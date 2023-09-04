@@ -1,0 +1,69 @@
+create table keys (
+	key_id integer,
+	key blob,
+);
+
+create table values (
+	key_id integer
+	offset integer,
+	value_part_id integer,
+	primary key (key_id, offset)
+);
+
+create table value_parts (
+	value_part_id integer primary key,
+	value_part_hash unique,
+	block_id,
+	block_offset,
+	length,
+);
+
+create index block_value_parts (
+	block_id,
+	value_part_id,
+)
+
+create table blocks (
+	block_id integer primary key,
+	file_id integer,
+	file_offset integer,
+	block_length,
+	bytes_active,
+	last_used integer,
+);
+
+create index block_eviction_index on blocks (
+	bytes_active,
+	last_used,
+	block_id,
+);
+
+every connection has its own file where writes are appended.
+
+write values for keys:
+	* lock unaligned tail of exclusive value file
+	* append to exclusive file
+	* hash parts?
+	* take exclusive write lock on manifest
+	* unlock exclusive file tail
+	* add entries, punching blocks from new writes that are duplicates
+	* evict and punch holes until size below max
+
+for a read:
+	* open manifest for read
+	* look up value parts that overlap with the read region
+	* perform any possible reads (not all the value is guaranteed to be available)
+	* update the last_used for blocks that were read (does this require upgrading to a write transaction?)
+
+when evicting:
+	* walk blocks in order of bytes used, last used, skipping blocks that have a lock:
+		* if there are enough consecutively non-full blocks that could be merged efficiently:
+			* write the active parts of each block:
+				* update the block locations
+				* punch out the block source location
+		* punch unused full blocks:
+			* delete value parts referencing the blocks
+
+
+advantages:
+	* you can bring your own files to the cache in their entirety and then have them punched out by the implementation as they decay in usefulness.

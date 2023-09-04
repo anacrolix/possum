@@ -1,5 +1,7 @@
 use std::io::Error;
 use std::os::fd::AsRawFd;
+use std::path::Path;
+// use clap::{Parser, Subcommand};
 
 #[derive(clap::Subcommand)]
 enum Commands {
@@ -8,6 +10,18 @@ enum Commands {
         offset: libc::off_t,
         length: libc::off_t,
     },
+    Database {
+        dir: String,
+        #[command(subcommand)]
+        command: DatabaseCommands,
+    }
+}
+
+#[derive(clap::Subcommand, Clone)]
+enum DatabaseCommands {
+    WriteFile {
+        file: String,
+    }
 }
 
 #[derive(clap::Parser)]
@@ -33,6 +47,54 @@ fn main() -> anyhow::Result<()> {
                 eprintln!("{:?}", Error::last_os_error());
             }
         }
+        Database {dir, command} => {
+            let mut handle = Handle::new_from_dir(dir)?;
+            match command {
+                DatabaseCommands::WriteFile {file} => {
+                    let key = &file;
+                    let file = std::fs::File::open(&file)?;
+                    handle.write_key(key.as_bytes(), file)?;
+                }
+            }
+        }
     }
     Ok(())
+}
+
+struct Handle {
+    conn: rusqlite::Connection,
+    exclusive_file: std::fs::File,
+}
+
+fn open_new_exclusive_file(dir: impl AsRef<Path>) -> anyhow::Result<std::fs::File> {
+    for i in 0..10000 {
+        // TODO: Handle already exists errors etc.
+        match std::fs::OpenOptions::new().create_new(true).append(true).open(dir.as_ref().join(&i.to_string())) {
+            Ok(file) => return Ok(file),
+            Err(err) => return Err(err.into()),
+        }
+    }
+    anyhow::bail!("gave up trying to create exclusive file");
+}
+
+impl Handle {
+    fn new_from_dir(dir: impl AsRef<Path>) -> anyhow::Result<Self> {
+        std::fs::create_dir_all(&dir)?;
+        let conn = rusqlite::Connection::open(dir.as_ref().join("manifest.db"))?;
+        let exclusive_file = open_new_exclusive_file(dir)?;
+        Ok(Self{conn, exclusive_file})
+    }
+
+    fn block_size() -> u64 {
+        4096
+    }
+
+    fn write_key(&mut self, key: &[u8], mut value: impl std::io::Read) -> anyhow::Result<()> {
+        std::io::copy(&mut value, &mut self.exclusive_file)?;
+        // TODO: Hash parts
+        let transaction = self.conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        // TODO: Unlock exclusive file tail
+
+        Ok(())
+    }
 }

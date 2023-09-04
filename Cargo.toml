@@ -7,4 +7,5 @@ edition = "2021"
 anyhow = "1.0.75"
 clap = { version = "4.4.2", features = ["derive"] }
 libc = { path = "../../src/rust-libc" }
+rusqlite = "0.29.0"
 #unix = "0.6.12"

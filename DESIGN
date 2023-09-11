@@ -27,7 +27,7 @@ create table blocks (
 	block_id integer primary key,
 	file_id integer,
 	file_offset integer,
-	block_length,
+	block_length, // can vary by filesystem
 	bytes_active,
 	last_used integer,
 );
@@ -38,32 +38,51 @@ create index block_eviction_index on blocks (
 	block_id,
 );
 
-every connection has its own file where writes are appended.
+DB instance are identified by their dir path.
+
+DB instance clients have:
+	* A lazily created exclusive file for writing new values to the DB.
+	* A sqlite3 connection to the manifest file.
+	* One or more snapshots?
+
+A snapshot has:
+	* One or more cloned value files.
 
 write values for keys:
-	* lock unaligned tail of exclusive value file
 	* append to exclusive file
 	* hash parts?
 	* take exclusive write lock on manifest
-	* unlock exclusive file tail
 	* add entries, punching blocks from new writes that are duplicates
 	* evict and punch holes until size below max
 
 for a read:
-	* open manifest for read
-	* look up value parts that overlap with the read region
-	* perform any possible reads (not all the value is guaranteed to be available)
-	* update the last_used for blocks that were read (does this require upgrading to a write transaction?)
+	* open manifest for immediate write
+	* look up value parts that overlap with the intended read region
+	* perform any possible immediate reads (not all the value is guaranteed to be available)
+	* update the last_used for blocks that were read
+	* clone any files that contain regions to be streamed out
+	* return snapshots
+
+when a snapshot is closed:
+	drop ref to cloned value files, deleting on the last one (or maybe they're anonymous to begin with, unlinked after the clone completes)
 
 when evicting:
-	* walk blocks in order of bytes used, last used, skipping blocks that have a lock:
-		* if there are enough consecutively non-full blocks that could be merged efficiently:
-			* write the active parts of each block:
-				* update the block locations
-				* punch out the block source location
-		* punch unused full blocks:
-			* delete value parts referencing the blocks
+	while manifest page_count*page_size + sum(block_length) from blocks >= capacity:
+		* walk blocks in order of bytes used, last used:
+			* if there are enough consecutively non-full blocks that could be merged efficiently:
+				* write the active parts of each block:
+					* update the block locations
+					* punch out the block source location
+			* punch unused full blocks:
+				* delete value parts referencing the blocks
 
+how to do a singleflight fetch for a missing item:
+	* open manifest
+	* see a key is in an undesired state
+	* write a tag with an timestamp of when a fetch was started
+	* unlock manifest
+	* perform the fetch
+	* do a write, and clear the fetch state
 
 advantages:
 	* you can bring your own files to the cache in their entirety and then have them punched out by the implementation as they decay in usefulness.

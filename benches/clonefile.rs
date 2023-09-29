@@ -21,19 +21,17 @@ pub fn clonefile_benchmark(c: &mut Criterion) -> anyhow::Result<()> {
             remaining_size -= n1 as u64;
         }
         ensure!(file.as_file().seek(SeekFrom::End(0))? == len);
+        let dst_path = "hello";
+        let dst_buf = CString::new(dst_path.as_bytes())?;
         c.bench_with_input(
             BenchmarkId::new("hello", bytesize::ByteSize(len).to_string_as(true)),
             &file,
             |b, file| {
                 b.iter(|| {
                     (|| -> anyhow::Result<()> {
-                        let dst_file = NamedTempFile::new()?;
                         let src_path = file.path();
                         let src_buf = CString::new(src_path.as_os_str().as_bytes())?;
-                        let dst_path = dst_file.path().to_path_buf();
                         // println!("{:?} -> {:?}", src_path, dst_path);
-                        let dst_buf = CString::new(dst_path.as_os_str().as_bytes())?;
-                        drop(dst_file);
                         let src = src_buf.as_ptr();
                         let dst = dst_buf.as_ptr();
                         let val = unsafe { libc::clonefile(src, dst, 0) };

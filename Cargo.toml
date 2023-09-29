@@ -5,7 +5,17 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.75"
+bytesize = "1.3.0"
 clap = { version = "4.4.2", features = ["derive"] }
-libc = { path = "../../src/rust-libc" }
+libc = { git = "https://github.com/rust-lang/libc.git" }
+rand = "0.8.5"
 rusqlite = "0.29.0"
+tempfile = "3.8.0"
 #unix = "0.6.12"
+
+[dev-dependencies]
+criterion = "0.5.1"
+
+[[bench]]
+name = "clonefile"
+harness = false

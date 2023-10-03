@@ -1,13 +1,15 @@
-use anyhow::{bail, ensure, Context};
-use log::{info, warn};
+use crate::punchfile::punchfile;
+use anyhow::{anyhow, bail, Context};
+use log::{debug, info, warn};
 use std::ffi::OsString;
+use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::SeekFrom::Start;
 use std::io::{ErrorKind, Seek, SeekFrom};
 use std::ops::{Deref, DerefMut};
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStringExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 // use clap::{Parser, Subcommand};
 
 mod clonefile;
@@ -21,7 +23,7 @@ enum Commands {
         length: libc::off_t,
     },
     Database {
-        dir: String,
+        dir: PathBuf,
         #[command(subcommand)]
         command: DatabaseCommands,
     },
@@ -49,31 +51,25 @@ fn main() -> anyhow::Result<()> {
             length,
         } => {
             let file = std::fs::OpenOptions::new().write(true).open(file)?;
-            let punchhole = libc::fpunchhole_t {
-                fp_flags: 0,
-                reserved: 0,
-                fp_offset: offset,
-                fp_length: length,
-            };
-            let fcntl_res = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_PUNCHHOLE, punchhole) };
-            if fcntl_res == -1 {
-                eprintln!("{:?}", std::io::Error::last_os_error());
-            }
+            punchfile(file, offset, length)?;
+            Ok(())
         }
         Database { dir, command } => {
             info!("sqlite version: {}", rusqlite::version());
             let mut handle = Handle::new_from_dir(dir)?;
             match command {
                 DatabaseCommands::WriteFile { file } => {
-                    let key = &file;
-                    let file = std::fs::File::open(&file)?;
-                    handle.stage_write(key.clone().into_vec(), file)?;
+                    let key = Path::new(&file)
+                        .file_name()
+                        .ok_or_else(|| anyhow!("can't extract file name"))?;
+                    let file = File::open(&file).with_context(|| format!("opening {:?}", key))?;
+                    handle.stage_write(key.to_os_string().into_vec(), file)?;
                     handle.flush_writes()?;
+                    Ok(())
                 }
             }
         }
     }
-    Ok(())
 }
 
 struct Handle {
@@ -82,6 +78,7 @@ struct Handle {
     pending_writes: Vec<PendingWrite>,
     next_write_offset: u64,
     last_flush_offset: u64,
+    dir: PathBuf,
 }
 
 struct ExclusiveFile {
@@ -140,7 +137,7 @@ fn init_manifest_schema(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
 }
 
 impl Handle {
-    fn new_from_dir(dir: impl AsRef<Path>) -> anyhow::Result<Self> {
+    fn new_from_dir(dir: PathBuf) -> anyhow::Result<Self> {
         std::fs::create_dir_all(&dir)?;
         let sqlite_version = rusqlite::version_number();
         if sqlite_version < 3042000 {
@@ -150,17 +147,18 @@ impl Handle {
                 "3.42"
             );
         }
-        let conn = rusqlite::Connection::open(dir.as_ref().join("manifest.db"))?;
+        let conn = rusqlite::Connection::open(dir.join("manifest.db"))?;
         init_manifest_schema(&conn).context("initing manifest schema")?;
-        let mut exclusive_file = open_new_exclusive_file(dir)?;
+        let mut exclusive_file = open_new_exclusive_file(&dir)?;
         let last_flush_offset = exclusive_file.seek(SeekFrom::Current(0))?;
         let next_write_offset = last_flush_offset;
-        let mut handle = Self {
+        let handle = Self {
             conn,
             exclusive_file,
             pending_writes: vec![],
             last_flush_offset,
             next_write_offset,
+            dir,
         };
         Ok(handle)
     }
@@ -194,6 +192,19 @@ impl Handle {
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         for pw in &self.pending_writes {
+            let existing = transaction.query_row(
+                "delete from keys where key=? returning file_id, file_offset, value_length",
+                &[&pw.key],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            );
+            match existing {
+                Ok((file_id, file_offset, value_length)) => {
+                    debug!("punching {} {} {}", file_id, file_offset, value_length);
+                    Self::punch_value(&self.dir, file_id, file_offset, value_length)?
+                }
+                Err(rusqlite::Error::QueryReturnedNoRows) => (),
+                Err(err) => return Err(err.into()),
+            }
             transaction.execute(
                 "insert into keys (key, file_id, file_offset, value_length)\
                 values (?, ?, ?, ?)",
@@ -204,10 +215,17 @@ impl Handle {
                     pw.value_length
                 ),
             )?;
-            // let key_id = transaction.last_insert_rowid();
         }
         transaction.commit()?;
         self.pending_writes.clear();
+        Ok(())
+    }
+
+    fn punch_value(dir: &Path, file: u64, offset: u64, length: u64) -> anyhow::Result<()> {
+        let file = OpenOptions::new()
+            .write(true)
+            .open(dir.join(file.to_string()))?;
+        punchfile(file, offset.try_into()?, length.try_into()?)?;
         Ok(())
     }
 }

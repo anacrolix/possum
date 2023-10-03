@@ -1,1 +1,1 @@
-stat -f 'file size: %z, alloc blocks: %b, fs blksize: %k' "$@"
+stat -f '%N: file size: %z, alloc blocks: %b, fs blksize: %k' "$@"

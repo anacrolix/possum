@@ -6,7 +6,8 @@ use std::ffi::CString;
 use std::io::{Error, Seek, SeekFrom, Write};
 use std::os::unix::ffi::OsStrExt;
 use tempfile::NamedTempFile;
-pub fn clonefile_benchmark(c: &mut Criterion) -> anyhow::Result<()> {
+
+pub fn clonefile_benchmark_fallible(c: &mut Criterion) -> anyhow::Result<()> {
     for size_power in [12, 16, 20, 24, 28] {
         let mut file = NamedTempFile::new()?;
         let len: u64 = 1 << size_power;
@@ -48,6 +49,10 @@ pub fn clonefile_benchmark(c: &mut Criterion) -> anyhow::Result<()> {
         );
     }
     Ok(())
+}
+
+fn clonefile_benchmark(c: &mut Criterion) {
+    clonefile_benchmark_fallible(c).unwrap()
 }
 
 criterion_group!(benches, clonefile_benchmark);

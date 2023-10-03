@@ -14,6 +14,7 @@ rusqlite = { git = "https://github.com/rusqlite/rusqlite.git", features = ["bund
 tempfile = "3.8.0"
 log = "0.4.20"
 env_logger = "0.10.0"
+nix = { version = "0.27.1", features = ["fs"] }
 
 [dev-dependencies]
 criterion = "0.5.1"

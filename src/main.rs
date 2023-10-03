@@ -1,15 +1,16 @@
 use crate::punchfile::punchfile;
 use anyhow::{anyhow, bail, Context};
 use log::{debug, info, warn};
+use nix::fcntl::FlockArg::{LockExclusive, LockExclusiveNonblock};
 use std::ffi::OsString;
-use std::fs::{File, OpenOptions};
-use std::io;
-use std::io::SeekFrom::Start;
+use std::fs::File;
+use std::io::SeekFrom::{End, Start};
 use std::io::{ErrorKind, Seek, SeekFrom};
 use std::ops::{Deref, DerefMut};
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
+use std::{fs, io};
 // use clap::{Parser, Subcommand};
 
 mod clonefile;
@@ -82,12 +83,12 @@ struct Handle {
 }
 
 struct ExclusiveFile {
-    inner: std::fs::File,
+    inner: File,
     id: u64,
 }
 
 impl Deref for ExclusiveFile {
-    type Target = std::fs::File;
+    type Target = File;
 
     fn deref(&self) -> &Self::Target {
         &self.inner
@@ -107,25 +108,24 @@ struct PendingWrite {
 }
 
 fn open_new_exclusive_file(dir: impl AsRef<Path>) -> anyhow::Result<ExclusiveFile> {
-    let mut err = None;
+    let mut last_err = None;
     for i in 0..10000 {
-        err = Some(
-            match std::fs::OpenOptions::new()
-                .create_new(true)
-                .append(true)
-                .open(dir.as_ref().join(&i.to_string()))
-            {
-                Ok(file) => return Ok(ExclusiveFile { inner: file, id: i }),
-                Err(err) => {
-                    if err.kind() == ErrorKind::AlreadyExists {
-                        continue;
-                    }
-                    err
-                }
-            },
-        )
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.as_ref().join(&i.to_string()));
+        let file = match file {
+            Ok(file) => file,
+            Err(err) => return Err(err.into()),
+        };
+        if let Err(err) = nix::fcntl::flock(file.as_raw_fd(), LockExclusiveNonblock) {
+            last_err = Some(err)
+        } else {
+            info!("opened with exclusive file id {}", i);
+            return Ok(ExclusiveFile { inner: file, id: i });
+        }
     }
-    Err(err.unwrap()).context("gave up trying to create exclusive file")
+    Err(last_err.unwrap()).context("gave up trying to create exclusive file")
 }
 
 const MANIFEST_SCHEMA_SQL: &str = include_str!("../manifest.sql");
@@ -138,7 +138,7 @@ fn init_manifest_schema(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
 
 impl Handle {
     fn new_from_dir(dir: PathBuf) -> anyhow::Result<Self> {
-        std::fs::create_dir_all(&dir)?;
+        fs::create_dir_all(&dir)?;
         let sqlite_version = rusqlite::version_number();
         if sqlite_version < 3042000 {
             bail!(
@@ -199,8 +199,9 @@ impl Handle {
             );
             match existing {
                 Ok((file_id, file_offset, value_length)) => {
-                    debug!("punching {} {} {}", file_id, file_offset, value_length);
-                    Self::punch_value(&self.dir, file_id, file_offset, value_length)?
+                    let msg = format!("punching {} {} {}", file_id, file_offset, value_length);
+                    debug!("{}", msg);
+                    Self::punch_value(&self.dir, file_id, file_offset, value_length).context(msg)?
                 }
                 Err(rusqlite::Error::QueryReturnedNoRows) => (),
                 Err(err) => return Err(err.into()),
@@ -221,11 +222,20 @@ impl Handle {
         Ok(())
     }
 
-    fn punch_value(dir: &Path, file: u64, offset: u64, length: u64) -> anyhow::Result<()> {
-        let file = OpenOptions::new()
-            .write(true)
-            .open(dir.join(file.to_string()))?;
-        punchfile(file, offset.try_into()?, length.try_into()?)?;
+    fn punch_value(dir: &Path, file_id: u64, offset: u64, mut length: u64) -> anyhow::Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .append(true)
+            .open(dir.join(file_id.to_string()))?;
+        // Does this handle ongoing writes to the same file?
+        let file_end = file.seek(End(0))?;
+        let end_offset = offset + length;
+        if end_offset < file_end {
+            // What if this is below the offset or negative?
+            length -= end_offset % Self::block_size();
+        }
+        debug!("punching {} at {} for {}", file_id, offset, length);
+        punchfile(file, offset.try_into()?, length.try_into()?)
+            .with_context(|| format!("length {}", length))?;
         Ok(())
     }
 }

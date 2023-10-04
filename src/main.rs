@@ -2,11 +2,13 @@ use crate::punchfile::punchfile;
 use anyhow::{anyhow, bail, Context};
 use log::{debug, info, warn};
 use nix::fcntl::FlockArg::{LockExclusive, LockExclusiveNonblock};
+use num::Integer;
+use rusqlite::Transaction;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::SeekFrom::{End, Start};
 use std::io::{ErrorKind, Seek, SeekFrom};
-use std::ops::{Deref, DerefMut};
+use std::ops::{Add, Deref, DerefMut, Div, Mul, Sub};
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
@@ -150,7 +152,7 @@ impl Handle {
         let conn = rusqlite::Connection::open(dir.join("manifest.db"))?;
         init_manifest_schema(&conn).context("initing manifest schema")?;
         let mut exclusive_file = open_new_exclusive_file(&dir)?;
-        let last_flush_offset = exclusive_file.seek(SeekFrom::Current(0))?;
+        let last_flush_offset = exclusive_file.seek(End(0))?;
         let next_write_offset = last_flush_offset;
         let handle = Self {
             conn,
@@ -188,7 +190,7 @@ impl Handle {
     }
 
     fn flush_writes(&mut self) -> anyhow::Result<()> {
-        let transaction = self
+        let mut transaction = self
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         for pw in &self.pending_writes {
@@ -199,9 +201,19 @@ impl Handle {
             );
             match existing {
                 Ok((file_id, file_offset, value_length)) => {
-                    let msg = format!("punching {} {} {}", file_id, file_offset, value_length);
+                    let msg = format!(
+                        "deleting value at {} {} {}",
+                        file_id, file_offset, value_length
+                    );
                     debug!("{}", msg);
-                    Self::punch_value(&self.dir, file_id, file_offset, value_length).context(msg)?
+                    Self::punch_value(
+                        &self.dir,
+                        file_id,
+                        file_offset,
+                        value_length,
+                        &mut transaction,
+                    )
+                    .context(msg)?
                 }
                 Err(rusqlite::Error::QueryReturnedNoRows) => (),
                 Err(err) => return Err(err.into()),
@@ -222,13 +234,59 @@ impl Handle {
         Ok(())
     }
 
-    fn punch_value(dir: &Path, file_id: u64, offset: u64, mut length: u64) -> anyhow::Result<()> {
+    // Returns the end offset of the last active value before offset in the same file.
+    fn query_last_end_offset(
+        tx: &mut Transaction,
+        file_id: u64,
+        offset: u64,
+    ) -> rusqlite::Result<u64> {
+        tx.query_row(
+            "select max(file_offset+value_length) as last_offset \
+            from keys \
+            where file_id=? and file_offset+value_length <= ?",
+            [file_id, offset],
+            |row| {
+                // I don't know why, but this can return null for file_ids that have values but
+                // don't fit the other conditions.
+                let res: rusqlite::Result<Option<_>> = row.get(0);
+                res.map(|v| v.unwrap_or_default())
+            },
+        )
+        .or_else(|err| {
+            if matches!(err, rusqlite::Error::QueryReturnedNoRows) {
+                Ok(0)
+            } else {
+                Err(err)
+            }
+        })
+    }
+
+    // Can't do this as &mut self for dumb Rust reasons.
+    fn punch_value(
+        dir: &Path,
+        file_id: u64,
+        mut offset: u64,
+        mut length: u64,
+        tx: &mut Transaction,
+    ) -> anyhow::Result<()> {
+        let block_size = Self::block_size();
+        // If we're not at a block boundary to begin with, find out how far back we can punch and
+        // start there.
+        if offset % block_size != 0 {
+            let new_offset = ceil_multiple(
+                Self::query_last_end_offset(tx, file_id, offset)?,
+                block_size,
+            );
+            length += offset - new_offset;
+            offset = new_offset;
+        }
         let mut file = fs::OpenOptions::new()
             .append(true)
             .open(dir.join(file_id.to_string()))?;
-        // Does this handle ongoing writes to the same file?
+        // append doesn't mean our file position is at the end to begin with.
         let file_end = file.seek(End(0))?;
         let end_offset = offset + length;
+        // Does this handle ongoing writes to the same file?
         if end_offset < file_end {
             // What if this is below the offset or negative?
             length -= end_offset % Self::block_size();
@@ -238,4 +296,18 @@ impl Handle {
             .with_context(|| format!("length {}", length))?;
         Ok(())
     }
+}
+
+fn floored_multiple<T>(value: T, multiple: T) -> T
+where
+    T: Integer + Copy,
+{
+    multiple * (value / multiple)
+}
+
+fn ceil_multiple<T>(value: T, multiple: T) -> T
+where
+    T: Integer + Copy,
+{
+    (value + multiple - T::one()) / multiple * multiple
 }

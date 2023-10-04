@@ -3,8 +3,11 @@ use anyhow::Context;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use rand::Rng;
 use std::ffi::CString;
+use std::fs::remove_file;
 use std::io::{Error, Seek, SeekFrom, Write};
 use std::os::unix::ffi::OsStrExt;
+// use crate:
+use possum::clonefile::clonefile;
 use tempfile::NamedTempFile;
 
 pub fn clonefile_benchmark_fallible(c: &mut Criterion) -> anyhow::Result<()> {
@@ -30,17 +33,8 @@ pub fn clonefile_benchmark_fallible(c: &mut Criterion) -> anyhow::Result<()> {
             |b, file| {
                 b.iter(|| {
                     (|| -> anyhow::Result<()> {
-                        let src_path = file.path();
-                        let src_buf = CString::new(src_path.as_os_str().as_bytes())?;
-                        // println!("{:?} -> {:?}", src_path, dst_path);
-                        let src = src_buf.as_ptr();
-                        let dst = dst_buf.as_ptr();
-                        let val = unsafe { libc::clonefile(src, dst, 0) };
-                        std::fs::remove_file(&dst_path)?;
-                        if val != 0 {
-                            return Err(Error::last_os_error())
-                                .with_context(|| format!("{:?} -> {:?}", src_path, dst_path));
-                        }
+                        remove_file(dst_path);
+                        clonefile(file.path(), dst_path.as_ref())?;
                         Ok(())
                     })()
                     .unwrap()

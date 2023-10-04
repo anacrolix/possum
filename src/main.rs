@@ -1,18 +1,22 @@
 use crate::punchfile::punchfile;
 use anyhow::{anyhow, bail, Context};
-use log::{debug, info, warn};
+use log::{debug, info};
 use nix::fcntl::FlockArg::LockExclusiveNonblock;
 use num::Integer;
+use possum::clonefile::clonefile;
+use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::Transaction;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
+use std::io::Seek;
 use std::io::SeekFrom::{End, Start};
-use std::io::{ErrorKind, Seek, SeekFrom};
-use std::ops::{Add, Deref, DerefMut, Div, Mul, Sub};
+use std::ops::{Deref, DerefMut};
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
+use tempfile::{spooled_tempfile, tempdir_in, tempfile_in, TempDir};
 
 mod clonefile;
 mod punchfile;
@@ -195,7 +199,7 @@ impl Handle {
         for pw in &self.pending_writes {
             let existing = transaction.query_row(
                 "delete from keys where key=? returning file_id, file_offset, value_length",
-                &[&pw.key],
+                [&pw.key],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             );
             match existing {
@@ -214,7 +218,7 @@ impl Handle {
                     )
                     .context(msg)?
                 }
-                Err(rusqlite::Error::QueryReturnedNoRows) => (),
+                Err(QueryReturnedNoRows) => (),
                 Err(err) => return Err(err.into()),
             }
             transaction.execute(
@@ -279,9 +283,7 @@ impl Handle {
             length += offset - new_offset;
             offset = new_offset;
         }
-        let mut file = fs::OpenOptions::new()
-            .append(true)
-            .open(dir.join(file_id.to_string()))?;
+        let mut file = open_file_id(OpenOptions::new().append(true), dir, file_id)?;
         // append doesn't mean our file position is at the end to begin with.
         let file_end = file.seek(End(0))?;
         let end_offset = offset + length;
@@ -297,6 +299,63 @@ impl Handle {
     }
 }
 
+pub struct Reader<'a> {
+    tx: Transaction<'a>,
+    dir: &'a Path,
+    files: HashSet<u64>,
+}
+
+pub struct Value {
+    file_id: u64,
+    file_offset: u64,
+    value_length: u64,
+}
+
+pub struct Snapshot {
+    tempdir: TempDir,
+    files: HashSet<u64>,
+}
+
+impl Reader<'_> {
+    pub fn add(&mut self, key: &[u8]) -> rusqlite::Result<Option<Value>> {
+        let res = self.tx.query_row(
+            "update keys \
+            set last_used=cast(unixepoch('subsec')*1e3 as integer) \
+            where key=? \
+            returning file_id, file_offset, value_length",
+            [key],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        );
+        match res {
+            Ok((file_id, file_offset, value_length)) => {
+                self.files.insert(file_id);
+                Ok(Some(Value {
+                    file_id,
+                    file_offset,
+                    value_length,
+                }))
+            }
+            Err(QueryReturnedNoRows) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn begin(self) -> anyhow::Result<Snapshot> {
+        let tempdir = tempdir_in(self.dir)?;
+        for file_id in self.files.iter().copied() {
+            clonefile(
+                &file_path(self.dir, file_id),
+                &file_path(tempdir.path(), file_id),
+            )?;
+        }
+        self.tx.commit()?;
+        Ok(Snapshot {
+            files: self.files,
+            tempdir,
+        })
+    }
+}
+
 fn floored_multiple<T>(value: T, multiple: T) -> T
 where
     T: Integer + Copy,
@@ -309,4 +368,12 @@ where
     T: Integer + Copy,
 {
     (value + multiple - T::one()) / multiple * multiple
+}
+
+fn open_file_id(options: &OpenOptions, dir: &Path, file_id: u64) -> io::Result<File> {
+    options.open(file_path(dir, file_id))
+}
+
+fn file_path(dir: &Path, file_id: u64) -> PathBuf {
+    dir.join(file_id.to_string())
 }

@@ -1,6 +1,7 @@
 use crate::punchfile::punchfile;
 use anyhow::{anyhow, bail, Context};
 use log::{debug, info};
+use memmap2::Mmap;
 use nix::fcntl::FlockArg::LockExclusiveNonblock;
 use num::Integer;
 use possum::clonefile::clonefile;
@@ -56,7 +57,7 @@ fn main() -> anyhow::Result<()> {
             offset,
             length,
         } => {
-            let file = fs::OpenOptions::new().write(true).open(file)?;
+            let file = OpenOptions::new().write(true).open(file)?;
             punchfile(file, offset, length)?;
             Ok(())
         }
@@ -313,7 +314,32 @@ pub struct Value {
 
 pub struct Snapshot {
     tempdir: TempDir,
-    files: HashSet<u64>,
+    // file_ids: HashSet<u64>,
+    files: HashMap<u64, File>,
+    mmaps: HashMap<u64, Mmap>,
+}
+
+impl Snapshot {
+    pub fn view(&mut self, value: &Value) -> anyhow::Result<&[u8]> {
+        let file_id = value.file_id;
+        if !self.mmaps.contains_key(&value.file_id) {
+            if !self.files.contains_key(&value.file_id) {
+                assert!(self
+                    .files
+                    .insert(
+                        file_id,
+                        open_file_id(OpenOptions::new().read(true), self.tempdir.path(), file_id)?
+                    )
+                    .is_none());
+            }
+            self.mmaps.insert(file_id, unsafe {
+                Mmap::map(self.files[&file_id].as_raw_fd())?
+            });
+        }
+        let start = value.file_offset.try_into()?;
+        let end = start + usize::try_from(value.value_length)?;
+        Ok(&self.mmaps[&file_id][start..end])
+    }
 }
 
 impl Reader<'_> {
@@ -350,8 +376,10 @@ impl Reader<'_> {
         }
         self.tx.commit()?;
         Ok(Snapshot {
-            files: self.files,
+            // file_ids: self.files,
             tempdir,
+            files: Default::default(),
+            mmaps: Default::default(),
         })
     }
 }

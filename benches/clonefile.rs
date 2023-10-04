@@ -26,7 +26,6 @@ pub fn clonefile_benchmark_fallible(c: &mut Criterion) -> anyhow::Result<()> {
         }
         ensure!(file.as_file().seek(SeekFrom::End(0))? == len);
         let dst_path = "hello";
-        let dst_buf = CString::new(dst_path.as_bytes())?;
         c.bench_with_input(
             BenchmarkId::new("hello", bytesize::ByteSize(len).to_string_as(true)),
             &file,

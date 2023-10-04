@@ -1,11 +1,11 @@
 use anyhow::ensure;
-use anyhow::Context;
+
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use rand::Rng;
-use std::ffi::CString;
+
 use std::fs::remove_file;
-use std::io::{Error, Seek, SeekFrom, Write};
-use std::os::unix::ffi::OsStrExt;
+use std::io::{Seek, SeekFrom, Write};
+
 // use crate:
 use possum::clonefile::clonefile;
 use tempfile::NamedTempFile;

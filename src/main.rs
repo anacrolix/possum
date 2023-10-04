@@ -1,7 +1,7 @@
 use crate::punchfile::punchfile;
 use anyhow::{anyhow, bail, Context};
 use log::{debug, info, warn};
-use nix::fcntl::FlockArg::{LockExclusive, LockExclusiveNonblock};
+use nix::fcntl::FlockArg::LockExclusiveNonblock;
 use num::Integer;
 use rusqlite::Transaction;
 use std::ffi::OsString;
@@ -13,7 +13,6 @@ use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
-// use clap::{Parser, Subcommand};
 
 mod clonefile;
 mod punchfile;
@@ -53,7 +52,7 @@ fn main() -> anyhow::Result<()> {
             offset,
             length,
         } => {
-            let file = std::fs::OpenOptions::new().write(true).open(file)?;
+            let file = fs::OpenOptions::new().write(true).open(file)?;
             punchfile(file, offset, length)?;
             Ok(())
         }

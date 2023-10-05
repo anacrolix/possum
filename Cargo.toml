@@ -24,3 +24,7 @@ rand = "0.8.5"
 [[bench]]
 name = "clonefile"
 harness = false
+
+[[bench]]
+name = "possum"
+harness = false

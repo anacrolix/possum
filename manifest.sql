@@ -9,7 +9,7 @@ create table if not exists keys (
     last_used integer not null default (cast(unixepoch('subsec')*1e3 as integer)),
     -- Put this last because it's most likely looked up in the index and not needed when looking at the row.
     key blob unique not null
-) strict, without rowid;
+) strict;
 
 create index if not exists last_used_index on keys (
     last_used,

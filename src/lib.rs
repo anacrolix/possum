@@ -243,6 +243,14 @@ impl Handle {
             .with_context(|| format!("length {}", length))?;
         Ok(())
     }
+
+    pub fn read(&mut self) -> rusqlite::Result<Reader> {
+        Ok(Reader {
+            tx: self.conn.transaction()?,
+            dir: &self.dir,
+            files: Default::default(),
+        })
+    }
 }
 
 pub struct Reader<'a> {

@@ -1,13 +1,9 @@
 use anyhow::ensure;
-
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use possum::clonefile::clonefile;
 use rand::Rng;
-
 use std::fs::remove_file;
 use std::io::{Seek, SeekFrom, Write};
-
-// use crate:
-use possum::clonefile::clonefile;
 use tempfile::NamedTempFile;
 
 pub fn clonefile_benchmark_fallible(c: &mut Criterion) -> anyhow::Result<()> {
@@ -32,7 +28,7 @@ pub fn clonefile_benchmark_fallible(c: &mut Criterion) -> anyhow::Result<()> {
             |b, file| {
                 b.iter(|| {
                     (|| -> anyhow::Result<()> {
-                        remove_file(dst_path);
+                        remove_file(dst_path)?;
                         clonefile(file.path(), dst_path.as_ref())?;
                         Ok(())
                     })()

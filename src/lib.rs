@@ -7,10 +7,11 @@ use nix::fcntl::FlockArg::LockExclusiveNonblock;
 use num::Integer;
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::Transaction;
+use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
-use std::io::Seek;
 use std::io::SeekFrom::{End, Start};
+use std::io::{Read, Seek};
 use std::ops::{Deref, DerefMut};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
@@ -253,16 +254,16 @@ impl Handle {
     }
 }
 
-pub struct Reader<'a> {
-    tx: Transaction<'a>,
-    dir: &'a Path,
-    files: HashSet<u64>,
-}
-
 pub struct Value {
     file_id: u64,
     file_offset: u64,
-    value_length: u64,
+    length: u64,
+}
+
+impl Value {
+    pub fn length(&self) -> u64 {
+        self.length
+    }
 }
 
 pub struct Snapshot {
@@ -290,9 +291,40 @@ impl Snapshot {
             });
         }
         let start = value.file_offset.try_into()?;
-        let end = start + usize::try_from(value.value_length)?;
+        let end = start + usize::try_from(value.length)?;
         Ok(&self.mmaps[&file_id][start..end])
     }
+
+    pub fn read(&mut self, value: &Value, mut buf: &mut [u8]) -> anyhow::Result<usize> {
+        self.open_file(value.file_id)?;
+        buf = buf
+            .split_at_mut(min(buf.len() as u64, value.length) as usize)
+            .0;
+        self.files
+            .get_mut(&value.file_id)
+            .unwrap()
+            .read(buf)
+            .map_err(Into::into)
+    }
+
+    fn open_file(&mut self, file_id: u64) -> anyhow::Result<()> {
+        if self.files.contains_key(&file_id) {
+            return Ok(());
+        }
+        Ok(assert!(self
+            .files
+            .insert(
+                file_id,
+                open_file_id(OpenOptions::new().read(true), self.tempdir.path(), file_id)?
+            )
+            .is_none()))
+    }
+}
+
+pub struct Reader<'a> {
+    tx: Transaction<'a>,
+    dir: &'a Path,
+    files: HashSet<u64>,
 }
 
 impl Reader<'_> {
@@ -311,7 +343,7 @@ impl Reader<'_> {
                 Ok(Some(Value {
                     file_id,
                     file_offset,
-                    value_length,
+                    length: value_length,
                 }))
             }
             Err(QueryReturnedNoRows) => Ok(None),

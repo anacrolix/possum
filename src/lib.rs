@@ -121,7 +121,8 @@ impl Handle {
                 "3.42"
             );
         }
-        let conn = rusqlite::Connection::open(dir.join("manifest.db"))?;
+        let conn = Connection::open(dir.join("manifest.db"))?;
+        conn.pragma_update(None, "journal_mode", "wal")?;
         init_manifest_schema(&conn).context("initing manifest schema")?;
         let mut exclusive_file = open_new_exclusive_file(&dir)?;
         let last_flush_offset = exclusive_file.seek(End(0))?;

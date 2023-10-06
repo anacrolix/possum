@@ -1,4 +1,5 @@
 use crate::punchfile::punchfile;
+use anyhow::Result;
 use anyhow::{bail, Context};
 use clonefile::clonefile;
 use log::{debug, info};
@@ -6,7 +7,7 @@ use memmap2::Mmap;
 use nix::fcntl::FlockArg::LockExclusiveNonblock;
 use num::Integer;
 use rusqlite::Error::QueryReturnedNoRows;
-use rusqlite::Transaction;
+use rusqlite::{Connection, Transaction};
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
@@ -15,19 +16,31 @@ use std::io::{Read, Seek};
 use std::ops::{Deref, DerefMut};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
+use std::sync::Mutex;
 use std::{fs, io};
 use tempfile::{tempdir_in, TempDir};
 
 pub mod clonefile;
 pub mod punchfile;
 
-pub struct Handle {
-    conn: rusqlite::Connection,
-    exclusive_file: ExclusiveFile,
-    pending_writes: Vec<PendingWrite>,
-    next_write_offset: u64,
-    last_flush_offset: u64,
-    dir: PathBuf,
+struct FileClone {
+    file: File,
+    tempdir: Rc<TempDir>,
+    mmap: Option<Mmap>,
+}
+
+type FileCloneCache = HashMap<u64, Rc<Mutex<FileClone>>>;
+
+impl FileClone {
+    fn get_mmap(&mut self) -> Result<&Mmap> {
+        let mmap_opt = &mut self.mmap;
+        if let Some(mmap) = mmap_opt {
+            return Ok(mmap);
+        }
+        let mmap = unsafe { Mmap::map(self.file.as_raw_fd()) }?;
+        Ok(mmap_opt.insert(mmap))
+    }
 }
 
 struct ExclusiveFile {
@@ -84,6 +97,19 @@ fn init_manifest_schema(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
     conn.execute_batch(MANIFEST_SCHEMA_SQL)
 }
 
+pub struct Handle {
+    conn: Connection,
+    exclusive_file: ExclusiveFile,
+    pending_writes: Vec<PendingWrite>,
+    next_write_offset: u64,
+    last_flush_offset: u64,
+    dir: PathBuf,
+    // Cache clones until we know the original files have changed. This means new snapshots can
+    // reuse clones. TODO: If other processes modify the database, our clones will
+    // be out of date, so there needs to be another check involved.
+    clones: HashMap<u64, Rc<Mutex<FileClone>>>,
+}
+
 impl Handle {
     pub fn new_from_dir(dir: PathBuf) -> anyhow::Result<Self> {
         fs::create_dir_all(&dir)?;
@@ -107,6 +133,7 @@ impl Handle {
             last_flush_offset,
             next_write_offset,
             dir,
+            clones: Default::default(),
         };
         Ok(handle)
     }
@@ -143,6 +170,7 @@ impl Handle {
         let mut transaction = self
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let mut altered_files = HashSet::new();
         for pw in &self.pending_writes {
             let existing = transaction.query_row(
                 "delete from keys where key=? returning file_id, file_offset, value_length",
@@ -163,7 +191,10 @@ impl Handle {
                         value_length,
                         &mut transaction,
                     )
-                    .context(msg)?
+                    .context(msg)?;
+                    if value_length != 0 {
+                        altered_files.insert(file_id);
+                    }
                 }
                 Err(QueryReturnedNoRows) => (),
                 Err(err) => return Err(err.into()),
@@ -178,9 +209,16 @@ impl Handle {
                     pw.value_length
                 ),
             )?;
+            if pw.value_length != 0 {
+                altered_files.insert(self.exclusive_file.id);
+            }
         }
         transaction.commit()?;
         self.pending_writes.clear();
+        // Forget any references to clones of files that have changed.
+        for file_id in altered_files {
+            self.clones.remove(&file_id);
+        }
         Ok(())
     }
 
@@ -248,7 +286,8 @@ impl Handle {
     pub fn read(&mut self) -> rusqlite::Result<Reader> {
         Ok(Reader {
             tx: self.conn.transaction()?,
-            dir: &self.dir,
+            handle_clones: &mut self.clones,
+            handle_dir: self.dir.as_path(),
             files: Default::default(),
         })
     }
@@ -267,63 +306,41 @@ impl Value {
 }
 
 pub struct Snapshot {
-    tempdir: TempDir,
-    // file_ids: HashSet<u64>,
-    files: HashMap<u64, File>,
-    mmaps: HashMap<u64, Mmap>,
+    file_clones: HashMap<u64, Rc<Mutex<FileClone>>>,
 }
 
 impl Snapshot {
-    pub fn view(&mut self, value: &Value) -> anyhow::Result<&[u8]> {
+    pub fn view(&mut self, value: &Value, f: impl FnOnce(&[u8])) -> Result<()> {
         let file_id = value.file_id;
-        if !self.mmaps.contains_key(&value.file_id) {
-            if !self.files.contains_key(&value.file_id) {
-                assert!(self
-                    .files
-                    .insert(
-                        file_id,
-                        open_file_id(OpenOptions::new().read(true), self.tempdir.path(), file_id)?
-                    )
-                    .is_none());
-            }
-            self.mmaps.insert(file_id, unsafe {
-                Mmap::map(self.files[&file_id].as_raw_fd())?
-            });
-        }
+        let file_clone = self.file_clones.get_mut(&file_id).unwrap();
         let start = value.file_offset.try_into()?;
         let end = start + usize::try_from(value.length)?;
-        Ok(&self.mmaps[&file_id][start..end])
+        let mut mutex_guard = file_clone.lock().unwrap();
+        let mmap = mutex_guard.get_mmap()?;
+        f(&mmap[start..end]);
+        Ok(())
     }
 
-    pub fn read(&mut self, value: &Value, mut buf: &mut [u8]) -> anyhow::Result<usize> {
-        self.open_file(value.file_id)?;
+    pub fn read(&mut self, value: &Value, mut buf: &mut [u8]) -> Result<usize> {
         buf = buf
             .split_at_mut(min(buf.len() as u64, value.length) as usize)
             .0;
-        self.files
+        let mut file_clone = self
+            .file_clones
             .get_mut(&value.file_id)
             .unwrap()
-            .read(buf)
-            .map_err(Into::into)
-    }
-
-    fn open_file(&mut self, file_id: u64) -> anyhow::Result<()> {
-        if self.files.contains_key(&file_id) {
-            return Ok(());
-        }
-        Ok(assert!(self
-            .files
-            .insert(
-                file_id,
-                open_file_id(OpenOptions::new().read(true), self.tempdir.path(), file_id)?
-            )
-            .is_none()))
+            .lock()
+            .unwrap();
+        let file = &mut file_clone.file;
+        file.seek(Start(value.file_offset))?;
+        file.read(buf).map_err(Into::into)
     }
 }
 
 pub struct Reader<'a> {
     tx: Transaction<'a>,
-    dir: &'a Path,
+    handle_clones: &'a mut FileCloneCache,
+    handle_dir: &'a Path,
     files: HashSet<u64>,
 }
 
@@ -351,21 +368,53 @@ impl Reader<'_> {
         }
     }
 
-    pub fn begin(self) -> anyhow::Result<Snapshot> {
-        let tempdir = tempdir_in(self.dir)?;
-        for file_id in self.files.iter().copied() {
-            clonefile(
-                &file_path(self.dir, file_id),
-                &file_path(tempdir.path(), file_id),
-            )?;
+    pub fn begin(mut self) -> Result<Snapshot> {
+        let mut tempdir = None;
+        let mut file_clones: HashMap<u64, Rc<Mutex<FileClone>>> = Default::default();
+        for file_id in self.files {
+            file_clones.insert(
+                file_id,
+                Self::get_file_clone(
+                    file_id,
+                    &mut tempdir,
+                    &mut self.handle_clones,
+                    self.handle_dir,
+                )?,
+            );
         }
         self.tx.commit()?;
-        Ok(Snapshot {
-            // file_ids: self.files,
-            tempdir,
-            files: Default::default(),
-            mmaps: Default::default(),
-        })
+        Ok(Snapshot { file_clones })
+    }
+
+    fn get_file_clone(
+        file_id: u64,
+        tempdir: &mut Option<Rc<TempDir>>,
+        cache: &mut FileCloneCache,
+        src_dir: &Path,
+    ) -> Result<Rc<Mutex<FileClone>>> {
+        if let Some(ret) = cache.get(&file_id) {
+            return Ok(ret.clone());
+        }
+        let tempdir: &Rc<TempDir> = match tempdir {
+            Some(tempdir) => tempdir,
+            None => {
+                let new = Rc::new(tempdir_in(src_dir)?);
+                *tempdir = Some(new);
+                tempdir.as_ref().unwrap()
+            }
+        };
+        let tempdir_path = tempdir.path();
+        clonefile(
+            &file_path(src_dir, file_id),
+            &file_path(tempdir_path, file_id),
+        )?;
+        let file_clone = Rc::new(Mutex::new(FileClone {
+            file: open_file_id(OpenOptions::new().read(true), tempdir_path, file_id)?,
+            tempdir: tempdir.clone(),
+            mmap: None,
+        }));
+        assert!(cache.insert(file_id, file_clone.clone()).is_none());
+        Ok(file_clone)
     }
 }
 

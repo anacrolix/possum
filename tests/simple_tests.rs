@@ -14,7 +14,8 @@ fn set_get() -> anyhow::Result<()> {
     let mut reader = handle.read()?;
     let value = reader.add("hello".as_bytes())?.expect("key should exist");
     let mut snapshot = reader.begin()?;
-    let read_value_bytes = snapshot.view(&value)?;
-    assert_eq!(read_value_bytes, value_bytes);
+    snapshot.view(&value, |read_value_bytes| {
+        assert_eq!(read_value_bytes, value_bytes)
+    })?;
     Ok(())
 }

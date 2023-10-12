@@ -8,8 +8,7 @@ pub fn benchmark_read_fallible(c: &mut Criterion) -> anyhow::Result<()> {
     let tempdir = PathBuf::from("benchmark_get_exists");
     let mut handle = Handle::new_from_dir(tempdir)?;
     let value_bytes = "world".as_bytes();
-    handle.stage_write("hello".as_bytes().to_owned(), value_bytes)?;
-    handle.flush_writes()?;
+    handle.single_write("hello".as_bytes().to_owned(), value_bytes)?;
     let mut buf = vec![0; value_bytes.len() + 1];
     c.bench_function("read", |b| {
         b.iter(|| {
@@ -31,8 +30,7 @@ pub fn benchmark_view_fallible(c: &mut Criterion) -> anyhow::Result<()> {
     let tempdir = PathBuf::from("benchmark_get_exists");
     let mut handle = Handle::new_from_dir(tempdir)?;
     let value_bytes = "world".as_bytes();
-    handle.stage_write("hello".as_bytes().to_owned(), value_bytes)?;
-    handle.flush_writes()?;
+    handle.single_write("hello".as_bytes().to_owned(), value_bytes)?;
     c.bench_function("view", |b| {
         b.iter(|| {
             (|| -> anyhow::Result<()> {

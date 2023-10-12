@@ -2,9 +2,9 @@ use crate::punchfile::punchfile;
 use anyhow::Result;
 use anyhow::{bail, Context};
 use clonefile::clonefile;
-use log::{debug, info};
+use log::debug;
 use memmap2::Mmap;
-use nix::fcntl::FlockArg::LockExclusiveNonblock;
+
 use num::Integer;
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{Connection, Transaction};
@@ -13,7 +13,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::io::SeekFrom::{End, Start};
 use std::io::{Read, Seek};
-use std::ops::{Deref, DerefMut};
+
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -24,8 +24,14 @@ use tempfile::{tempdir_in, TempDir};
 pub mod clonefile;
 pub mod punchfile;
 
+mod exclusive_file;
+pub mod testing;
+
+use exclusive_file::ExclusiveFile;
+
 struct FileClone {
     file: File,
+    #[allow(dead_code)]
     tempdir: Rc<TempDir>,
     mmap: Option<Mmap>,
 }
@@ -43,50 +49,10 @@ impl FileClone {
     }
 }
 
-struct ExclusiveFile {
-    inner: File,
-    id: u64,
-}
-
-impl Deref for ExclusiveFile {
-    type Target = File;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl DerefMut for ExclusiveFile {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.inner
-    }
-}
-
 struct PendingWrite {
     key: Vec<u8>,
     value_file_offset: u64,
     value_length: u64,
-}
-
-fn open_new_exclusive_file(dir: impl AsRef<Path>) -> anyhow::Result<ExclusiveFile> {
-    let mut last_err = None;
-    for i in 0..10000 {
-        let file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(dir.as_ref().join(&i.to_string()));
-        let file = match file {
-            Ok(file) => file,
-            Err(err) => return Err(err.into()),
-        };
-        if let Err(err) = nix::fcntl::flock(file.as_raw_fd(), LockExclusiveNonblock) {
-            last_err = Some(err)
-        } else {
-            info!("opened with exclusive file id {}", i);
-            return Ok(ExclusiveFile { inner: file, id: i });
-        }
-    }
-    Err(last_err.unwrap()).context("gave up trying to create exclusive file")
 }
 
 const MANIFEST_SCHEMA_SQL: &str = include_str!("../manifest.sql");
@@ -97,12 +63,38 @@ fn init_manifest_schema(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
     conn.execute_batch(MANIFEST_SCHEMA_SQL)
 }
 
-pub struct Handle {
-    conn: Connection,
+pub struct Writer {
     exclusive_file: ExclusiveFile,
     pending_writes: Vec<PendingWrite>,
-    next_write_offset: u64,
-    last_flush_offset: u64,
+}
+
+impl Writer {
+    // TODO: Rename read_from.
+    pub fn stage_write(&mut self, key: Vec<u8>, mut value: impl Read) -> anyhow::Result<()> {
+        let value_file_offset = self.exclusive_file.next_write_offset;
+        let value_length = match std::io::copy(&mut value, &mut self.exclusive_file.inner) {
+            Ok(ok) => ok,
+            Err(err) => {
+                self.exclusive_file
+                    .inner
+                    .seek(Start(value_file_offset))
+                    .expect("should rewind failed copy");
+                return Err(err.into());
+            }
+        };
+        self.exclusive_file.next_write_offset += value_length;
+        self.pending_writes.push(PendingWrite {
+            key,
+            value_file_offset,
+            value_length,
+        });
+        Ok(())
+    }
+}
+
+pub struct Handle {
+    conn: Connection,
+    exclusive_files: HashMap<FileId, ExclusiveFile>,
     dir: PathBuf,
     // Cache clones until we know the original files have changed. This means new snapshots can
     // reuse clones. TODO: If other processes modify the database, our clones will
@@ -123,16 +115,13 @@ impl Handle {
         }
         let conn = Connection::open(dir.join("manifest.db"))?;
         conn.pragma_update(None, "journal_mode", "wal")?;
+        conn.pragma_update(None, "synchronous", "off")?;
+        conn.pragma_update(None, "locking_mode", "exclusive")?;
         init_manifest_schema(&conn).context("initing manifest schema")?;
-        let mut exclusive_file = open_new_exclusive_file(&dir)?;
-        let last_flush_offset = exclusive_file.seek(End(0))?;
-        let next_write_offset = last_flush_offset;
+        let _exclusive_file = ExclusiveFile::new(&dir)?;
         let handle = Self {
             conn,
-            exclusive_file,
-            pending_writes: vec![],
-            last_flush_offset,
-            next_write_offset,
+            exclusive_files: Default::default(),
             dir,
             clones: Default::default(),
         };
@@ -143,36 +132,12 @@ impl Handle {
         4096
     }
 
-    pub fn stage_write(
-        &mut self,
-        key: Vec<u8>,
-        mut value: impl std::io::Read,
-    ) -> anyhow::Result<()> {
-        let value_file_offset = self.next_write_offset;
-        let value_length = std::io::copy(&mut value, &mut self.exclusive_file.deref())?;
-        self.pending_writes.push(PendingWrite {
-            key,
-            value_file_offset,
-            value_length,
-        });
-        self.next_write_offset += value_length;
-        Ok(())
-    }
-
-    fn rollback_writes(&mut self) -> io::Result<()> {
-        self.exclusive_file.seek(Start(self.last_flush_offset))?;
-        self.exclusive_file.set_len(self.last_flush_offset)?;
-        self.next_write_offset = self.last_flush_offset;
-        self.pending_writes.clear();
-        Ok(())
-    }
-
-    pub fn flush_writes(&mut self) -> anyhow::Result<()> {
+    pub fn commit(&mut self, mut writer: Writer) -> anyhow::Result<()> {
         let mut transaction = self
             .conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let mut altered_files = HashSet::new();
-        for pw in &self.pending_writes {
+        for pw in &writer.pending_writes {
             let existing = transaction.query_row(
                 "delete from keys where key=? returning file_id, file_offset, value_length",
                 [&pw.key],
@@ -205,22 +170,34 @@ impl Handle {
                 values (?, ?, ?, ?)",
                 rusqlite::params!(
                     pw.key,
-                    self.exclusive_file.id,
+                    writer.exclusive_file.id,
                     pw.value_file_offset,
                     pw.value_length
                 ),
             )?;
             if pw.value_length != 0 {
-                altered_files.insert(self.exclusive_file.id);
+                altered_files.insert(writer.exclusive_file.id);
             }
         }
         transaction.commit()?;
-        self.pending_writes.clear();
+        writer.pending_writes.clear();
+        let mut exclusive_file = writer.exclusive_file;
+        exclusive_file.committed();
+        assert!(self
+            .exclusive_files
+            .insert(exclusive_file.id, exclusive_file)
+            .is_none());
         // Forget any references to clones of files that have changed.
         for file_id in altered_files {
             self.clones.remove(&file_id);
         }
         Ok(())
+    }
+
+    pub fn single_write(&mut self, key: Vec<u8>, r: impl Read) -> Result<()> {
+        let mut writer = self.new_writer()?;
+        writer.stage_write(key, r)?;
+        self.commit(writer)
     }
 
     // Returns the end offset of the last active value before offset in the same file.
@@ -247,6 +224,18 @@ impl Handle {
             } else {
                 Err(err)
             }
+        })
+    }
+
+    pub fn new_writer(&mut self) -> Result<Writer> {
+        let exclusive_file = if let Some(key) = self.exclusive_files.keys().next().copied() {
+            self.exclusive_files.remove(&key).unwrap()
+        } else {
+            ExclusiveFile::new(&self.dir)?
+        };
+        Ok(Writer {
+            exclusive_file,
+            pending_writes: Default::default(),
         })
     }
 
@@ -419,6 +408,7 @@ impl Reader<'_> {
     }
 }
 
+#[allow(dead_code)]
 fn floored_multiple<T>(value: T, multiple: T) -> T
 where
     T: Integer + Copy,
@@ -440,3 +430,5 @@ fn open_file_id(options: &OpenOptions, dir: &Path, file_id: u64) -> io::Result<F
 fn file_path(dir: &Path, file_id: u64) -> PathBuf {
     dir.join(file_id.to_string())
 }
+
+type FileId = u64;

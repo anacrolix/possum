@@ -2,6 +2,8 @@ use criterion::{criterion_group, criterion_main, Criterion};
 use possum::Handle;
 use std::path::PathBuf;
 
+mod clonefile;
+
 pub fn benchmark_read_fallible(c: &mut Criterion) -> anyhow::Result<()> {
     let tempdir = PathBuf::from("benchmark_get_exists");
     let mut handle = Handle::new_from_dir(tempdir)?;
@@ -63,5 +65,10 @@ fn benchmark_view(c: &mut Criterion) {
     unwrap_fallible(benchmark_view_fallible)(c)
 }
 
-criterion_group!(benches, benchmark_read, benchmark_view);
+criterion_group!(
+    benches,
+    benchmark_read,
+    benchmark_view,
+    clonefile::clonefile_benchmark
+);
 criterion_main!(benches);

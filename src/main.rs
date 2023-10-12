@@ -1,14 +1,11 @@
-use crate::punchfile::punchfile;
 use anyhow::{anyhow, Context};
 use log::info;
+use possum::punchfile::punchfile;
 use possum::Handle;
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
-
-mod clonefile;
-mod punchfile;
 
 #[derive(clap::Subcommand)]
 enum Commands {

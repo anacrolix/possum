@@ -55,7 +55,7 @@ fn main() -> anyhow::Result<()> {
                         .file_name()
                         .ok_or_else(|| anyhow!("can't extract file name"))?;
                     let file = File::open(&file).with_context(|| format!("opening {:?}", key))?;
-                    handle.single_write(key.to_os_string().into_vec(), file)?;
+                    handle.single_write_from(key.to_os_string().into_vec(), file)?;
                     Ok(())
                 }
             }

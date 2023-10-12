@@ -2,22 +2,31 @@ use crate::punchfile::punchfile;
 use anyhow::Result;
 use anyhow::{bail, Context};
 use clonefile::clonefile;
+use libc::fclonefileat;
 use log::debug;
 use memmap2::Mmap;
-
 use num::Integer;
+use owning_ref::OwningRefMut;
+use positioned_io::ReadAt;
+use rand::Rng;
+use rusqlite::types::{FromSql, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::Error::QueryReturnedNoRows;
-use rusqlite::{Connection, Transaction};
+use rusqlite::{params, Connection, ToSql, Transaction};
+use std::cell::RefCell;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
-use std::fs::{File, OpenOptions};
+use std::ffi::{OsStr, OsString};
+use std::fmt::{Debug, Display, Formatter};
+use std::fs::{read_dir, File, OpenOptions};
 use std::io::SeekFrom::{End, Start};
-use std::io::{Read, Seek};
-
-use std::os::fd::AsRawFd;
+use std::io::{ErrorKind, Read, Seek, Write};
+use std::ops::Deref;
+use std::os::fd::{AsRawFd, RawFd};
+use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::rc::Rc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::{fs, io};
 use tempfile::{tempdir_in, TempDir};
 
@@ -27,6 +36,7 @@ pub mod punchfile;
 mod exclusive_file;
 pub mod testing;
 
+use crate::clonefile::fclonefile;
 use exclusive_file::ExclusiveFile;
 
 struct FileClone {
@@ -36,10 +46,10 @@ struct FileClone {
     mmap: Option<Mmap>,
 }
 
-type FileCloneCache = HashMap<u64, Rc<Mutex<FileClone>>>;
+type FileCloneCache = HashMap<FileId, Rc<Mutex<FileClone>>>;
 
 impl FileClone {
-    fn get_mmap(&mut self) -> Result<&Mmap> {
+    fn get_mmap(&mut self) -> io::Result<&Mmap> {
         let mmap_opt = &mut self.mmap;
         if let Some(mmap) = mmap_opt {
             return Ok(mmap);
@@ -53,6 +63,7 @@ struct PendingWrite {
     key: Vec<u8>,
     value_file_offset: u64,
     value_length: u64,
+    value_file_id: FileId,
 }
 
 const MANIFEST_SCHEMA_SQL: &str = include_str!("../manifest.sql");
@@ -63,14 +74,47 @@ fn init_manifest_schema(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
     conn.execute_batch(MANIFEST_SCHEMA_SQL)
 }
 
-pub struct Writer {
-    exclusive_file: ExclusiveFile,
-    pending_writes: Vec<PendingWrite>,
+pub struct BeginWriteValue<'writer, 'handle> {
+    batch: &'writer mut BatchWriter<'handle>,
 }
 
-impl Writer {
-    // TODO: Rename read_from.
-    pub fn stage_write(&mut self, key: Vec<u8>, mut value: impl Read) -> anyhow::Result<()> {
+impl BeginWriteValue<'_, '_> {
+    pub fn clone_fd(self, fd: RawFd, flags: u32) -> Result<ValueWriter> {
+        let dst_path = loop {
+            let dst_path = random_file_name_in_dir(&self.batch.handle.dir);
+            match fclonefile(fd, &dst_path, 0) {
+                Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+                Err(err) => return Err(err.into()),
+                Ok(()) => break dst_path,
+            }
+        };
+        // TODO: Delete the file if this errors?
+        let exclusive_file = ExclusiveFile::open(dst_path)?;
+        Ok(ValueWriter {
+            value_length: exclusive_file.next_write_offset,
+            exclusive_file,
+            value_file_offset: 0,
+        })
+    }
+
+    pub fn begin(self) -> Result<ValueWriter> {
+        let exclusive_file = self.batch.handle.get_exclusive_file()?;
+        Ok(ValueWriter {
+            value_file_offset: exclusive_file.next_write_offset,
+            value_length: 0,
+            exclusive_file,
+        })
+    }
+}
+
+pub struct ValueWriter {
+    exclusive_file: ExclusiveFile,
+    value_file_offset: u64,
+    value_length: u64,
+}
+
+impl ValueWriter {
+    pub fn copy_from(&mut self, mut value: impl Read) -> Result<u64> {
         let value_file_offset = self.exclusive_file.next_write_offset;
         let value_length = match std::io::copy(&mut value, &mut self.exclusive_file.inner) {
             Ok(ok) => ok,
@@ -83,26 +127,156 @@ impl Writer {
             }
         };
         self.exclusive_file.next_write_offset += value_length;
+        Ok(value_length)
+    }
+}
+
+impl Write for ValueWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let n = self.exclusive_file.inner.write(buf)?;
+        self.value_length += n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        // This makes no sense until commit.
+        Ok(())
+    }
+}
+
+pub struct BatchWriter<'a> {
+    handle: &'a mut Handle,
+    exclusive_files: Vec<ExclusiveFile>,
+    pending_writes: Vec<PendingWrite>,
+}
+
+impl<'handle> BatchWriter<'handle> {
+    // TODO: Rename read_from.
+    pub fn stage_write(&mut self, key: Vec<u8>, value: ValueWriter) -> anyhow::Result<()> {
         self.pending_writes.push(PendingWrite {
             key,
-            value_file_offset,
-            value_length,
+            value_file_offset: value.value_file_offset,
+            value_length: value.value_length,
+            value_file_id: value.exclusive_file.id.clone(),
         });
+        Ok(())
+    }
+
+    pub fn new_value<'writer>(&'writer mut self) -> BeginWriteValue<'writer, 'handle> {
+        BeginWriteValue { batch: self }
+    }
+
+    pub fn commit(self) -> Result<()> {
+        let mut transaction = self
+            .handle
+            .conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let mut altered_files = HashSet::new();
+        for pw in self.pending_writes {
+            let existing = transaction.query_row(
+                "delete from keys where key=? returning file_id, file_offset, value_length",
+                [&pw.key],
+                |row| {
+                    let file_id: String = row.get(0)?;
+                    Ok((file_id, row.get(1)?, row.get(2)?))
+                },
+            );
+            match existing {
+                Ok((file_id, file_offset, value_length)) => {
+                    let file_id = file_id.into();
+                    let msg = format!(
+                        "deleting value at {:?} {} {}",
+                        file_id, file_offset, value_length
+                    );
+                    debug!("{}", msg);
+                    punch_value(
+                        &self.handle.dir,
+                        &file_id,
+                        file_offset,
+                        value_length,
+                        &mut transaction,
+                        Handle::block_size(),
+                    )
+                    .context(msg)?;
+                    if value_length != 0 {
+                        altered_files.insert(file_id);
+                    }
+                }
+                Err(QueryReturnedNoRows) => (),
+                Err(err) => return Err(err.into()),
+            }
+            transaction.execute(
+                "insert into keys (key, file_id, file_offset, value_length)\
+                values (?, ?, ?, ?)",
+                rusqlite::params!(
+                    pw.key,
+                    pw.value_file_id.as_str(),
+                    pw.value_file_offset,
+                    pw.value_length
+                ),
+            )?;
+            if pw.value_length != 0 {
+                altered_files.insert(pw.value_file_id);
+            }
+        }
+        transaction.commit()?;
+        {
+            let exclusive_files = self
+                .handle
+                .exclusive_files
+                .get_mut()
+                .expect("should get mut exclusive files");
+            for mut ef in self.exclusive_files {
+                ef.committed();
+                assert!(exclusive_files.insert(ef.id.clone(), ef).is_none());
+            }
+        }
+        // Forget any references to clones of files that have changed.
+        for file_id in altered_files {
+            self.handle.clones.remove(&file_id);
+        }
         Ok(())
     }
 }
 
 pub struct Handle {
     conn: Connection,
-    exclusive_files: HashMap<FileId, ExclusiveFile>,
+    exclusive_files: Mutex<HashMap<FileId, ExclusiveFile>>,
     dir: PathBuf,
     // Cache clones until we know the original files have changed. This means new snapshots can
     // reuse clones. TODO: If other processes modify the database, our clones will
     // be out of date, so there needs to be another check involved.
-    clones: HashMap<u64, Rc<Mutex<FileClone>>>,
+    clones: HashMap<FileId, Rc<Mutex<FileClone>>>,
 }
 
 impl Handle {
+    fn get_exclusive_file(&self) -> Result<ExclusiveFile> {
+        let mut files = self.exclusive_files.lock().unwrap();
+        if let Some((_, file)) = files.drain().next() {
+            return Ok(file);
+        }
+        if let Some(file) = self.open_existing_exclusive_file()? {
+            return Ok(file);
+        }
+        ExclusiveFile::new(&self.dir)
+    }
+
+    fn open_existing_exclusive_file(&self) -> Result<Option<ExclusiveFile>> {
+        for res in read_dir(&self.dir)? {
+            let entry = res?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            if !valid_file_name(entry.file_name().to_str().unwrap()) {
+                continue;
+            }
+            if let Ok(ef) = ExclusiveFile::open(entry.path()) {
+                return Ok(Some(ef));
+            }
+        }
+        Ok(None)
+    }
+
     pub fn new_from_dir(dir: PathBuf) -> anyhow::Result<Self> {
         fs::create_dir_all(&dir)?;
         let sqlite_version = rusqlite::version_number();
@@ -113,7 +287,7 @@ impl Handle {
                 "3.42"
             );
         }
-        let conn = Connection::open(dir.join("manifest.db"))?;
+        let conn = Connection::open(dir.join(MANIFEST_DB_FILE_NAME))?;
         conn.pragma_update(None, "journal_mode", "wal")?;
         conn.pragma_update(None, "synchronous", "off")?;
         conn.pragma_update(None, "locking_mode", "exclusive")?;
@@ -132,145 +306,12 @@ impl Handle {
         4096
     }
 
-    pub fn commit(&mut self, mut writer: Writer) -> anyhow::Result<()> {
-        let mut transaction = self
-            .conn
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let mut altered_files = HashSet::new();
-        for pw in &writer.pending_writes {
-            let existing = transaction.query_row(
-                "delete from keys where key=? returning file_id, file_offset, value_length",
-                [&pw.key],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            );
-            match existing {
-                Ok((file_id, file_offset, value_length)) => {
-                    let msg = format!(
-                        "deleting value at {} {} {}",
-                        file_id, file_offset, value_length
-                    );
-                    debug!("{}", msg);
-                    Self::punch_value(
-                        &self.dir,
-                        file_id,
-                        file_offset,
-                        value_length,
-                        &mut transaction,
-                    )
-                    .context(msg)?;
-                    if value_length != 0 {
-                        altered_files.insert(file_id);
-                    }
-                }
-                Err(QueryReturnedNoRows) => (),
-                Err(err) => return Err(err.into()),
-            }
-            transaction.execute(
-                "insert into keys (key, file_id, file_offset, value_length)\
-                values (?, ?, ?, ?)",
-                rusqlite::params!(
-                    pw.key,
-                    writer.exclusive_file.id,
-                    pw.value_file_offset,
-                    pw.value_length
-                ),
-            )?;
-            if pw.value_length != 0 {
-                altered_files.insert(writer.exclusive_file.id);
-            }
-        }
-        transaction.commit()?;
-        writer.pending_writes.clear();
-        let mut exclusive_file = writer.exclusive_file;
-        exclusive_file.committed();
-        assert!(self
-            .exclusive_files
-            .insert(exclusive_file.id, exclusive_file)
-            .is_none());
-        // Forget any references to clones of files that have changed.
-        for file_id in altered_files {
-            self.clones.remove(&file_id);
-        }
-        Ok(())
-    }
-
-    pub fn single_write(&mut self, key: Vec<u8>, r: impl Read) -> Result<()> {
-        let mut writer = self.new_writer()?;
-        writer.stage_write(key, r)?;
-        self.commit(writer)
-    }
-
-    // Returns the end offset of the last active value before offset in the same file.
-    fn query_last_end_offset(
-        tx: &mut Transaction,
-        file_id: u64,
-        offset: u64,
-    ) -> rusqlite::Result<u64> {
-        tx.query_row(
-            "select max(file_offset+value_length) as last_offset \
-            from keys \
-            where file_id=? and file_offset+value_length <= ?",
-            [file_id, offset],
-            |row| {
-                // I don't know why, but this can return null for file_ids that have values but
-                // don't fit the other conditions.
-                let res: rusqlite::Result<Option<_>> = row.get(0);
-                res.map(|v| v.unwrap_or_default())
-            },
-        )
-        .or_else(|err| {
-            if matches!(err, rusqlite::Error::QueryReturnedNoRows) {
-                Ok(0)
-            } else {
-                Err(err)
-            }
-        })
-    }
-
-    pub fn new_writer(&mut self) -> Result<Writer> {
-        let exclusive_file = if let Some(key) = self.exclusive_files.keys().next().copied() {
-            self.exclusive_files.remove(&key).unwrap()
-        } else {
-            ExclusiveFile::new(&self.dir)?
-        };
-        Ok(Writer {
-            exclusive_file,
+    pub fn new_writer(&mut self) -> Result<BatchWriter> {
+        Ok(BatchWriter {
+            handle: self,
+            exclusive_files: Default::default(),
             pending_writes: Default::default(),
         })
-    }
-
-    // Can't do this as &mut self for dumb Rust reasons.
-    fn punch_value(
-        dir: &Path,
-        file_id: u64,
-        mut offset: u64,
-        mut length: u64,
-        tx: &mut Transaction,
-    ) -> anyhow::Result<()> {
-        let block_size = Self::block_size();
-        // If we're not at a block boundary to begin with, find out how far back we can punch and
-        // start there.
-        if offset % block_size != 0 {
-            let new_offset = ceil_multiple(
-                Self::query_last_end_offset(tx, file_id, offset)?,
-                block_size,
-            );
-            length += offset - new_offset;
-            offset = new_offset;
-        }
-        let mut file = open_file_id(OpenOptions::new().append(true), dir, file_id)?;
-        // append doesn't mean our file position is at the end to begin with.
-        let file_end = file.seek(End(0))?;
-        let end_offset = offset + length;
-        // Does this handle ongoing writes to the same file?
-        if end_offset < file_end {
-            // What if this is below the offset or negative?
-            length -= end_offset % Self::block_size();
-        }
-        debug!("punching {} at {} for {}", file_id, offset, length);
-        punchfile(file, offset.try_into()?, length.try_into()?)
-            .with_context(|| format!("length {}", length))?;
-        Ok(())
     }
 
     pub fn read(&mut self) -> rusqlite::Result<Reader> {
@@ -281,12 +322,57 @@ impl Handle {
             files: Default::default(),
         })
     }
+
+    pub fn read_single(&mut self, key: Vec<u8>) -> Result<Option<SnapshotValue<Value, Snapshot>>> {
+        let mut reader = self.read()?;
+        let Some(value) = reader.add(&key)? else {
+            return Ok(None);
+        };
+        let mut snapshot = reader.begin()?;
+        Ok(Some(snapshot.with_value(value)))
+    }
+
+    pub fn single_write_from(&mut self, key: Vec<u8>, r: impl Read) -> Result<u64> {
+        let mut writer = self.new_writer()?;
+        let mut value = writer.new_value().begin()?;
+        let n = value.copy_from(r)?;
+        writer.stage_write(key, value)?;
+        writer.commit()?;
+        Ok(n)
+    }
+
+    pub fn clone_from_fd(&mut self, key: Vec<u8>, fd: RawFd) -> Result<u64> {
+        let mut writer = self.new_writer()?;
+        let value = writer.new_value().clone_fd(fd, 0)?;
+        let n = value.value_length;
+        writer.stage_write(key, value)?;
+        writer.commit()?;
+        Ok(n)
+    }
 }
 
 pub struct Value {
-    file_id: u64,
+    file_id: FileId,
     file_offset: u64,
     length: u64,
+}
+
+impl AsRef<Value> for Value {
+    fn as_ref(&self) -> &Value {
+        self
+    }
+}
+
+impl AsMut<Snapshot> for Snapshot {
+    fn as_mut(&mut self) -> &mut Snapshot {
+        self
+    }
+}
+
+impl AsRef<Snapshot> for Snapshot {
+    fn as_ref(&self) -> &Self {
+        self
+    }
 }
 
 impl Value {
@@ -296,28 +382,97 @@ impl Value {
 }
 
 pub struct Snapshot {
-    file_clones: HashMap<u64, Rc<Mutex<FileClone>>>,
+    file_clones: HashMap<FileId, Rc<Mutex<FileClone>>>,
+}
+
+pub trait ReadSnapshot {
+    fn view(&mut self, f: impl FnOnce(&[u8])) -> Result<()>;
+    fn read(&mut self, buf: &mut [u8]) -> Result<usize>;
+}
+
+pub struct SnapshotValue<V, S>
+where
+    V: AsRef<Value>,
+    S: AsRef<Snapshot>,
+{
+    value: V,
+    snapshot: S,
 }
 
 impl Snapshot {
-    pub fn view(&mut self, value: &Value, f: impl FnOnce(&[u8])) -> Result<()> {
-        let file_id = value.file_id;
-        let file_clone = self.file_clones.get_mut(&file_id).unwrap();
-        let start = value.file_offset.try_into()?;
-        let end = start + usize::try_from(value.length)?;
-        let mut mutex_guard = file_clone.lock().unwrap();
-        let mmap = mutex_guard.get_mmap()?;
-        f(&mmap[start..end]);
-        Ok(())
+    pub fn value<V>(self: &mut Self, value: V) -> SnapshotValue<V, &mut Snapshot>
+    where
+        V: AsRef<Value>,
+    {
+        SnapshotValue {
+            value,
+            snapshot: self,
+        }
     }
 
-    pub fn read(&mut self, value: &Value, mut buf: &mut [u8]) -> Result<usize> {
+    pub fn with_value<V>(self: Self, value: V) -> SnapshotValue<V, Self>
+    where
+        V: AsRef<Value>,
+    {
+        SnapshotValue {
+            value,
+            snapshot: self,
+        }
+    }
+}
+
+pub struct SnapshotWithValue<V, S>
+where
+    V: AsRef<Value>,
+    S: AsRef<Snapshot>,
+{
+    snapshot: Snapshot,
+    value: SnapshotValue<V, S>,
+}
+
+impl<V, S> ReadAt for SnapshotValue<V, S>
+where
+    V: AsRef<Value>,
+    S: AsRef<Snapshot>,
+{
+    fn read_at(&self, pos: u64, mut buf: &mut [u8]) -> io::Result<usize> {
+        Ok(self.view(|mut view| {
+            // TODO: Create a thiserror for non-usize pos.
+            let mut r = &view[usize::try_from(pos).expect("pos should be usize")..];
+            io::copy(&mut r, &mut buf)
+        })?? as usize)
+    }
+}
+
+impl<V, S> SnapshotValue<V, S>
+where
+    V: AsRef<Value>,
+    S: AsRef<Snapshot>,
+{
+    pub fn view<R>(&self, f: impl FnOnce(&[u8]) -> R) -> io::Result<R> {
+        let value = self.value.as_ref();
+        let file_id = &value.file_id;
+        let file_clone = self.snapshot.as_ref().file_clones.get(&file_id).unwrap();
+        let start = value
+            .file_offset
+            .try_into()
+            .expect("file offset should be usize");
+        let end = start + usize::try_from(value.length).expect("length should be usize");
+        let mut mutex_guard = file_clone.lock().unwrap();
+        let mmap = mutex_guard.get_mmap()?;
+        Ok(f(&mmap[start..end]))
+    }
+
+    pub fn read(&mut self, mut buf: &mut [u8]) -> Result<usize> {
+        let value = self.value.as_ref();
         buf = buf
             .split_at_mut(min(buf.len() as u64, value.length) as usize)
             .0;
         let mut file_clone = self
+            .snapshot
+            .as_ref()
             .file_clones
-            .get_mut(&value.file_id)
+            .get(&value.file_id)
             .unwrap()
             .lock()
             .unwrap();
@@ -325,16 +480,20 @@ impl Snapshot {
         file.seek(Start(value.file_offset))?;
         file.read(buf).map_err(Into::into)
     }
+
+    pub fn new_reader(&self) -> impl Read + '_ {
+        positioned_io::Cursor::new(self)
+    }
 }
 
-pub struct Reader<'a> {
-    tx: Transaction<'a>,
-    handle_clones: &'a mut FileCloneCache,
-    handle_dir: &'a Path,
-    files: HashSet<u64>,
+pub struct Reader<'handle> {
+    tx: Transaction<'handle>,
+    handle_clones: &'handle mut FileCloneCache,
+    handle_dir: &'handle Path,
+    files: HashSet<FileId>,
 }
 
-impl Reader<'_> {
+impl<'a> Reader<'a> {
     pub fn add(&mut self, key: &[u8]) -> rusqlite::Result<Option<Value>> {
         let res = self.tx.query_row(
             "update keys \
@@ -342,11 +501,15 @@ impl Reader<'_> {
             where key=? \
             returning file_id, file_offset, value_length",
             [key],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| {
+                let file_id: String = row.get(0)?;
+                Ok((file_id, row.get(1)?, row.get(2)?))
+            },
         );
         match res {
             Ok((file_id, file_offset, value_length)) => {
-                self.files.insert(file_id);
+                let file_id: FileId = file_id.into();
+                self.files.insert(file_id.clone());
                 Ok(Some(Value {
                     file_id,
                     file_offset,
@@ -360,10 +523,10 @@ impl Reader<'_> {
 
     pub fn begin(mut self) -> Result<Snapshot> {
         let mut tempdir = None;
-        let mut file_clones: HashMap<u64, Rc<Mutex<FileClone>>> = Default::default();
+        let mut file_clones: FileCloneCache = Default::default();
         for file_id in self.files {
             file_clones.insert(
-                file_id,
+                file_id.clone(),
                 Self::get_file_clone(
                     file_id,
                     &mut tempdir,
@@ -377,7 +540,7 @@ impl Reader<'_> {
     }
 
     fn get_file_clone(
-        file_id: u64,
+        file_id: FileId,
         tempdir: &mut Option<Rc<TempDir>>,
         cache: &mut FileCloneCache,
         src_dir: &Path,
@@ -395,11 +558,11 @@ impl Reader<'_> {
         };
         let tempdir_path = tempdir.path();
         clonefile(
-            &file_path(src_dir, file_id),
-            &file_path(tempdir_path, file_id),
+            &file_path(src_dir, &file_id),
+            &file_path(tempdir_path, &file_id),
         )?;
         let file_clone = Rc::new(Mutex::new(FileClone {
-            file: open_file_id(OpenOptions::new().read(true), tempdir_path, file_id)?,
+            file: open_file_id(OpenOptions::new().read(true), tempdir_path, &file_id)?,
             tempdir: tempdir.clone(),
             mmap: None,
         }));
@@ -423,12 +586,161 @@ where
     (value + multiple - T::one()) / multiple * multiple
 }
 
-fn open_file_id(options: &OpenOptions, dir: &Path, file_id: u64) -> io::Result<File> {
+fn open_file_id(options: &OpenOptions, dir: &Path, file_id: &FileId) -> io::Result<File> {
     options.open(file_path(dir, file_id))
 }
 
-fn file_path(dir: &Path, file_id: u64) -> PathBuf {
-    dir.join(file_id.to_string())
+fn file_path(dir: &Path, file_id: impl AsRef<FileId>) -> PathBuf {
+    dir.join(file_id.as_ref())
 }
 
-type FileId = u64;
+pub struct SingleWriter<'a> {
+    key: Vec<u8>,
+    handle: &'a mut Handle,
+    value_writer: BatchWriter<'a>,
+}
+
+fn random_file_name_in_dir(dir: &Path) -> PathBuf {
+    let base = random_file_name();
+    dir.join(base)
+}
+
+const FILE_NAME_LENGTH: usize = 8;
+
+fn random_file_name() -> OsString {
+    OsString::from_vec(
+        rand::thread_rng()
+            .sample_iter(rand::distributions::Alphanumeric)
+            .take(FILE_NAME_LENGTH)
+            .collect::<Vec<_>>(),
+    )
+}
+
+const MANIFEST_DB_FILE_NAME: &str = "manifest.db";
+
+fn valid_file_name(file_name: &str) -> bool {
+    return file_name.len() == FILE_NAME_LENGTH && file_name != MANIFEST_DB_FILE_NAME;
+}
+
+#[derive(Clone, Eq, PartialEq, Hash)]
+struct FileId(OsString);
+
+impl From<OsString> for FileId {
+    fn from(value: OsString) -> Self {
+        Self(value)
+    }
+}
+
+// impl Deref for FileId {
+//     type Target = OsString;
+//
+//     fn deref(&self) -> &Self::Target {
+//         &self.0
+//     }
+// }
+
+impl AsRef<Path> for FileId {
+    fn as_ref(&self) -> &Path {
+        self.as_ref()
+    }
+}
+
+impl Debug for FileId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl From<String> for FileId {
+    fn from(value: String) -> Self {
+        Self(value.into())
+    }
+}
+
+impl FileId {
+    fn as_str(&self) -> &str {
+        self.0.to_str().unwrap()
+    }
+}
+
+impl ToSql for FileId {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::Borrowed(ValueRef::Blob(self.0.as_bytes())))
+    }
+}
+
+impl FromSql for FileId {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        Ok(OsStr::from_bytes(value.as_bytes()?).to_owned().into())
+    }
+}
+
+impl Display for FileId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(self.as_str(), f)
+    }
+}
+
+impl AsRef<FileId> for &FileId {
+    fn as_ref(&self) -> &FileId {
+        self
+    }
+}
+
+// Can't do this as &mut self for dumb Rust reasons.
+fn punch_value(
+    dir: &Path,
+    file_id: &FileId,
+    mut offset: u64,
+    mut length: u64,
+    tx: &mut Transaction,
+    block_size: u64,
+) -> anyhow::Result<()> {
+    // If we're not at a block boundary to begin with, find out how far back we can punch and
+    // start there.
+    if offset % block_size != 0 {
+        let new_offset = ceil_multiple(query_last_end_offset(tx, file_id, offset)?, block_size);
+        length += offset - new_offset;
+        offset = new_offset;
+    }
+    let mut file = open_file_id(OpenOptions::new().append(true), dir, file_id)?;
+    // append doesn't mean our file position is at the end to begin with.
+    let file_end = file.seek(End(0))?;
+    let end_offset = offset + length;
+    // Does this handle ongoing writes to the same file?
+    if end_offset < file_end {
+        // What if this is below the offset or negative?
+        length -= end_offset % block_size;
+    }
+    debug!("punching {} at {} for {}", file_id, offset, length);
+    punchfile(file, offset.try_into()?, length.try_into()?)
+        .with_context(|| format!("length {}", length))?;
+    Ok(())
+}
+
+// Returns the end offset of the last active value before offset in the same file.
+fn query_last_end_offset(
+    tx: &mut Transaction,
+    file_id: &FileId,
+    offset: u64,
+) -> rusqlite::Result<u64> {
+    tx.query_row(
+        "select max(file_offset+value_length) as last_offset \
+            from keys \
+            where file_id=? and file_offset+value_length <= ?",
+        params![file_id, offset],
+        |row| {
+            // I don't know why, but this can return null for file_ids that have values but
+            // don't fit the other conditions.
+            let res: rusqlite::Result<Option<_>> = row.get(0);
+            res.map(|v| v.unwrap_or_default())
+        },
+    )
+    .or_else(|err| {
+        if matches!(err, rusqlite::Error::QueryReturnedNoRows) {
+            Ok(0)
+        } else {
+            Err(err)
+        }
+    })
+}

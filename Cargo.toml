@@ -18,6 +18,10 @@ memmap2 = "0.9.0"
 # This might currently only be needed for test utilities, but there's no easy way to share dependencies when test is
 # enabled.
 rand = "0.8.5"
+twox-hash = "1.6.3"
+owning_ref = "0.4.1"
+rental = "0.5.6"
+positioned-io = "0.3.2"
 
 [dev-dependencies]
 criterion = "0.5.1"

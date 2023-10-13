@@ -22,8 +22,7 @@ fn set_get() -> Result<()> {
     let mut reader = handle.read()?;
     let value = reader.add("hello".as_bytes())?.expect("key should exist");
     let mut snapshot = reader.begin()?;
-    reader
-        .begin()?
+    snapshot
         .value(&value)
         .view(|read_value_bytes| assert_eq!(read_value_bytes, value_bytes))?;
     Ok(())

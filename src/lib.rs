@@ -20,7 +20,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::fs::{read_dir, File, OpenOptions};
 use std::io::SeekFrom::{End, Start};
 use std::io::{ErrorKind, Read, Seek, Write};
-use std::ops::Deref;
+use std::ops::{Deref, DerefMut};
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
@@ -145,7 +145,7 @@ impl Write for ValueWriter {
 }
 
 pub struct BatchWriter<'a> {
-    handle: &'a mut Handle,
+    handle: &'a Handle,
     exclusive_files: Vec<ExclusiveFile>,
     pending_writes: Vec<PendingWrite>,
 }
@@ -166,11 +166,10 @@ impl<'handle> BatchWriter<'handle> {
         BeginWriteValue { batch: self }
     }
 
-    pub fn commit(self) -> Result<()> {
-        let mut transaction = self
-            .handle
-            .conn
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+    pub fn commit(mut self) -> Result<()> {
+        let mut tx_guard = self.handle.conn.lock().unwrap();
+        let mut transaction =
+            tx_guard.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let mut altered_files = HashSet::new();
         for pw in self.pending_writes {
             let existing = transaction.query_row(
@@ -221,32 +220,28 @@ impl<'handle> BatchWriter<'handle> {
         }
         transaction.commit()?;
         {
-            let exclusive_files = self
-                .handle
-                .exclusive_files
-                .get_mut()
-                .expect("should get mut exclusive files");
+            let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
             for mut ef in self.exclusive_files {
                 ef.committed();
-                assert!(exclusive_files.insert(ef.id.clone(), ef).is_none());
+                assert!(handle_exclusive_files.insert(ef.id.clone(), ef).is_none());
             }
         }
         // Forget any references to clones of files that have changed.
         for file_id in altered_files {
-            self.handle.clones.remove(&file_id);
+            self.handle.clones.lock().unwrap().remove(&file_id);
         }
         Ok(())
     }
 }
 
 pub struct Handle {
-    conn: Connection,
+    conn: Mutex<Connection>,
     exclusive_files: Mutex<HashMap<FileId, ExclusiveFile>>,
     dir: PathBuf,
     // Cache clones until we know the original files have changed. This means new snapshots can
     // reuse clones. TODO: If other processes modify the database, our clones will
     // be out of date, so there needs to be another check involved.
-    clones: HashMap<FileId, Rc<Mutex<FileClone>>>,
+    clones: Mutex<FileCloneCache>,
 }
 
 impl Handle {
@@ -277,7 +272,7 @@ impl Handle {
         Ok(None)
     }
 
-    pub fn new_from_dir(dir: PathBuf) -> anyhow::Result<Self> {
+    pub fn new_from_dir(dir: PathBuf) -> Result<Self> {
         fs::create_dir_all(&dir)?;
         let sqlite_version = rusqlite::version_number();
         if sqlite_version < 3042000 {
@@ -294,7 +289,7 @@ impl Handle {
         init_manifest_schema(&conn).context("initing manifest schema")?;
         let _exclusive_file = ExclusiveFile::new(&dir)?;
         let handle = Self {
-            conn,
+            conn: Mutex::new(conn),
             exclusive_files: Default::default(),
             dir,
             clones: Default::default(),
@@ -306,7 +301,7 @@ impl Handle {
         4096
     }
 
-    pub fn new_writer(&mut self) -> Result<BatchWriter> {
+    pub fn new_writer(&self) -> Result<BatchWriter> {
         Ok(BatchWriter {
             handle: self,
             exclusive_files: Default::default(),
@@ -314,13 +309,16 @@ impl Handle {
         })
     }
 
-    pub fn read(&mut self) -> rusqlite::Result<Reader> {
-        Ok(Reader {
-            tx: self.conn.transaction()?,
-            handle_clones: &mut self.clones,
-            handle_dir: self.dir.as_path(),
+    pub fn read(&self) -> rusqlite::Result<Reader> {
+        let mut guard = self.conn.lock().unwrap();
+        let tx = unsafe { std::mem::transmute(guard.transaction()?) };
+        let mut reader = Reader {
+            guard,
+            tx,
+            handle: self,
             files: Default::default(),
-        })
+        };
+        Ok(reader)
     }
 
     pub fn read_single(&mut self, key: Vec<u8>) -> Result<Option<SnapshotValue<Value, Snapshot>>> {
@@ -436,11 +434,12 @@ where
     S: AsRef<Snapshot>,
 {
     fn read_at(&self, pos: u64, mut buf: &mut [u8]) -> io::Result<usize> {
+        // TODO: Create a thiserror or io::Error for non-usize pos.
+        // let pos = usize::try_from(pos).expect("pos should be usize");
         Ok(self.view(|mut view| {
-            // TODO: Create a thiserror for non-usize pos.
-            let mut r = &view[usize::try_from(pos).expect("pos should be usize")..];
-            io::copy(&mut r, &mut buf)
-        })?? as usize)
+            let mut r = &view;
+            r.read_at(pos, buf)
+        })??)
     }
 }
 
@@ -487,9 +486,9 @@ where
 }
 
 pub struct Reader<'handle> {
+    guard: MutexGuard<'handle, Connection>,
     tx: Transaction<'handle>,
-    handle_clones: &'handle mut FileCloneCache,
-    handle_dir: &'handle Path,
+    handle: &'handle Handle,
     files: HashSet<FileId>,
 }
 
@@ -524,15 +523,12 @@ impl<'a> Reader<'a> {
     pub fn begin(mut self) -> Result<Snapshot> {
         let mut tempdir = None;
         let mut file_clones: FileCloneCache = Default::default();
+        let mut handle_clone_guard = self.handle.clones.lock().unwrap();
+        let handle_clones = handle_clone_guard.deref_mut();
         for file_id in self.files {
             file_clones.insert(
                 file_id.clone(),
-                Self::get_file_clone(
-                    file_id,
-                    &mut tempdir,
-                    &mut self.handle_clones,
-                    self.handle_dir,
-                )?,
+                Self::get_file_clone(file_id, &mut tempdir, handle_clones, &self.handle.dir)?,
             );
         }
         self.tx.commit()?;
@@ -641,7 +637,7 @@ impl From<OsString> for FileId {
 
 impl AsRef<Path> for FileId {
     fn as_ref(&self) -> &Path {
-        self.as_ref()
+        Path::new(&self.0)
     }
 }
 
@@ -681,7 +677,7 @@ impl Display for FileId {
     }
 }
 
-impl AsRef<FileId> for &FileId {
+impl AsRef<FileId> for FileId {
     fn as_ref(&self) -> &FileId {
         self
     }

@@ -2,7 +2,7 @@
 
 create table if not exists keys (
     key_id integer primary key,
-    file_id integer,
+    file_id any,
     file_offset integer,
     value_length integer,
     -- This is the most (concrete?) representation for the finest time granularity sqlite's internal time functions support.

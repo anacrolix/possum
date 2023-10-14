@@ -128,6 +128,7 @@ impl ValueWriter {
                 return Err(err.into());
             }
         };
+        self.value_length += value_length;
         self.exclusive_file.next_write_offset += value_length;
         Ok(value_length)
     }
@@ -170,8 +171,9 @@ impl<'handle> BatchWriter<'handle> {
 
     pub fn commit(mut self) -> Result<()> {
         let mut tx_guard = self.handle.conn.lock().unwrap();
-        let mut transaction =
-            tx_guard.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let mut transaction = tx_guard
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .context("begin immediate")?;
         let mut altered_files = HashSet::new();
         for pw in self.pending_writes {
             let existing = transaction.query_row(
@@ -219,7 +221,7 @@ impl<'handle> BatchWriter<'handle> {
                 altered_files.insert(pw.value_file_id);
             }
         }
-        transaction.commit()?;
+        transaction.commit().context("commit transaction")?;
         {
             let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
             for mut ef in self.exclusive_files {
@@ -286,7 +288,10 @@ impl Handle {
         let conn = Connection::open(dir.join(MANIFEST_DB_FILE_NAME))?;
         conn.pragma_update(None, "journal_mode", "wal")?;
         conn.pragma_update(None, "synchronous", "off")?;
-        conn.pragma_update(None, "locking_mode", "exclusive")?;
+        if false {
+            conn.pragma_update(None, "locking_mode", "exclusive")
+                .context("set conn locking mode exclusive")?;
+        }
         init_manifest_schema(&conn).context("initing manifest schema")?;
         let _exclusive_file = ExclusiveFile::new(&dir)?;
         let handle = Self {

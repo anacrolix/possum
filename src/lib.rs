@@ -289,7 +289,6 @@ impl Handle {
                 .context("set conn locking mode exclusive")?;
         }
         init_manifest_schema(&conn).context("initing manifest schema")?;
-        let _exclusive_file = ExclusiveFile::new(&dir)?;
         let handle = Self {
             conn: Mutex::new(conn),
             exclusive_files: Default::default(),
@@ -596,15 +595,17 @@ fn random_file_name_in_dir(dir: &Path) -> PathBuf {
     dir.join(base)
 }
 
-const FILE_NAME_LENGTH: usize = 8;
+const FILE_NAME_RAND_LENGTH: usize = 8;
+const VALUES_FILE_NAME_PREFIX: &str = "values-";
 
 fn random_file_name() -> OsString {
-    OsString::from_vec(
+    let mut begin = VALUES_FILE_NAME_PREFIX.as_bytes().to_vec();
+    begin.extend(
         rand::thread_rng()
             .sample_iter(rand::distributions::Alphanumeric)
-            .take(FILE_NAME_LENGTH)
-            .collect::<Vec<_>>(),
-    )
+            .take(FILE_NAME_RAND_LENGTH),
+    );
+    OsString::from_vec(begin)
 }
 
 const MANIFEST_DB_FILE_NAME: &str = "manifest.db";
@@ -613,10 +614,7 @@ fn valid_file_name(file_name: &str) -> bool {
     if file_name.starts_with(MANIFEST_DB_FILE_NAME) {
         return false;
     }
-    if file_name.len() == FILE_NAME_LENGTH {
-        return true;
-    }
-    file_name.parse::<u64>().is_ok()
+    file_name.starts_with(VALUES_FILE_NAME_PREFIX)
 }
 
 #[derive(Clone, Eq, PartialEq, Hash)]

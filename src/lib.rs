@@ -9,6 +9,8 @@ use num::Integer;
 use owning_ref::OwningRefMut;
 use positioned_io::ReadAt;
 use rand::Rng;
+use rusqlite::types::FromSqlError::InvalidType;
+use rusqlite::types::ValueRef::{Null, Real};
 use rusqlite::types::{FromSql, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{params, Connection, ToSql, Transaction};
@@ -176,13 +178,12 @@ impl<'handle> BatchWriter<'handle> {
                 "delete from keys where key=? returning file_id, file_offset, value_length",
                 [&pw.key],
                 |row| {
-                    let file_id: String = row.get(0)?;
+                    let file_id: FileId = row.get(0)?;
                     Ok((file_id, row.get(1)?, row.get(2)?))
                 },
             );
             match existing {
                 Ok((file_id, file_offset, value_length)) => {
-                    let file_id = file_id.into();
                     let msg = format!(
                         "deleting value at {:?} {} {}",
                         file_id, file_offset, value_length
@@ -501,13 +502,12 @@ impl<'a> Reader<'a> {
             returning file_id, file_offset, value_length",
             [key],
             |row| {
-                let file_id: String = row.get(0)?;
+                let file_id: FileId = row.get(0)?;
                 Ok((file_id, row.get(1)?, row.get(2)?))
             },
         );
         match res {
             Ok((file_id, file_offset, value_length)) => {
-                let file_id: FileId = file_id.into();
                 self.files.insert(file_id.clone());
                 Ok(Some(Value {
                     file_id,
@@ -615,7 +615,13 @@ fn random_file_name() -> OsString {
 const MANIFEST_DB_FILE_NAME: &str = "manifest.db";
 
 fn valid_file_name(file_name: &str) -> bool {
-    return file_name.len() == FILE_NAME_LENGTH && file_name != MANIFEST_DB_FILE_NAME;
+    if file_name == MANIFEST_DB_FILE_NAME {
+        return false;
+    }
+    if file_name.len() == FILE_NAME_LENGTH {
+        return true;
+    }
+    file_name.parse::<u64>().is_ok()
 }
 
 #[derive(Clone, Eq, PartialEq, Hash)]
@@ -653,6 +659,12 @@ impl From<String> for FileId {
     }
 }
 
+impl From<Vec<u8>> for FileId {
+    fn from(value: Vec<u8>) -> Self {
+        OsString::from_vec(value).into()
+    }
+}
+
 impl FileId {
     fn as_str(&self) -> &str {
         self.0.to_str().unwrap()
@@ -667,7 +679,13 @@ impl ToSql for FileId {
 
 impl FromSql for FileId {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-        Ok(OsStr::from_bytes(value.as_bytes()?).to_owned().into())
+        Ok(match value {
+            Null | Real(..) => Err(InvalidType),
+            ValueRef::Text(text) => Ok(text.to_owned()),
+            ValueRef::Blob(blob) => Ok(blob.to_owned()),
+            ValueRef::Integer(int) => Ok(int.to_string().into_bytes()),
+        }?
+        .into())
     }
 }
 

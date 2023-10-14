@@ -1,4 +1,3 @@
-use libc::c_int;
 use std::ffi::CString;
 use std::io;
 use std::os::fd::AsRawFd;

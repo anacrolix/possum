@@ -2,11 +2,9 @@ use crate::punchfile::punchfile;
 use anyhow::Result;
 use anyhow::{bail, Context};
 use clonefile::clonefile;
-use libc::fclonefileat;
 use log::debug;
 use memmap2::Mmap;
 use num::Integer;
-use owning_ref::OwningRefMut;
 use positioned_io::ReadAt;
 use rand::Rng;
 use rusqlite::types::FromSqlError::InvalidType;
@@ -14,21 +12,19 @@ use rusqlite::types::ValueRef::{Null, Real};
 use rusqlite::types::{FromSql, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{params, Connection, ToSql, Transaction};
-use std::cell::RefCell;
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::{read_dir, File, OpenOptions};
 use std::io::SeekFrom::{End, Start};
 use std::io::{ErrorKind, Read, Seek, Write};
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
-use std::pin::Pin;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Mutex, MutexGuard};
 use std::{fs, io};
 use tempfile::{tempdir_in, TempDir};
 
@@ -81,7 +77,7 @@ pub struct BeginWriteValue<'writer, 'handle> {
 }
 
 impl BeginWriteValue<'_, '_> {
-    pub fn clone_fd(self, fd: RawFd, flags: u32) -> Result<ValueWriter> {
+    pub fn clone_fd(self, fd: RawFd, _flags: u32) -> Result<ValueWriter> {
         let dst_path = loop {
             let dst_path = random_file_name_in_dir(&self.batch.handle.dir);
             match fclonefile(fd, &dst_path, 0) {
@@ -169,7 +165,7 @@ impl<'handle> BatchWriter<'handle> {
         BeginWriteValue { batch: self }
     }
 
-    pub fn commit(mut self) -> Result<()> {
+    pub fn commit(self) -> Result<()> {
         let mut tx_guard = self.handle.conn.lock().unwrap();
         let mut transaction = tx_guard
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -318,8 +314,8 @@ impl Handle {
     pub fn read(&self) -> rusqlite::Result<Reader> {
         let mut guard = self.conn.lock().unwrap();
         let tx = unsafe { std::mem::transmute(guard.transaction()?) };
-        let mut reader = Reader {
-            guard,
+        let reader = Reader {
+            _guard: guard,
             tx,
             handle: self,
             files: Default::default(),
@@ -332,7 +328,7 @@ impl Handle {
         let Some(value) = reader.add(&key)? else {
             return Ok(None);
         };
-        let mut snapshot = reader.begin()?;
+        let snapshot = reader.begin()?;
         Ok(Some(snapshot.with_value(value)))
     }
 
@@ -439,11 +435,11 @@ where
     V: AsRef<Value>,
     S: AsRef<Snapshot>,
 {
-    fn read_at(&self, pos: u64, mut buf: &mut [u8]) -> io::Result<usize> {
+    fn read_at(&self, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
         // TODO: Create a thiserror or io::Error for non-usize pos.
         // let pos = usize::try_from(pos).expect("pos should be usize");
-        Ok(self.view(|mut view| {
-            let mut r = &view;
+        Ok(self.view(|view| {
+            let r = &view;
             r.read_at(pos, buf)
         })??)
     }
@@ -492,7 +488,7 @@ where
 }
 
 pub struct Reader<'handle> {
-    guard: MutexGuard<'handle, Connection>,
+    _guard: MutexGuard<'handle, Connection>,
     tx: Transaction<'handle>,
     handle: &'handle Handle,
     files: HashSet<FileId>,
@@ -525,7 +521,7 @@ impl<'a> Reader<'a> {
         }
     }
 
-    pub fn begin(mut self) -> Result<Snapshot> {
+    pub fn begin(self) -> Result<Snapshot> {
         let mut tempdir = None;
         let mut file_clones: FileCloneCache = Default::default();
         let mut handle_clone_guard = self.handle.clones.lock().unwrap();
@@ -595,12 +591,6 @@ fn file_path(dir: &Path, file_id: impl AsRef<FileId>) -> PathBuf {
     dir.join(file_id.as_ref())
 }
 
-pub struct SingleWriter<'a> {
-    key: Vec<u8>,
-    handle: &'a mut Handle,
-    value_writer: BatchWriter<'a>,
-}
-
 fn random_file_name_in_dir(dir: &Path) -> PathBuf {
     let base = random_file_name();
     dir.join(base)
@@ -620,7 +610,7 @@ fn random_file_name() -> OsString {
 const MANIFEST_DB_FILE_NAME: &str = "manifest.db";
 
 fn valid_file_name(file_name: &str) -> bool {
-    if file_name == MANIFEST_DB_FILE_NAME {
+    if file_name.starts_with(MANIFEST_DB_FILE_NAME) {
         return false;
     }
     if file_name.len() == FILE_NAME_LENGTH {

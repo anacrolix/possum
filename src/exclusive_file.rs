@@ -3,7 +3,6 @@ use crate::FileId;
 use anyhow::Context;
 use log::info;
 use nix::fcntl::FlockArg::LockExclusiveNonblock;
-use std::fs;
 use std::fs::{File, OpenOptions};
 use std::io::Seek;
 use std::io::SeekFrom::End;
@@ -39,7 +38,7 @@ impl ExclusiveFile {
 
     pub(crate) fn new(dir: impl AsRef<Path>) -> anyhow::Result<ExclusiveFile> {
         let mut last_err = None;
-        for i in 0..10000 {
+        for _ in 0..10000 {
             let id = random_file_name().into();
             let file = OpenOptions::new()
                 .create(true)
@@ -52,7 +51,7 @@ impl ExclusiveFile {
             if let Err(err) = nix::fcntl::flock(file.as_raw_fd(), LockExclusiveNonblock) {
                 last_err = Some(err)
             } else {
-                info!("opened with exclusive file id {}", i);
+                info!("opened with exclusive file id {}", id);
                 let end = file.seek(End(0))?;
                 return Ok(ExclusiveFile {
                     inner: file,

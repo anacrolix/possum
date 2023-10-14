@@ -9,7 +9,7 @@ use tempfile::tempdir;
 #[test]
 fn set_get() -> Result<()> {
     let tempdir = tempdir()?;
-    let mut handle = Handle::new_from_dir(tempdir.path().to_owned())?;
+    let handle = Handle::new_from_dir(tempdir.path().to_owned())?;
     let value_bytes = "world".as_bytes();
     let mut writer = handle.new_writer()?;
     let mut value = writer.new_value().begin()?;

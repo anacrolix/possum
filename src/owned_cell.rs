@@ -2,7 +2,6 @@
 
 use super::*;
 use stable_deref_trait::StableDeref;
-use std::mem::transmute;
 use std::ops::Deref;
 
 pub(crate) struct OwnedCell<O, D> {
@@ -29,7 +28,7 @@ where
         let stable_deref: *mut O::Target = owner.deref_mut();
         Ok(Self {
             _owner: owner,
-            dep: make_dependent(unsafe { transmute(stable_deref) })?,
+            dep: make_dependent(unsafe { &mut *stable_deref })?,
         })
     }
 

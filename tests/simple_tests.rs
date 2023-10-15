@@ -89,7 +89,7 @@ fn torrent_storage() -> Result<()> {
     thread_rng().fill_bytes(&mut piece_data);
     let piece_data_hash = {
         let mut hash = Hash::default();
-        hash.write(&*piece_data);
+        hash.write(&piece_data);
         hash.finish()
     };
     dbg!(piece_data_hash);
@@ -161,7 +161,7 @@ fn big_set_get() -> Result<()> {
     thread_rng().fill_bytes(&mut piece_data);
     let piece_data_hash = {
         let mut hash = Hash::default();
-        hash.write(&*piece_data);
+        hash.write(&piece_data);
         hash.finish()
     };
     dbg!(piece_data_hash);

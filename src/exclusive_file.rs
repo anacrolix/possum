@@ -69,12 +69,12 @@ impl ExclusiveFile {
         nix::fcntl::flock(file.as_raw_fd(), LockExclusiveNonblock)?;
         info!("opened with exclusive file id {:?}", id);
         let end = file.seek(End(0))?;
-        return Ok(ExclusiveFile {
+        Ok(ExclusiveFile {
             inner: file,
             id,
             next_write_offset: end,
             last_committed_offset: end,
-        });
+        })
     }
 
     pub(crate) fn committed(&mut self) -> io::Result<()> {

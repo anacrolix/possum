@@ -431,7 +431,7 @@ where
 }
 
 impl Snapshot {
-    pub fn value<V>(self: &mut Self, value: V) -> SnapshotValue<V, &mut Snapshot>
+    pub fn value<V>(&mut self, value: V) -> SnapshotValue<V, &mut Snapshot>
     where
         V: AsRef<Value>,
     {
@@ -441,7 +441,7 @@ impl Snapshot {
         }
     }
 
-    pub fn with_value<V>(self: Self, value: V) -> SnapshotValue<V, Self>
+    pub fn with_value<V>(self, value: V) -> SnapshotValue<V, Self>
     where
         V: AsRef<Value>,
     {
@@ -477,7 +477,7 @@ where
     pub fn view<R>(&self, f: impl FnOnce(&[u8]) -> R) -> io::Result<R> {
         let value = self.value.as_ref();
         let file_id = &value.file_id;
-        let file_clone = self.snapshot.as_ref().file_clones.get(&file_id).unwrap();
+        let file_clone = self.snapshot.as_ref().file_clones.get(file_id).unwrap();
         let start = value
             .file_offset
             .try_into()

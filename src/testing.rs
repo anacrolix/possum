@@ -18,7 +18,7 @@ pub fn write_random_tempfile(len: u64) -> Result<NamedTempFile> {
         let n1 = min(remaining_size, buf.len() as u64).try_into()?;
         let buf1 = &mut buf[..n1];
         rng.fill(buf1);
-        file.write(buf1)?;
+        file.write_all(buf1)?;
         remaining_size -= n1 as u64;
     }
     ensure!(file.as_file().seek(SeekFrom::End(0))? == len);

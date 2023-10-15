@@ -30,16 +30,15 @@ pub fn benchmark_view_fallible(c: &mut Criterion) -> anyhow::Result<()> {
     let tempdir = PathBuf::from("benchmark_get_exists");
     let handle = Handle::new_from_dir(tempdir)?;
     let value_bytes = "world".as_bytes();
-    handle.single_write_from("hello".as_bytes().to_owned(), value_bytes)?;
+    let key = "hello".as_bytes().to_vec();
+    handle.single_write_from(key.clone(), value_bytes)?;
     c.bench_function("view", |b| {
         b.iter(|| {
             (|| -> anyhow::Result<()> {
-                let mut reader = handle.read()?;
-                let value = reader.add("hello".as_bytes())?.expect("key should exist");
-                let mut snapshot = reader.begin()?;
-                snapshot
-                    .value(&value)
-                    .view(|read_value_bytes| assert_eq!(read_value_bytes, value_bytes))?;
+                handle
+                    .read_single(key.clone())?
+                    .expect("key should exist")
+                    .view(|view_bytes| assert_eq!(view_bytes, value_bytes))?;
                 Ok(())
             })()
             .unwrap()

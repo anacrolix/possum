@@ -167,7 +167,7 @@ fn big_set_get() -> Result<()> {
     dbg!(piece_data_hash);
     let completed_key = format!("completed/{:x}", piece_data_hash).into_bytes();
     handle.single_write_from(completed_key.clone(), &*piece_data)?;
-    let mut completed_value = handle
+    let completed_value = handle
         .read_single(completed_key.clone())?
         .expect("completed item should exist");
     dbg!(&completed_value);

@@ -1,7 +1,9 @@
+use crate::clonefile::fclonefile;
 use crate::punchfile::punchfile;
 use anyhow::Result;
 use anyhow::{bail, Context};
 use clonefile::clonefile;
+use exclusive_file::ExclusiveFile;
 use log::debug;
 use memmap2::Mmap;
 use num::Integer;
@@ -31,10 +33,8 @@ pub mod clonefile;
 pub mod punchfile;
 
 mod exclusive_file;
+mod owned_cell;
 pub mod testing;
-
-use crate::clonefile::fclonefile;
-use exclusive_file::ExclusiveFile;
 
 #[derive(Debug)]
 struct FileClone {
@@ -342,9 +342,9 @@ impl Handle {
     }
 
     pub fn read(&self) -> rusqlite::Result<Reader> {
-        let mut guard = self.conn.lock().unwrap();
+        let guard = self.conn.lock().unwrap();
         let reader = Reader {
-            owned_tx: reader_tx::S::try_make(guard, |guard| guard.transaction())?,
+            owned_tx: owned_cell::OwnedCell::try_make(guard, |guard| guard.transaction())?,
             handle: self,
             files: Default::default(),
         };
@@ -452,15 +452,6 @@ impl Snapshot {
     }
 }
 
-pub struct SnapshotWithValue<V, S>
-where
-    V: AsRef<Value>,
-    S: AsRef<Snapshot>,
-{
-    snapshot: Snapshot,
-    value: SnapshotValue<V, S>,
-}
-
 impl<V, S> ReadAt for SnapshotValue<V, S>
 where
     V: AsRef<Value>,
@@ -520,43 +511,8 @@ where
     }
 }
 
-mod reader_tx {
-    use super::*;
-    use std::mem::transmute;
-    use std::ops::Deref;
-    pub(crate) struct S<'s> {
-        guard: MutexGuard<'s, Connection>,
-        tx: Transaction<'s>,
-    }
-
-    impl<'a> S<'a> {
-        pub(crate) fn try_make<E>(
-            mut guard: MutexGuard<'a, Connection>,
-            make_dependent: impl FnOnce(&'a mut Connection) -> Result<Transaction<'a>, E>,
-        ) -> Result<Self, E> {
-            let conn: *mut Connection = guard.deref_mut();
-            Ok(Self {
-                guard,
-                tx: make_dependent(unsafe { transmute(conn) })?,
-            })
-        }
-
-        pub(crate) fn move_dependent<R>(self, f: impl FnOnce(Transaction<'_>) -> R) -> R {
-            f(self.tx)
-        }
-    }
-
-    impl<'a> Deref for S<'a> {
-        type Target = Transaction<'a>;
-
-        fn deref(&self) -> &Self::Target {
-            &self.tx
-        }
-    }
-}
-
 pub struct Reader<'handle> {
-    owned_tx: reader_tx::S<'handle>,
+    owned_tx: owned_cell::OwnedCell<MutexGuard<'handle, Connection>, Transaction<'handle>>,
     handle: &'handle Handle,
     files: HashSet<FileId>,
 }

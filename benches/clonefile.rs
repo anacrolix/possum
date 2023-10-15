@@ -3,11 +3,12 @@ use possum::clonefile::clonefile;
 use std::fs::remove_file;
 
 fn clonefile_benchmark_fallible(c: &mut Criterion) -> anyhow::Result<()> {
-    for size_power in [12, 16, 20, 24, 28] {
+    for size_power in [12, 20, 28] {
         let len = 1 << size_power;
         let file = possum::testing::write_random_tempfile(len)?;
         let dst_path = "hello";
-        c.bench_with_input(
+        let mut group = c.benchmark_group("clonefile");
+        group.bench_with_input(
             BenchmarkId::new("hello", bytesize::ByteSize(len).to_string_as(true)),
             &file,
             |b, file| {

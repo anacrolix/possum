@@ -7,6 +7,8 @@ use std::io::{copy, SeekFrom};
 use tempfile::NamedTempFile;
 use twox_hash::XxHash64;
 
+pub type Hash = XxHash64;
+
 pub fn write_random_tempfile(len: u64) -> Result<NamedTempFile> {
     let mut file = NamedTempFile::new()?;
     let mut rng = rand::thread_rng();
@@ -40,11 +42,12 @@ impl<T: Hasher> Write for HashWriter<T> {
     // }
 }
 
-fn hash_reader(mut r: impl Read) -> Result<u64> {
-    let h = XxHash64::default();
+pub fn hash_reader(mut r: impl Read) -> Result<u64> {
+    let h = Hash::default();
     let mut hw = HashWriter(h);
-    copy(&mut r, &mut hw)?;
-    Ok(h.finish())
+    let n = copy(&mut r, &mut hw)?;
+    dbg!(n);
+    Ok(hw.0.finish())
 }
 
 pub fn compare_reads(a: impl Read, b: impl Read) -> Result<()> {

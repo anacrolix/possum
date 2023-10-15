@@ -343,10 +343,8 @@ impl Handle {
 
     pub fn read(&self) -> rusqlite::Result<Reader> {
         let mut guard = self.conn.lock().unwrap();
-        let tx = unsafe { std::mem::transmute(guard.transaction()?) };
         let reader = Reader {
-            _guard: guard,
-            tx,
+            owned_tx: reader_tx::S::try_make(guard, |guard| guard.transaction())?,
             handle: self,
             files: Default::default(),
         };
@@ -522,16 +520,50 @@ where
     }
 }
 
+mod reader_tx {
+    use super::*;
+    use std::mem::transmute;
+    use std::ops::Deref;
+    pub(crate) struct S<'s> {
+        guard: MutexGuard<'s, Connection>,
+        tx: Transaction<'s>,
+    }
+
+    impl<'a> S<'a> {
+        pub(crate) fn try_make<E>(
+            mut guard: MutexGuard<'a, Connection>,
+            make_dependent: impl FnOnce(&'a mut Connection) -> Result<Transaction<'a>, E>,
+        ) -> Result<Self, E> {
+            let conn: *mut Connection = guard.deref_mut();
+            Ok(Self {
+                guard,
+                tx: make_dependent(unsafe { transmute(conn) })?,
+            })
+        }
+
+        pub(crate) fn move_dependent<R>(self, f: impl FnOnce(Transaction<'_>) -> R) -> R {
+            f(self.tx)
+        }
+    }
+
+    impl<'a> Deref for S<'a> {
+        type Target = Transaction<'a>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.tx
+        }
+    }
+}
+
 pub struct Reader<'handle> {
-    _guard: MutexGuard<'handle, Connection>,
-    tx: Transaction<'handle>,
+    owned_tx: reader_tx::S<'handle>,
     handle: &'handle Handle,
     files: HashSet<FileId>,
 }
 
 impl<'a> Reader<'a> {
     pub fn add(&mut self, key: &[u8]) -> rusqlite::Result<Option<Value>> {
-        let res = self.tx.query_row(
+        let res = self.owned_tx.query_row(
             "update keys \
             set last_used=cast(unixepoch('subsec')*1e3 as integer) \
             where key=? \
@@ -567,7 +599,7 @@ impl<'a> Reader<'a> {
                 Self::get_file_clone(file_id, &mut tempdir, handle_clones, &self.handle.dir)?,
             );
         }
-        self.tx.commit()?;
+        self.owned_tx.move_dependent(|tx| tx.commit())?;
         Ok(Snapshot { file_clones })
     }
 

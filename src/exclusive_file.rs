@@ -9,6 +9,7 @@ use std::io::SeekFrom::End;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug)]
 pub(crate) struct ExclusiveFile {
     pub(crate) inner: File,
     pub(crate) id: FileId,
@@ -76,7 +77,18 @@ impl ExclusiveFile {
         });
     }
 
-    pub(crate) fn committed(&mut self) {
+    pub(crate) fn committed(&mut self) -> io::Result<()> {
         self.last_committed_offset = self.next_write_offset;
+        if false {
+            self.inner.flush()
+        } else {
+            Ok(())
+        }
+    }
+}
+
+impl Drop for ExclusiveFile {
+    fn drop(&mut self) {
+        // dbg!(self);
     }
 }

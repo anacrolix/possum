@@ -23,8 +23,7 @@ use std::ops::DerefMut;
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::{fs, io};
 use tempfile::{tempdir_in, TempDir};
 
@@ -37,14 +36,15 @@ pub mod testing;
 use crate::clonefile::fclonefile;
 use exclusive_file::ExclusiveFile;
 
+#[derive(Debug)]
 struct FileClone {
     file: File,
     #[allow(dead_code)]
-    tempdir: Rc<TempDir>,
+    tempdir: Arc<TempDir>,
     mmap: Option<Mmap>,
 }
 
-type FileCloneCache = HashMap<FileId, Rc<Mutex<FileClone>>>;
+type FileCloneCache = HashMap<FileId, Arc<Mutex<FileClone>>>;
 
 impl FileClone {
     fn get_mmap(&mut self) -> io::Result<&Mmap> {
@@ -96,7 +96,7 @@ impl BeginWriteValue<'_, '_> {
     }
 
     pub fn begin(self) -> Result<ValueWriter> {
-        let exclusive_file = self.batch.handle.get_exclusive_file()?;
+        let exclusive_file = self.batch.get_exclusive_file()?;
         Ok(ValueWriter {
             value_file_offset: exclusive_file.next_write_offset,
             value_length: 0,
@@ -105,6 +105,7 @@ impl BeginWriteValue<'_, '_> {
     }
 }
 
+#[derive(Debug)]
 pub struct ValueWriter {
     exclusive_file: ExclusiveFile,
     value_file_offset: u64,
@@ -133,6 +134,7 @@ impl ValueWriter {
 impl Write for ValueWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let n = self.exclusive_file.inner.write(buf)?;
+        self.exclusive_file.next_write_offset += n as u64;
         self.value_length += n as u64;
         Ok(n)
     }
@@ -150,7 +152,13 @@ pub struct BatchWriter<'a> {
 }
 
 impl<'handle> BatchWriter<'handle> {
-    // TODO: Rename read_from.
+    fn get_exclusive_file(&mut self) -> Result<ExclusiveFile> {
+        if let Some(ef) = self.exclusive_files.pop() {
+            return Ok(ef);
+        }
+        self.handle.get_exclusive_file()
+    }
+
     pub fn stage_write(&mut self, key: Vec<u8>, value: ValueWriter) -> anyhow::Result<()> {
         self.pending_writes.push(PendingWrite {
             key,
@@ -158,6 +166,7 @@ impl<'handle> BatchWriter<'handle> {
             value_length: value.value_length,
             value_file_id: value.exclusive_file.id.clone(),
         });
+        self.exclusive_files.push(value.exclusive_file);
         Ok(())
     }
 
@@ -165,13 +174,13 @@ impl<'handle> BatchWriter<'handle> {
         BeginWriteValue { batch: self }
     }
 
-    pub fn commit(self) -> Result<()> {
+    pub fn commit(mut self) -> Result<()> {
         let mut tx_guard = self.handle.conn.lock().unwrap();
         let mut transaction = tx_guard
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .context("begin immediate")?;
         let mut altered_files = HashSet::new();
-        for pw in self.pending_writes {
+        for pw in self.pending_writes.drain(..) {
             let existing = transaction.query_row(
                 "delete from keys where key=? returning file_id, file_offset, value_length",
                 [&pw.key],
@@ -220,16 +229,38 @@ impl<'handle> BatchWriter<'handle> {
         transaction.commit().context("commit transaction")?;
         {
             let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
-            for mut ef in self.exclusive_files {
-                ef.committed();
+            // dbg!(
+            //     "adding {} exclusive files to handle",
+            //     self.exclusive_files.len()
+            // );
+            for mut ef in self.exclusive_files.drain(..) {
+                ef.committed().unwrap();
                 assert!(handle_exclusive_files.insert(ef.id.clone(), ef).is_none());
             }
+            // dbg!(
+            //     "handle has {} exclusive files",
+            //     handle_exclusive_files.len()
+            // );
         }
         // Forget any references to clones of files that have changed.
         for file_id in altered_files {
             self.handle.clones.lock().unwrap().remove(&file_id);
         }
         Ok(())
+    }
+}
+
+impl Drop for BatchWriter<'_> {
+    fn drop(&mut self) {
+        // dbg!(
+        //     "adding exclusive files to handle",
+        //     self.exclusive_files.len()
+        // );
+        let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
+        for ef in self.exclusive_files.drain(..) {
+            assert!(handle_exclusive_files.insert(ef.id.clone(), ef).is_none());
+        }
+        // dbg!("handle exclusive files", handle_exclusive_files.len());
     }
 }
 
@@ -322,7 +353,7 @@ impl Handle {
         Ok(reader)
     }
 
-    pub fn read_single(&mut self, key: Vec<u8>) -> Result<Option<SnapshotValue<Value, Snapshot>>> {
+    pub fn read_single(&self, key: Vec<u8>) -> Result<Option<SnapshotValue<Value, Snapshot>>> {
         let mut reader = self.read()?;
         let Some(value) = reader.add(&key)? else {
             return Ok(None);
@@ -331,7 +362,7 @@ impl Handle {
         Ok(Some(snapshot.with_value(value)))
     }
 
-    pub fn single_write_from(&mut self, key: Vec<u8>, r: impl Read) -> Result<u64> {
+    pub fn single_write_from(&self, key: Vec<u8>, r: impl Read) -> Result<u64> {
         let mut writer = self.new_writer()?;
         let mut value = writer.new_value().begin()?;
         let n = value.copy_from(r)?;
@@ -350,6 +381,7 @@ impl Handle {
     }
 }
 
+#[derive(Debug)]
 pub struct Value {
     file_id: FileId,
     file_offset: u64,
@@ -380,8 +412,9 @@ impl Value {
     }
 }
 
+#[derive(Debug)]
 pub struct Snapshot {
-    file_clones: HashMap<FileId, Rc<Mutex<FileClone>>>,
+    file_clones: HashMap<FileId, Arc<Mutex<FileClone>>>,
 }
 
 pub trait ReadSnapshot {
@@ -389,6 +422,7 @@ pub trait ReadSnapshot {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize>;
 }
 
+#[derive(Debug)]
 pub struct SnapshotValue<V, S>
 where
     V: AsRef<Value>,
@@ -437,10 +471,12 @@ where
     fn read_at(&self, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
         // TODO: Create a thiserror or io::Error for non-usize pos.
         // let pos = usize::try_from(pos).expect("pos should be usize");
-        Ok(self.view(|view| {
-            let r = &view;
+        let n = self.view(|view| {
+            let r = view;
             r.read_at(pos, buf)
-        })??)
+        })??;
+        // dbg!(buf.split_at(n).0);
+        Ok(n)
     }
 }
 
@@ -463,7 +499,7 @@ where
         Ok(f(&mmap[start..end]))
     }
 
-    pub fn read(&mut self, mut buf: &mut [u8]) -> Result<usize> {
+    pub fn read(&self, mut buf: &mut [u8]) -> Result<usize> {
         let value = self.value.as_ref();
         buf = buf
             .split_at_mut(min(buf.len() as u64, value.length) as usize)
@@ -537,17 +573,17 @@ impl<'a> Reader<'a> {
 
     fn get_file_clone(
         file_id: FileId,
-        tempdir: &mut Option<Rc<TempDir>>,
+        tempdir: &mut Option<Arc<TempDir>>,
         cache: &mut FileCloneCache,
         src_dir: &Path,
-    ) -> Result<Rc<Mutex<FileClone>>> {
+    ) -> Result<Arc<Mutex<FileClone>>> {
         if let Some(ret) = cache.get(&file_id) {
             return Ok(ret.clone());
         }
-        let tempdir: &Rc<TempDir> = match tempdir {
+        let tempdir: &Arc<TempDir> = match tempdir {
             Some(tempdir) => tempdir,
             None => {
-                let new = Rc::new(tempdir_in(src_dir)?);
+                let new = Arc::new(tempdir_in(src_dir)?);
                 *tempdir = Some(new);
                 tempdir.as_ref().unwrap()
             }
@@ -557,7 +593,7 @@ impl<'a> Reader<'a> {
             &file_path(src_dir, &file_id),
             &file_path(tempdir_path, &file_id),
         )?;
-        let file_clone = Rc::new(Mutex::new(FileClone {
+        let file_clone = Arc::new(Mutex::new(FileClone {
             file: open_file_id(OpenOptions::new().read(true), tempdir_path, &file_id)?,
             tempdir: tempdir.clone(),
             mmap: None,

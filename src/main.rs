@@ -48,7 +48,7 @@ fn main() -> anyhow::Result<()> {
         }
         Database { dir, command } => {
             info!("sqlite version: {}", rusqlite::version());
-            let handle = Handle::new_from_dir(dir)?;
+            let handle = Handle::new(dir)?;
             match command {
                 DatabaseCommands::WriteFile { file } => {
                     let key = Path::new(&file)

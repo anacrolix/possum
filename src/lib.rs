@@ -2,6 +2,7 @@ use crate::clonefile::fclonefile;
 use crate::punchfile::punchfile;
 use anyhow::Result;
 use anyhow::{bail, Context};
+use chrono::NaiveDateTime;
 use clonefile::clonefile;
 use exclusive_file::ExclusiveFile;
 use log::debug;
@@ -9,9 +10,8 @@ use memmap2::Mmap;
 use num::Integer;
 use positioned_io::ReadAt;
 use rand::Rng;
-use rusqlite::types::FromSqlError::InvalidType;
 use rusqlite::types::ValueRef::{Null, Real};
-use rusqlite::types::{FromSql, FromSqlResult, ToSqlOutput, ValueRef};
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{params, Connection, ToSql, Transaction};
 use std::cmp::min;
@@ -21,11 +21,12 @@ use std::fmt::{Debug, Display, Formatter};
 use std::fs::{read_dir, File, OpenOptions};
 use std::io::SeekFrom::{End, Start};
 use std::io::{ErrorKind, Read, Seek, Write};
-use std::ops::DerefMut;
+use std::ops::{Deref, DerefMut};
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 use std::{fs, io};
 use tempfile::{tempdir_in, TempDir};
 
@@ -151,6 +152,48 @@ pub struct BatchWriter<'a> {
     pending_writes: Vec<PendingWrite>,
 }
 
+pub type TimestampInner = NaiveDateTime;
+
+#[derive(Debug, PartialEq, Copy, Clone, PartialOrd)]
+pub struct Timestamp(TimestampInner);
+
+impl FromSql for Timestamp {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        let int_time = value.as_i64()?;
+        Ok(Self(
+            TimestampInner::from_timestamp_millis(int_time)
+                .ok_or(FromSqlError::OutOfRange(int_time))?,
+        ))
+    }
+}
+
+pub const LAST_USED_RESOLUTION: Duration = Duration::from_millis(1);
+
+impl Deref for Timestamp {
+    type Target = TimestampInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+pub struct WriteCommitResult {
+    // If the current time for sqlite3 doesn't change during a transaction, this might be obtainable
+    // from the sqlite3 VFS and so not require any insertions to occur.
+    last_used: Option<Timestamp>,
+    count: usize,
+}
+
+impl WriteCommitResult {
+    pub fn last_used(&self) -> Option<Timestamp> {
+        self.last_used
+    }
+
+    pub fn count(&self) -> usize {
+        self.count
+    }
+}
+
 impl<'handle> BatchWriter<'handle> {
     fn get_exclusive_file(&mut self) -> Result<ExclusiveFile> {
         if let Some(ef) = self.exclusive_files.pop() {
@@ -174,12 +217,16 @@ impl<'handle> BatchWriter<'handle> {
         BeginWriteValue { batch: self }
     }
 
-    pub fn commit(mut self) -> Result<()> {
+    pub fn commit(mut self) -> Result<WriteCommitResult> {
         let mut tx_guard = self.handle.conn.lock().unwrap();
         let mut transaction = tx_guard
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .context("begin immediate")?;
         let mut altered_files = HashSet::new();
+        let mut write_commit_res = WriteCommitResult {
+            last_used: None,
+            count: 0,
+        };
         for pw in self.pending_writes.drain(..) {
             let existing = transaction.query_row(
                 "delete from keys where key=? returning file_id, file_offset, value_length",
@@ -212,19 +259,28 @@ impl<'handle> BatchWriter<'handle> {
                 Err(QueryReturnedNoRows) => (),
                 Err(err) => return Err(err.into()),
             }
-            transaction.execute(
+            let last_used = transaction.query_row(
                 "insert into keys (key, file_id, file_offset, value_length)\
-                values (?, ?, ?, ?)",
+                values (?, ?, ?, ?)\
+                returning last_used",
                 rusqlite::params!(
                     pw.key,
                     pw.value_file_id.as_str(),
                     pw.value_file_offset,
                     pw.value_length
                 ),
+                |row| row.get(0),
             )?;
+            // last_used should not change between sqlite3_step. I'm assuming for now this means all
+            // keys committed will have the same last_used.
+            assert_eq!(
+                write_commit_res.last_used.get_or_insert(last_used),
+                &last_used
+            );
             if pw.value_length != 0 {
                 altered_files.insert(pw.value_file_id);
             }
+            write_commit_res.count += 1;
         }
         transaction.commit().context("commit transaction")?;
         {
@@ -246,7 +302,7 @@ impl<'handle> BatchWriter<'handle> {
         for file_id in altered_files {
             self.handle.clones.lock().unwrap().remove(&file_id);
         }
-        Ok(())
+        Ok(write_commit_res)
     }
 }
 
@@ -302,7 +358,7 @@ impl Handle {
         Ok(None)
     }
 
-    pub fn new_from_dir(dir: PathBuf) -> Result<Self> {
+    pub fn new(dir: PathBuf) -> Result<Self> {
         fs::create_dir_all(&dir)?;
         let sqlite_version = rusqlite::version_number();
         if sqlite_version < 3042000 {
@@ -360,13 +416,13 @@ impl Handle {
         Ok(Some(snapshot.with_value(value)))
     }
 
-    pub fn single_write_from(&self, key: Vec<u8>, r: impl Read) -> Result<u64> {
+    pub fn single_write_from(&self, key: Vec<u8>, r: impl Read) -> Result<(u64, Timestamp)> {
         let mut writer = self.new_writer()?;
         let mut value = writer.new_value().begin()?;
         let n = value.copy_from(r)?;
         writer.stage_write(key, value)?;
-        writer.commit()?;
-        Ok(n)
+        let commit = writer.commit()?;
+        Ok((n, commit.last_used().unwrap()))
     }
 
     pub fn clone_from_fd(&mut self, key: Vec<u8>, fd: RawFd) -> Result<u64> {
@@ -384,6 +440,7 @@ pub struct Value {
     file_id: FileId,
     file_offset: u64,
     length: u64,
+    last_used: Timestamp,
 }
 
 impl AsRef<Value> for Value {
@@ -408,6 +465,10 @@ impl Value {
     pub fn length(&self) -> u64 {
         self.length
     }
+
+    pub fn last_used(&self) -> &Timestamp {
+        &self.last_used
+    }
 }
 
 #[derive(Debug)]
@@ -421,13 +482,17 @@ pub trait ReadSnapshot {
 }
 
 #[derive(Debug)]
-pub struct SnapshotValue<V, S>
-where
-    V: AsRef<Value>,
-    S: AsRef<Snapshot>,
-{
+pub struct SnapshotValue<V, S> {
     value: V,
     snapshot: S,
+}
+
+impl<V, S> Deref for SnapshotValue<V, S> {
+    type Target = V;
+
+    fn deref(&self) -> &Self::Target {
+        &self.value
+    }
 }
 
 impl Snapshot {
@@ -523,20 +588,21 @@ impl<'a> Reader<'a> {
             "update keys \
             set last_used=cast(unixepoch('subsec')*1e3 as integer) \
             where key=? \
-            returning file_id, file_offset, value_length",
+            returning file_id, file_offset, value_length, last_used",
             [key],
             |row| {
                 let file_id: FileId = row.get(0)?;
-                Ok((file_id, row.get(1)?, row.get(2)?))
+                Ok((file_id, row.get(1)?, row.get(2)?, row.get(3)?))
             },
         );
         match res {
-            Ok((file_id, file_offset, value_length)) => {
+            Ok((file_id, file_offset, value_length, last_used)) => {
                 self.files.insert(file_id.clone());
                 Ok(Some(Value {
                     file_id,
                     file_offset,
                     length: value_length,
+                    last_used,
                 }))
             }
             Err(QueryReturnedNoRows) => Ok(None),
@@ -555,7 +621,7 @@ impl<'a> Reader<'a> {
                 Self::get_file_clone(file_id, &mut tempdir, handle_clones, &self.handle.dir)?,
             );
         }
-        self.owned_tx.move_dependent(|tx| tx.commit())?;
+        self.owned_tx.move_dependent(|tx| tx.rollback())?;
         Ok(Snapshot { file_clones })
     }
 
@@ -697,7 +763,7 @@ impl ToSql for FileId {
 impl FromSql for FileId {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
         Ok(match value {
-            Null | Real(..) => Err(InvalidType),
+            Null | Real(..) => Err(FromSqlError::InvalidType),
             ValueRef::Text(text) => Ok(text.to_owned()),
             ValueRef::Blob(blob) => Ok(blob.to_owned()),
             ValueRef::Integer(int) => Ok(int.to_string().into_bytes()),

@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context, Result};
-use possum::testing::{compare_reads, hash_reader, write_random_tempfile, Hash};
-use possum::Handle;
+use possum::testing::*;
+use possum::*;
+use rand::distributions::uniform::{UniformDuration, UniformSampler};
 use rand::{thread_rng, RngCore};
 use std::hash::Hasher;
 use std::io::Read;
@@ -8,12 +9,14 @@ use std::io::SeekFrom::Start;
 use std::io::{Seek, Write};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
+use std::thread::sleep;
+use std::time::Duration;
 use tempfile::tempdir;
 
 #[test]
 fn set_get() -> Result<()> {
     let tempdir = tempdir()?;
-    let handle = Handle::new_from_dir(tempdir.path().to_owned())?;
+    let handle = Handle::new(tempdir.path().to_owned())?;
     let value_bytes = "world".as_bytes();
     let mut writer = handle.new_writer()?;
     let mut value = writer.new_value().begin()?;
@@ -35,7 +38,7 @@ fn set_get() -> Result<()> {
 #[test]
 fn set_get_reader() -> Result<()> {
     let tempdir = tempdir()?;
-    let handle = Handle::new_from_dir(tempdir.path().to_owned())?;
+    let handle = Handle::new(tempdir.path().to_owned())?;
     let mut value_bytes = vec![0; 1 << 16];
     thread_rng().fill_bytes(&mut value_bytes);
     let mut value_bytes_reader: &[u8] = &value_bytes;
@@ -64,7 +67,7 @@ fn set_get_reader() -> Result<()> {
 #[test]
 fn clone_in_file() -> Result<()> {
     let tempdir = tempdir()?;
-    let mut handle = Handle::new_from_dir(tempdir.path().to_owned())?;
+    let mut handle = Handle::new(tempdir.path().to_owned())?;
     let mut file = write_random_tempfile(42069)?;
     let key = "hi\x00elon".as_bytes();
     handle.clone_from_fd(key.to_owned(), file.as_raw_fd())?;
@@ -83,7 +86,7 @@ fn clone_in_file() -> Result<()> {
 fn torrent_storage() -> Result<()> {
     let tempdir = PathBuf::from("torrent_storage");
     dbg!(&tempdir);
-    let handle = Handle::new_from_dir(tempdir)?;
+    let handle = Handle::new(tempdir)?;
     let piece_size = 2 << 20;
     let mut piece_data = vec![0; piece_size];
     thread_rng().fill_bytes(&mut piece_data);
@@ -155,7 +158,7 @@ fn torrent_storage() -> Result<()> {
 fn big_set_get() -> Result<()> {
     let tempdir = PathBuf::from("torrent_storage");
     dbg!(&tempdir);
-    let handle = Handle::new_from_dir(tempdir)?;
+    let handle = Handle::new(tempdir)?;
     let piece_size = 2 << 20;
     let mut piece_data = vec![0; piece_size];
     thread_rng().fill_bytes(&mut piece_data);
@@ -196,5 +199,25 @@ fn big_set_get() -> Result<()> {
     let completed_reader = completed_value.new_reader();
     let completed_hash = hash_reader(completed_reader)?;
     assert_eq!(completed_hash, piece_data_hash);
+    Ok(())
+}
+
+#[test]
+fn reads_update_last_used() -> Result<()> {
+    let handle = Handle::new(tempdir()?.into_path())?;
+    let key = Vec::from("hello");
+    let value = "mundo".as_bytes();
+    let (n, write_ts) = handle.single_write_from(key.clone(), value)?;
+    assert_eq!(n, 5);
+    let read_ts = *handle.read_single(key.clone())?.unwrap().last_used();
+    assert!(read_ts >= write_ts);
+    let mut rng = thread_rng();
+    let uniform = UniformDuration::new(Duration::from_nanos(0), LAST_USED_RESOLUTION);
+    for _ in 0..100 {
+        let dither = uniform.sample(&mut rng);
+        sleep(LAST_USED_RESOLUTION + dither);
+        let new_read_ts = *handle.read_single(key.clone())?.unwrap().last_used();
+        assert!(new_read_ts > read_ts);
+    }
     Ok(())
 }

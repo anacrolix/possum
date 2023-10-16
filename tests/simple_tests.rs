@@ -3,13 +3,17 @@ use possum::testing::*;
 use possum::*;
 use rand::distributions::uniform::{UniformDuration, UniformSampler};
 use rand::{thread_rng, RngCore};
+use std::error::Error;
+use std::fmt::{Debug, Display};
 use std::hash::Hasher;
 use std::io::Read;
 use std::io::SeekFrom::Start;
 use std::io::{Seek, Write};
+use std::ops::Range;
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
-use std::thread::sleep;
+use std::str::FromStr;
+use std::thread::{scope, sleep};
 use std::time::Duration;
 use tempfile::tempdir;
 
@@ -218,6 +222,61 @@ fn reads_update_last_used() -> Result<()> {
         sleep(LAST_USED_RESOLUTION + dither);
         let new_read_ts = *handle.read_single(key.clone())?.unwrap().last_used();
         assert!(new_read_ts > read_ts);
+    }
+    Ok(())
+}
+
+#[test]
+fn read_and_writes_different_handles() -> Result<()> {
+    let range = 0..100;
+    let tempdir = tempdir()?;
+    let key = "incr".as_bytes();
+    Ok(scope(|scope| {
+        // let writer = scope.spawn(|| {
+        //     let handle = Handle::new(dir)?;
+        // });
+        let dir = tempdir.path().to_owned();
+        let reader = scope.spawn(|| read_consecutive_integers(dir, key, &range));
+        let range = range.clone();
+        let writer = scope.spawn(|| write_consecutive_integers(tempdir.into_path(), key, range));
+        reader.join().unwrap()?;
+        writer.join().unwrap()?;
+        anyhow::Ok(())
+    })?)
+}
+
+fn write_consecutive_integers<I, R>(dir: PathBuf, key: &[u8], values: R) -> Result<()>
+where
+    I: Display,
+    R: Iterator<Item = I>,
+{
+    let handle = Handle::new(dir)?;
+    for i in values {
+        handle.single_write_from(key.to_owned(), i.to_string().as_bytes())?;
+    }
+    Ok(())
+}
+
+fn read_consecutive_integers<I>(dir: PathBuf, key: &[u8], range: &Range<I>) -> Result<()>
+where
+    I: FromStr + Debug + PartialOrd,
+    <I as FromStr>::Err: Error + Send + Sync + 'static,
+{
+    let handle = Handle::new(dir)?;
+    let mut last_i = None;
+    loop {
+        let Some(value) = handle.read_single(key.to_owned())? else {
+            continue;
+        };
+        let mut s = String::new();
+        value.new_reader().read_to_string(&mut s)?;
+        let i: I = s.parse()?;
+        dbg!(&i);
+        assert!(Some(&i) >= last_i.as_ref());
+        if i >= range.end {
+            break;
+        }
+        last_i = Some(i);
     }
     Ok(())
 }

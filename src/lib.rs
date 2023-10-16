@@ -16,11 +16,13 @@ use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{params, Connection, ToSql, Transaction};
 use std::cmp::min;
 use std::collections::{HashMap, HashSet};
+use std::error::Error;
 use std::ffi::OsString;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::{read_dir, File, OpenOptions};
 use std::io::SeekFrom::{End, Start};
 use std::io::{ErrorKind, Read, Seek, Write};
+use std::num::TryFromIntError;
 use std::ops::{Deref, DerefMut};
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
@@ -29,6 +31,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use std::{fs, io};
 use tempfile::{tempdir_in, TempDir};
+use ErrorKind::InvalidInput;
 
 pub mod clonefile;
 pub mod punchfile;
@@ -476,11 +479,6 @@ pub struct Snapshot {
     file_clones: HashMap<FileId, Arc<Mutex<FileClone>>>,
 }
 
-pub trait ReadSnapshot {
-    fn view(&mut self, f: impl FnOnce(&[u8])) -> Result<()>;
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize>;
-}
-
 #[derive(Debug)]
 pub struct SnapshotValue<V, S> {
     value: V,
@@ -543,11 +541,9 @@ where
         let value = self.value.as_ref();
         let file_id = &value.file_id;
         let file_clone = self.snapshot.as_ref().file_clones.get(file_id).unwrap();
-        let start = value
-            .file_offset
-            .try_into()
-            .expect("file offset should be usize");
-        let end = start + usize::try_from(value.length).expect("length should be usize");
+        let start = to_usize_io(value.file_offset)?;
+        let usize_length = to_usize_io(value.length)?;
+        let end = usize::checked_add(start, usize_length).ok_or_else(make_to_usize_io_error)?;
         let mut mutex_guard = file_clone.lock().unwrap();
         let mmap = mutex_guard.get_mmap()?;
         Ok(f(&mmap[start..end]))
@@ -840,4 +836,57 @@ fn query_last_end_offset(
             Err(err)
         }
     })
+}
+
+fn to_usize_io<F>(from: F) -> io::Result<usize>
+where
+    usize: TryFrom<F, Error = TryFromIntError>,
+{
+    convert_int_io(from)
+}
+
+fn convert_int_io<F, T>(from: F) -> io::Result<T>
+where
+    T: TryFrom<F, Error = TryFromIntError>,
+{
+    from.try_into()
+        .map_err(|_: TryFromIntError| make_to_usize_io_error())
+}
+
+fn make_to_usize_io_error() -> io::Error {
+    io::Error::new(TO_USIZE_IO_ERROR_KIND, TO_USIZE_IO_ERR_PAYLOAD)
+}
+
+const TO_USIZE_IO_ERROR_KIND: ErrorKind = InvalidInput;
+const TO_USIZE_IO_ERR_PAYLOAD: &str = "can't convert to usize";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_to_usize_io() -> Result<()> {
+        // Check u32 MAX converts to u32 (usize on 32 bit system) without error.
+        assert_eq!(convert_int_io::<_, u32>(u32::MAX as u64)?, u32::MAX);
+        // Check that u64 out of u32 bounds fails.
+        if let Err(err) = convert_int_io::<_, u32>(u32::MAX as u64 + 1) {
+            assert_eq!(err.kind(), TO_USIZE_IO_ERROR_KIND);
+            // Check that TryFromIntError isn't leaked.
+            assert!(err
+                .get_ref()
+                .unwrap()
+                .downcast_ref::<TryFromIntError>()
+                .is_none());
+            assert_eq!(err.get_ref().unwrap().to_string(), TO_USIZE_IO_ERR_PAYLOAD);
+        } else {
+            panic!("expected failure")
+        }
+        // This checks that usize always converts to u64 (hope you don't have a 128 bit system). We
+        // can't test u32 to u64 because it's infallible convert_int_io expects TryFromIntError.
+        assert_eq!(
+            convert_int_io::<_, u64>(u32::MAX as usize)?,
+            u32::MAX as u64
+        );
+        Ok(())
+    }
 }

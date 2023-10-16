@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use log::debug;
 use possum::testing::*;
 use possum::*;
 use rand::distributions::uniform::{UniformDuration, UniformSampler};
@@ -9,12 +10,13 @@ use std::hash::Hasher;
 use std::io::Read;
 use std::io::SeekFrom::Start;
 use std::io::{Seek, Write};
-use std::ops::Range;
+use std::ops::Bound::Included;
+use std::ops::{Range, RangeBounds, RangeInclusive};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::thread::{scope, sleep};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tempfile::tempdir;
 
 #[test]
@@ -228,41 +230,47 @@ fn reads_update_last_used() -> Result<()> {
 
 #[test]
 fn read_and_writes_different_handles() -> Result<()> {
-    let range = 0..100;
-    let tempdir = tempdir()?;
+    let range = 0..=10;
+    // let tempdir = tempdir()?;
+    // let dir = tempdir.path().to_owned();
+    let dir = PathBuf::from("herp");
     let key = "incr".as_bytes();
     Ok(scope(|scope| {
-        // let writer = scope.spawn(|| {
-        //     let handle = Handle::new(dir)?;
-        // });
-        let dir = tempdir.path().to_owned();
-        let reader = scope.spawn(|| read_consecutive_integers(dir, key, &range));
+        let reader = scope.spawn(|| read_consecutive_integers(dir.clone(), key, &range));
         let range = range.clone();
-        let writer = scope.spawn(|| write_consecutive_integers(tempdir.into_path(), key, range));
+        let writer = scope.spawn(|| write_consecutive_integers(dir.clone(), key, range));
         reader.join().unwrap()?;
         writer.join().unwrap()?;
         anyhow::Ok(())
     })?)
 }
 
+const RACE_SLEEP_DURATION: Duration = Duration::from_millis(1);
+
 fn write_consecutive_integers<I, R>(dir: PathBuf, key: &[u8], values: R) -> Result<()>
 where
-    I: Display,
+    I: Display + Debug,
     R: Iterator<Item = I>,
 {
     let handle = Handle::new(dir)?;
     for i in values {
+        println!("writing {}", i);
         handle.single_write_from(key.to_owned(), i.to_string().as_bytes())?;
+        sleep(RACE_SLEEP_DURATION);
     }
     Ok(())
 }
 
-fn read_consecutive_integers<I>(dir: PathBuf, key: &[u8], range: &Range<I>) -> Result<()>
+fn read_consecutive_integers<I>(dir: PathBuf, key: &[u8], range: &RangeInclusive<I>) -> Result<()>
 where
-    I: FromStr + Debug + PartialOrd,
+    I: FromStr + Debug + PartialOrd + Display,
     <I as FromStr>::Err: Error + Send + Sync + 'static,
 {
     let handle = Handle::new(dir)?;
+    let Included(end_i) = range.end_bound() else {
+        panic!("expected inclusive range: {:?}", range);
+    };
+    sleep(RACE_SLEEP_DURATION);
     let mut last_i = None;
     loop {
         let Some(value) = handle.read_single(key.to_owned())? else {
@@ -271,12 +279,17 @@ where
         let mut s = String::new();
         value.new_reader().read_to_string(&mut s)?;
         let i: I = s.parse()?;
-        dbg!(&i);
+        println!("read {}", &i);
         assert!(Some(&i) >= last_i.as_ref());
-        if i >= range.end {
+        if &i >= end_i {
             break;
         }
-        last_i = Some(i);
+        let new_i = Some(i);
+        if last_i == new_i {
+            sleep(RACE_SLEEP_DURATION);
+        } else {
+            last_i = new_i;
+        }
     }
     Ok(())
 }

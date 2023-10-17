@@ -48,3 +48,9 @@ how to do a singleflight fetch for a missing item:
 
 advantages:
 	* you can bring your own files to the cache in their entirety and then have them punched out by the implementation as they decay in usefulness.
+
+On Windows, file cloning appears to be possible with https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ni-winioctl-fsctl_duplicate_extents_to_file. The destination file is opened, then the regions of the source file are specified and the clone occurs. It might not be available on NTFS.
+
+For filesystems where cloning is not supported, it should be possible to "fall back" to synchronously reading while a transaction is open, or providing an API to copy out or lock values more efficiently than is usually available.
+
+Here's a list of support https://www.ctrl.blog/entry/file-cloning.html.

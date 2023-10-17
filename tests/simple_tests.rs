@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Context, Result};
-use log::debug;
 use possum::testing::*;
 use possum::*;
 use rand::distributions::uniform::{UniformDuration, UniformSampler};
@@ -11,12 +10,12 @@ use std::io::Read;
 use std::io::SeekFrom::Start;
 use std::io::{Seek, Write};
 use std::ops::Bound::Included;
-use std::ops::{Range, RangeBounds, RangeInclusive};
+use std::ops::{RangeBounds, RangeInclusive};
 use std::os::fd::AsRawFd;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::thread::{scope, sleep};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tempfile::tempdir;
 
 #[test]
@@ -235,14 +234,14 @@ fn read_and_writes_different_handles() -> Result<()> {
     // let dir = tempdir.path().to_owned();
     let dir = PathBuf::from("herp");
     let key = "incr".as_bytes();
-    Ok(scope(|scope| {
+    scope(|scope| {
         let reader = scope.spawn(|| read_consecutive_integers(dir.clone(), key, &range));
         let range = range.clone();
         let writer = scope.spawn(|| write_consecutive_integers(dir.clone(), key, range));
         reader.join().unwrap()?;
         writer.join().unwrap()?;
         anyhow::Ok(())
-    })?)
+    })
 }
 
 const RACE_SLEEP_DURATION: Duration = Duration::from_millis(1);

@@ -14,9 +14,8 @@ use rusqlite::types::ValueRef::{Null, Real};
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{params, Connection, ToSql, Transaction};
-use std::cmp::min;
-use std::collections::{HashMap, HashSet};
-use std::error::Error;
+use std::cmp::{max, min};
+use std::collections::{hash_map, HashMap, HashSet};
 use std::ffi::OsString;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::{read_dir, File, OpenOptions};
@@ -43,9 +42,11 @@ pub mod testing;
 #[derive(Debug)]
 struct FileClone {
     file: File,
-    #[allow(dead_code)]
+    /// This exists to destroy clone tempdirs after they become empty.
+    #[allow(unused)]
     tempdir: Arc<TempDir>,
     mmap: Option<Mmap>,
+    len: u64,
 }
 
 type FileCloneCache = HashMap<FileId, Arc<Mutex<FileClone>>>;
@@ -327,9 +328,6 @@ pub struct Handle {
     conn: Mutex<Connection>,
     exclusive_files: Mutex<HashMap<FileId, ExclusiveFile>>,
     dir: PathBuf,
-    // Cache clones until we know the original files have changed. This means new snapshots can
-    // reuse clones. TODO: If other processes modify the database, our clones will
-    // be out of date, so there needs to be another check involved.
     clones: Mutex<FileCloneCache>,
 }
 
@@ -575,7 +573,7 @@ where
 pub struct Reader<'handle> {
     owned_tx: owned_cell::OwnedCell<MutexGuard<'handle, Connection>, Transaction<'handle>>,
     handle: &'handle Handle,
-    files: HashSet<FileId>,
+    files: HashMap<FileId, u64>,
 }
 
 impl<'a> Reader<'a> {
@@ -593,7 +591,18 @@ impl<'a> Reader<'a> {
         );
         match res {
             Ok((file_id, file_offset, value_length, last_used)) => {
-                self.files.insert(file_id.clone());
+                let file = self.files.entry(file_id.clone());
+                let value_end = file_offset + value_length;
+                use hash_map::Entry::*;
+                match file {
+                    Occupied(mut entry) => {
+                        let value = entry.get_mut();
+                        *value = max(*value, value_end);
+                    }
+                    Vacant(entry) => {
+                        entry.insert(value_end);
+                    }
+                };
                 Ok(Some(Value {
                     file_id,
                     file_offset,
@@ -611,13 +620,19 @@ impl<'a> Reader<'a> {
         let mut file_clones: FileCloneCache = Default::default();
         let mut handle_clone_guard = self.handle.clones.lock().unwrap();
         let handle_clones = handle_clone_guard.deref_mut();
-        for file_id in self.files {
+        for (file_id, min_len) in self.files {
             file_clones.insert(
                 file_id.clone(),
-                Self::get_file_clone(file_id, &mut tempdir, handle_clones, &self.handle.dir)?,
+                Self::get_file_clone(
+                    file_id,
+                    &mut tempdir,
+                    handle_clones,
+                    &self.handle.dir,
+                    min_len,
+                )?,
             );
         }
-        self.owned_tx.move_dependent(|tx| tx.rollback())?;
+        self.owned_tx.move_dependent(|tx| tx.commit())?;
         Ok(Snapshot { file_clones })
     }
 
@@ -626,9 +641,13 @@ impl<'a> Reader<'a> {
         tempdir: &mut Option<Arc<TempDir>>,
         cache: &mut FileCloneCache,
         src_dir: &Path,
+        min_len: u64,
     ) -> Result<Arc<Mutex<FileClone>>> {
         if let Some(ret) = cache.get(&file_id) {
-            return Ok(ret.clone());
+            let file_clone_guard = ret.lock().unwrap();
+            if file_clone_guard.len >= min_len {
+                return Ok(ret.clone());
+            }
         }
         let tempdir: &Arc<TempDir> = match tempdir {
             Some(tempdir) => tempdir,
@@ -643,12 +662,15 @@ impl<'a> Reader<'a> {
             &file_path(src_dir, &file_id),
             &file_path(tempdir_path, &file_id),
         )?;
+        let mut file = open_file_id(OpenOptions::new().read(true), tempdir_path, &file_id)?;
+        let len = file.seek(End(0))?;
         let file_clone = Arc::new(Mutex::new(FileClone {
-            file: open_file_id(OpenOptions::new().read(true), tempdir_path, &file_id)?,
+            file,
             tempdir: tempdir.clone(),
             mmap: None,
+            len,
         }));
-        assert!(cache.insert(file_id, file_clone.clone()).is_none());
+        cache.insert(file_id, file_clone.clone());
         Ok(file_clone)
     }
 }

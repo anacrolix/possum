@@ -26,6 +26,7 @@ use std::ops::{Deref, DerefMut};
 use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
+use std::str;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use std::{fs, io};
@@ -398,6 +399,7 @@ impl Handle {
         })
     }
 
+    /// Begins a read transaction.
     pub fn read(&self) -> rusqlite::Result<Reader> {
         let guard = self.conn.lock().unwrap();
         let reader = Reader {
@@ -615,6 +617,7 @@ impl<'a> Reader<'a> {
         }
     }
 
+    /// Takes a snapshot and commits the read transaction.
     pub fn begin(self) -> Result<Snapshot> {
         let mut tempdir = None;
         let mut file_clones: FileCloneCache = Default::default();
@@ -629,10 +632,13 @@ impl<'a> Reader<'a> {
                     handle_clones,
                     &self.handle.dir,
                     min_len,
-                )?,
+                )
+                .context("getting file clone")?,
             );
         }
-        self.owned_tx.move_dependent(|tx| tx.commit())?;
+        self.owned_tx
+            .move_dependent(|tx| tx.commit())
+            .context("committing transaction")?;
         Ok(Snapshot { file_clones })
     }
 

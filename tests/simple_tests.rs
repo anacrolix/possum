@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Context, Result};
+use fdlimit::raise_fd_limit;
 use possum::testing::*;
 use possum::*;
 use rand::distributions::uniform::{UniformDuration, UniformSampler};
@@ -89,6 +90,7 @@ fn clone_in_file() -> Result<()> {
 
 #[test]
 fn torrent_storage() -> Result<()> {
+    let _ = raise_fd_limit();
     let tempdir = PathBuf::from("torrent_storage");
     dbg!(&tempdir);
     let handle = Handle::new(tempdir)?;

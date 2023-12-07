@@ -22,6 +22,7 @@ twox-hash = "1.6.3"
 positioned-io = "0.3.2"
 stable_deref_trait = "1.2.0"
 chrono = "0.4.31"
+fdlimit = "0.3.0"
 
 [dev-dependencies]
 criterion = "0.5.1"

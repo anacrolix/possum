@@ -33,11 +33,11 @@ use std::{fs, io};
 use tempfile::{tempdir_in, TempDir};
 use ErrorKind::InvalidInput;
 
+mod c_api;
 pub mod clonefile;
-pub mod punchfile;
-
 mod exclusive_file;
 mod owned_cell;
+pub mod punchfile;
 pub mod testing;
 
 #[derive(Debug)]

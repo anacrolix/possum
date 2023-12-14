@@ -21,6 +21,17 @@ use rand::{thread_rng, RngCore};
 use tempfile::tempdir;
 
 #[test]
+fn rename_key() -> Result<()> {
+    let tempdir = tempdir()?;
+    let mut handle = Handle::new(tempdir.path().to_owned())?;
+    let value_bytes = "world".as_bytes();
+    let rename_res = handle
+        .rename_item("noexist".as_bytes(), "borat".as_bytes())
+        .map(|_| ())?;
+    Ok(())
+}
+
+#[test]
 fn set_get() -> Result<()> {
     let tempdir = tempdir()?;
     let handle = Handle::new(tempdir.path().to_owned())?;

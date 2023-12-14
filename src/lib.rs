@@ -203,6 +203,22 @@ impl WriteCommitResult {
     }
 }
 
+fn delete_key(conn: &Connection, key: &[u8]) -> rusqlite::Result<Value> {
+    conn.query_row(
+        "delete from keys where key=? returning file_id, file_offset, value_length, last_used",
+        [key],
+        |row| {
+            let file_id: FileId = row.get(0)?;
+            Ok(Value {
+                file_id,
+                file_offset: row.get(1)?,
+                length: row.get(2)?,
+                last_used: row.get(3)?,
+            })
+        },
+    )
+}
+
 impl<'handle> BatchWriter<'handle> {
     fn get_exclusive_file(&mut self) -> Result<ExclusiveFile> {
         if let Some(ef) = self.exclusive_files.pop() {
@@ -227,26 +243,22 @@ impl<'handle> BatchWriter<'handle> {
     }
 
     pub fn commit(mut self) -> Result<WriteCommitResult> {
-        let mut tx_guard = self.handle.conn.lock().unwrap();
-        let mut transaction = tx_guard
-            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-            .context("begin immediate")?;
+        let mut transaction: OwnedTx = self.handle.start_immediate_transaction()?;
         let mut altered_files = HashSet::new();
         let mut write_commit_res = WriteCommitResult {
             last_used: None,
             count: 0,
         };
         for pw in self.pending_writes.drain(..) {
-            let existing = transaction.query_row(
-                "delete from keys where key=? returning file_id, file_offset, value_length",
-                [&pw.key],
-                |row| {
-                    let file_id: FileId = row.get(0)?;
-                    Ok((file_id, row.get(1)?, row.get(2)?))
-                },
-            );
+            let existing = delete_key(&*transaction, &pw.key);
             match existing {
-                Ok((file_id, file_offset, value_length)) => {
+                Ok(Value {
+                    file_id,
+                    file_offset,
+                    length,
+                    ..
+                }) => {
+                    let value_length = length;
                     let msg = format!(
                         "deleting value at {:?} {} {}",
                         file_id, file_offset, value_length
@@ -257,7 +269,7 @@ impl<'handle> BatchWriter<'handle> {
                         &file_id,
                         file_offset,
                         value_length,
-                        &mut transaction,
+                        &mut *transaction,
                         Handle::block_size(),
                     )
                     .context(msg)?;
@@ -291,7 +303,7 @@ impl<'handle> BatchWriter<'handle> {
             }
             write_commit_res.count += 1;
         }
-        transaction.commit().context("commit transaction")?;
+        transaction.move_dependent(|tx| tx.commit().context("commit transaction"))?;
         {
             let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
             // dbg!(
@@ -463,8 +475,13 @@ where
     }
 }
 
+/// A Sqlite Transaction and the mutex guard on the Connection it came from.
+// Not in the handle module since it can be owned by types other than Handle.
+type OwnedTx<'handle> =
+    owned_cell::OwnedCell<MutexGuard<'handle, Connection>, Transaction<'handle>>;
+
 pub struct Reader<'handle> {
-    owned_tx: owned_cell::OwnedCell<MutexGuard<'handle, Connection>, Transaction<'handle>>,
+    owned_tx: OwnedTx<'handle>,
     handle: &'handle Handle,
     files: HashMap<FileId, u64>,
 }

@@ -74,11 +74,24 @@ impl Handle {
         })
     }
 
+    fn start_transaction(
+        &self,
+        make_tx: impl FnOnce(&mut Connection) -> rusqlite::Result<Transaction<'_>>,
+    ) -> rusqlite::Result<OwnedTx> {
+        let guard = self.conn.lock().unwrap();
+        owned_cell::OwnedCell::try_make(guard, make_tx)
+    }
+
+    pub(crate) fn start_immediate_transaction(&self) -> rusqlite::Result<OwnedTx> {
+        self.start_transaction(|conn| {
+            conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        })
+    }
+
     /// Begins a read transaction.
     pub fn read(&self) -> rusqlite::Result<Reader> {
-        let guard = self.conn.lock().unwrap();
         let reader = Reader {
-            owned_tx: owned_cell::OwnedCell::try_make(guard, |guard| guard.transaction())?,
+            owned_tx: self.start_transaction(|conn| conn.transaction())?,
             handle: self,
             files: Default::default(),
         };
@@ -110,5 +123,16 @@ impl Handle {
         writer.stage_write(key, value)?;
         writer.commit()?;
         Ok(n)
+    }
+
+    pub fn rename_item(&mut self, from: &[u8], to: &[u8]) -> Result<Timestamp> {
+        let tx = self.start_immediate_transaction()?;
+        let last_used = tx.query_row(
+            "update keys set key=? where key=? returning last_used",
+            [to, from],
+            |row| row.get(0),
+        )?;
+        assert_eq!(tx.changes(), 1);
+        Ok(last_used)
     }
 }

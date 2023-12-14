@@ -1,5 +1,6 @@
 mod c_api;
 pub mod clonefile;
+mod error;
 mod exclusive_file;
 mod handle;
 mod owned_cell;
@@ -43,6 +44,10 @@ use ErrorKind::InvalidInput;
 
 use crate::clonefile::fclonefile;
 use crate::punchfile::punchfile;
+pub use error::Error;
+
+// Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.
+type PubResult<T> = Result<T, Error>;
 
 #[derive(Debug)]
 struct FileClone {

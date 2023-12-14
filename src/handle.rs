@@ -125,13 +125,20 @@ impl Handle {
         Ok(n)
     }
 
-    pub fn rename_item(&mut self, from: &[u8], to: &[u8]) -> Result<Timestamp> {
+    pub fn rename_item(&mut self, from: &[u8], to: &[u8]) -> PubResult<Timestamp> {
         let tx = self.start_immediate_transaction()?;
-        let last_used = tx.query_row(
+        let last_used = match tx.query_row(
             "update keys set key=? where key=? returning last_used",
             [to, from],
-            |row| row.get(0),
-        )?;
+            |row| {
+                let ts: Timestamp = row.get(0)?;
+                Ok(ts)
+            },
+        ) {
+            Err(QueryReturnedNoRows) => Err(Error::NoSuchKey),
+            Ok(ok) => Ok(ok),
+            Err(err) => Err(err.into()),
+        }?;
         assert_eq!(tx.changes(), 1);
         Ok(last_used)
     }

@@ -255,7 +255,7 @@ impl<'handle> BatchWriter<'handle> {
             count: 0,
         };
         for pw in self.pending_writes.drain(..) {
-            let existing = delete_key(&*transaction, &pw.key);
+            let existing = delete_key(&transaction, &pw.key);
             match existing {
                 Ok(Value {
                     file_id,
@@ -274,7 +274,7 @@ impl<'handle> BatchWriter<'handle> {
                         &file_id,
                         file_offset,
                         value_length,
-                        &mut *transaction,
+                        &mut transaction,
                         Handle::block_size(),
                     )
                     .context(msg)?;

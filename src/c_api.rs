@@ -49,8 +49,6 @@ pub extern "C" fn possum_single_write_buf(
             n
         }
     }
-    .try_into()
-    .unwrap()
 }
 
 #[no_mangle]

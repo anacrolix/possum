@@ -1,0 +1,1 @@
+* Figure out how to have RustRover limit lines to 100 characters. (It thinks I want 120 characters, but rustfmt is working on 100).

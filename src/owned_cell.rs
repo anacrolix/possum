@@ -6,9 +6,14 @@ use stable_deref_trait::StableDeref;
 
 use super::*;
 
+/// Store a value (the dependent, D) that needs a stable reference to another value (the owner, O) together. This is
+/// useful to allow the owner to move around with the dependent to ensure it gets dropped when the dependent is no
+/// longer needed. This is only possible if the owner implements StableDeref, a market trait for types that can be moved
+/// while there are references to them. A great example is MutexGuard.
 pub(crate) struct OwnedCell<O, D> {
-    _owner: O,
+    // The order here matters. dep must be dropped before owner.
     dep: D,
+    _owner: O,
 }
 
 /// Allows for a dependent value that holds a reference to its owner in the same struct.
@@ -35,6 +40,8 @@ where
     }
 
     /// Move the dependent type out, before destroying the owner.
+    // Another way to do this might be to extract the dependent and owner together, with the dependents lifetime bound
+    // to the owner in the return scope.
     pub(crate) fn move_dependent<R>(self, f: impl FnOnce(D) -> R) -> R {
         f(self.dep)
     }
@@ -45,5 +52,11 @@ impl<O, D> Deref for OwnedCell<O, D> {
 
     fn deref(&self) -> &Self::Target {
         &self.dep
+    }
+}
+
+impl<O, D> DerefMut for OwnedCell<O, D> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.dep
     }
 }

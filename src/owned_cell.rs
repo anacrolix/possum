@@ -1,8 +1,10 @@
 //! This is a module to protect the internals of the helper type.
 
-use super::*;
-use stable_deref_trait::StableDeref;
 use std::ops::Deref;
+
+use stable_deref_trait::StableDeref;
+
+use super::*;
 
 pub(crate) struct OwnedCell<O, D> {
     _owner: O,

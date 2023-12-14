@@ -1,19 +1,3 @@
-use crate::clonefile::fclonefile;
-use crate::punchfile::punchfile;
-use anyhow::Result;
-use anyhow::{bail, Context};
-use chrono::NaiveDateTime;
-use clonefile::clonefile;
-use exclusive_file::ExclusiveFile;
-use log::debug;
-use memmap2::Mmap;
-use num::Integer;
-use positioned_io::ReadAt;
-use rand::Rng;
-use rusqlite::types::ValueRef::{Null, Real};
-use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
-use rusqlite::Error::QueryReturnedNoRows;
-use rusqlite::{params, Connection, ToSql, Transaction};
 use std::cmp::{max, min};
 use std::collections::{hash_map, HashMap, HashSet};
 use std::ffi::OsString;
@@ -30,8 +14,26 @@ use std::str;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use std::{fs, io};
+
+use anyhow::Result;
+use anyhow::{bail, Context};
+use chrono::NaiveDateTime;
+use clonefile::clonefile;
+use exclusive_file::ExclusiveFile;
+use log::debug;
+use memmap2::Mmap;
+use num::Integer;
+use positioned_io::ReadAt;
+use rand::Rng;
+use rusqlite::types::ValueRef::{Null, Real};
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
+use rusqlite::Error::QueryReturnedNoRows;
+use rusqlite::{params, Connection, ToSql, Transaction};
 use tempfile::{tempdir_in, TempDir};
 use ErrorKind::InvalidInput;
+
+use crate::clonefile::fclonefile;
+use crate::punchfile::punchfile;
 
 mod c_api;
 pub mod clonefile;

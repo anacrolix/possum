@@ -1,11 +1,13 @@
-use super::*;
-use anyhow::{ensure, Result};
-use rand::Rng;
 use std::hash::Hasher;
 use std::io::Write;
 use std::io::{copy, SeekFrom};
+
+use anyhow::{ensure, Result};
+use rand::Rng;
 use tempfile::NamedTempFile;
 use twox_hash::XxHash64;
+
+use super::*;
 
 pub type Hash = XxHash64;
 

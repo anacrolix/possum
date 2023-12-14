@@ -1,7 +1,8 @@
-use libc::off_t;
 use std::io;
 use std::io::Error;
 use std::os::fd::AsRawFd;
+
+use libc::off_t;
 
 pub fn punchfile(file: impl AsRawFd, offset: off_t, length: off_t) -> io::Result<()> {
     let punchhole = libc::fpunchhole_t {

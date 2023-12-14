@@ -1,9 +1,3 @@
-use anyhow::{anyhow, Context, Result};
-use fdlimit::raise_fd_limit;
-use possum::testing::*;
-use possum::*;
-use rand::distributions::uniform::{UniformDuration, UniformSampler};
-use rand::{thread_rng, RngCore};
 use std::error::Error;
 use std::fmt::{Debug, Display};
 use std::hash::Hasher;
@@ -17,6 +11,13 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::thread::{scope, sleep};
 use std::time::Duration;
+
+use anyhow::{anyhow, Context, Result};
+use fdlimit::raise_fd_limit;
+use possum::testing::*;
+use possum::*;
+use rand::distributions::uniform::{UniformDuration, UniformSampler};
+use rand::{thread_rng, RngCore};
 use tempfile::tempdir;
 
 #[test]

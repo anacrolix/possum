@@ -1,6 +1,7 @@
+use std::fs::remove_file;
+
 use criterion::{BenchmarkId, Criterion};
 use possum::clonefile::clonefile;
-use std::fs::remove_file;
 
 fn clonefile_benchmark_fallible(c: &mut Criterion) -> anyhow::Result<()> {
     for size_power in [12, 20, 28] {

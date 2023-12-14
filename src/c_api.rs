@@ -1,9 +1,11 @@
-use super::*;
-use libc::size_t;
-use log::error;
 use std::ffi::{c_char, c_uchar, CStr, OsStr};
 use std::ptr::null_mut;
 use std::slice;
+
+use libc::size_t;
+use log::error;
+
+use super::*;
 
 #[no_mangle]
 pub extern "C" fn possum_new(path: *const c_char) -> *mut Handle {

@@ -1,13 +1,15 @@
-use super::*;
-use crate::FileId;
-use anyhow::Context;
-use log::info;
-use nix::fcntl::FlockArg::LockExclusiveNonblock;
 use std::fs::{File, OpenOptions};
 use std::io::Seek;
 use std::io::SeekFrom::End;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
+
+use anyhow::Context;
+use log::info;
+use nix::fcntl::FlockArg::LockExclusiveNonblock;
+
+use super::*;
+use crate::FileId;
 
 #[derive(Debug)]
 pub(crate) struct ExclusiveFile {

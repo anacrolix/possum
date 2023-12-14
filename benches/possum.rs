@@ -1,6 +1,7 @@
+use std::path::PathBuf;
+
 use criterion::{criterion_group, criterion_main, Criterion};
 use possum::Handle;
-use std::path::PathBuf;
 
 mod clonefile;
 

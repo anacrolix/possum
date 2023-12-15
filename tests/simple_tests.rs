@@ -15,6 +15,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use fdlimit::raise_fd_limit;
 use possum::testing::*;
+use possum::Error::NoSuchKey;
 use possum::*;
 use rand::distributions::uniform::{UniformDuration, UniformSampler};
 use rand::{thread_rng, RngCore};
@@ -27,7 +28,24 @@ fn rename_key() -> Result<()> {
     let value_bytes = "world".as_bytes();
     let rename_res = handle
         .rename_item("noexist".as_bytes(), "borat".as_bytes())
-        .map(|_| ())?;
+        .map(|_| ());
+    assert_eq!(rename_res, Err(NoSuchKey));
+    assert_eq!(
+        handle
+            .single_write_from("hello".as_bytes().to_vec(), value_bytes)?
+            .0,
+        5
+    );
+    handle
+        .read_single("hello".as_bytes().to_vec())?
+        .ok_or(NoSuchKey)?
+        .view(|value| assert_eq!(value, value_bytes))?;
+    handle.rename_item("hello".as_ref(), "borat".as_ref())?;
+    handle
+        .read_single("borat".as_bytes().to_vec())?
+        .expect("key should be renamed to borat")
+        .view(|value| assert_eq!(value, value_bytes))?;
+    assert!(handle.read_single("hello".as_bytes().to_vec())?.is_none());
     Ok(())
 }
 

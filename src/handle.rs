@@ -140,6 +140,7 @@ impl Handle {
             Err(err) => Err(err.into()),
         }?;
         assert_eq!(tx.changes(), 1);
+        tx.move_dependent(|tx| tx.commit())?;
         Ok(last_used)
     }
 }

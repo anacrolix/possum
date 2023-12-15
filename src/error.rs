@@ -1,7 +1,7 @@
 use super::*;
 use thiserror::Error;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, PartialEq)]
 pub enum Error {
     #[error("no such key")]
     NoSuchKey,

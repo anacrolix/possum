@@ -27,6 +27,8 @@ stable_deref_trait = "1.2.0"
 chrono = "0.4.31"
 fdlimit = "0.3.0"
 thiserror = "1.0.50"
+itertools = "0.12.0"
+maplit = "1.0.2"
 
 [dev-dependencies]
 criterion = "0.5.1"

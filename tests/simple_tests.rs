@@ -1,3 +1,5 @@
+use std::borrow::Borrow;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::{Debug, Display};
 use std::hash::Hasher;
@@ -7,14 +9,18 @@ use std::io::{Seek, Write};
 use std::ops::Bound::Included;
 use std::ops::{RangeBounds, RangeInclusive};
 use std::os::fd::AsRawFd;
-use std::path::PathBuf;
+use std::os::unix::fs::MetadataExt;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::thread::{scope, sleep};
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use fdlimit::raise_fd_limit;
+use itertools::Itertools;
+use maplit::hashmap;
 use possum::testing::*;
+use possum::walk::EntryType;
 use possum::Error::NoSuchKey;
 use possum::*;
 use rand::distributions::uniform::{UniformDuration, UniformSampler};
@@ -46,7 +52,39 @@ fn rename_key() -> Result<()> {
         .expect("key should be renamed to borat")
         .view(|value| assert_eq!(value, value_bytes))?;
     assert!(handle.read_single("hello".as_bytes().to_vec())?.is_none());
+    let handle_entries = handle_relative_walk_entries_hashset(&handle);
+    let counts = count_by_entry_types(&handle_entries);
+    assert_eq!(counts[&ValuesFile], 1);
     Ok(())
+}
+
+use crate::walk::EntryType::*;
+
+fn count_by_entry_types(
+    entries: impl IntoIterator<Item = impl Borrow<WalkEntry>>,
+) -> HashMap<EntryType, usize> {
+    entries
+        .into_iter()
+        .group_by(|entry| entry.borrow().entry_type)
+        .into_iter()
+        .map(|(key, group)| (key, group.count()))
+        .collect()
+}
+
+fn handle_relative_walk_entries_hashset(handle: &Handle) -> HashSet<WalkEntry> {
+    handle
+        .walk_dir()
+        .expect("should be able to walk handle dir")
+        .into_iter()
+        .map(|mut entry: possum::WalkEntry| {
+            entry.path = entry
+                .path
+                .strip_prefix(handle.dir())
+                .expect("walk entry should have handle dir path prefix")
+                .to_owned();
+            entry
+        })
+        .collect()
 }
 
 #[test]
@@ -188,12 +226,32 @@ fn torrent_storage() -> Result<()> {
     let completed_reader = completed_value.new_reader();
     let completed_hash = hash_reader(completed_reader)?;
     assert_eq!(completed_hash, piece_data_hash);
+    let handle_walk_entries = handle.walk_dir()?;
+    let counts = count_by_entry_types(&handle_walk_entries);
+    // ValuesFile count calculation might need changing if this doesn't hold.
+    assert_eq!(block_size as u64 % handle.block_size(), 0);
+    // This might all be reusable as a Handle current disk usage calculation.
+    let mut values_file_total_len = 0;
+    for entry in &handle_walk_entries {
+        if entry.entry_type != ValuesFile {
+            continue;
+        }
+        let metadata = std::fs::metadata(&entry.path)?;
+        dbg!(metadata.blocks(), metadata.blksize());
+        values_file_total_len += if false {
+            metadata.len()
+        } else {
+            metadata.blocks() * 512
+        };
+        assert_ne!(metadata.blocks(), 0);
+    }
+    assert_eq!(values_file_total_len, 2 * piece_size as u64);
     Ok(())
 }
 
 #[test]
 fn big_set_get() -> Result<()> {
-    let tempdir = PathBuf::from("torrent_storage");
+    let tempdir = PathBuf::from("big_set_get");
     dbg!(&tempdir);
     let handle = Handle::new(tempdir)?;
     let piece_size = 2 << 20;
@@ -273,7 +331,9 @@ fn read_and_writes_different_handles() -> Result<()> {
         reader.join().unwrap()?;
         writer.join().unwrap()?;
         anyhow::Ok(())
-    })
+    })?;
+    let handle = Handle::new(dir)?;
+    Ok(())
 }
 
 const RACE_SLEEP_DURATION: Duration = Duration::from_millis(1);

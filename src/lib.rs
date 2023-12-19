@@ -6,6 +6,7 @@ mod handle;
 mod owned_cell;
 pub mod punchfile;
 pub mod testing;
+pub mod walk;
 
 use std::cmp::{max, min};
 use std::collections::{hash_map, HashMap, HashSet};
@@ -45,6 +46,7 @@ use ErrorKind::InvalidInput;
 use crate::clonefile::fclonefile;
 use crate::punchfile::punchfile;
 pub use error::Error;
+pub use walk::Entry as WalkEntry;
 
 // Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.
 type PubResult<T> = Result<T, Error>;
@@ -275,7 +277,7 @@ impl<'handle> BatchWriter<'handle> {
                         file_offset,
                         value_length,
                         &mut transaction,
-                        Handle::block_size(),
+                        self.handle.block_size(),
                     )
                     .context(msg)?;
                     if value_length != 0 {
@@ -571,7 +573,9 @@ impl<'a> Reader<'a> {
         let tempdir: &Arc<TempDir> = match tempdir {
             Some(tempdir) => tempdir,
             None => {
-                let new = Arc::new(tempdir_in(src_dir)?);
+                let mut builder = tempfile::Builder::new();
+                builder.prefix(SNAPSHOT_DIR_NAME_PREFIX);
+                let new = Arc::new(builder.tempdir_in(src_dir)?);
                 *tempdir = Some(new);
                 tempdir.as_ref().unwrap()
             }
@@ -624,6 +628,7 @@ fn random_file_name_in_dir(dir: &Path) -> PathBuf {
 
 const FILE_NAME_RAND_LENGTH: usize = 8;
 const VALUES_FILE_NAME_PREFIX: &str = "values-";
+const SNAPSHOT_DIR_NAME_PREFIX: &str = "snapshot-";
 
 fn random_file_name() -> OsString {
     let mut begin = VALUES_FILE_NAME_PREFIX.as_bytes().to_vec();
@@ -729,7 +734,7 @@ fn punch_value(
     mut length: u64,
     tx: &mut Transaction,
     block_size: u64,
-) -> anyhow::Result<()> {
+) -> Result<()> {
     // If we're not at a block boundary to begin with, find out how far back we can punch and
     // start there.
     if offset % block_size != 0 {

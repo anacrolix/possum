@@ -8,6 +8,10 @@ pub struct Handle {
 }
 
 impl Handle {
+    pub fn dir(&self) -> &PathBuf {
+        &self.dir
+    }
+
     pub(crate) fn get_exclusive_file(&self) -> Result<ExclusiveFile> {
         let mut files = self.exclusive_files.lock().unwrap();
         if let Some((_, file)) = files.drain().next() {
@@ -62,7 +66,7 @@ impl Handle {
         Ok(handle)
     }
 
-    pub(super) fn block_size() -> u64 {
+    pub fn block_size(&self) -> u64 {
         4096
     }
 
@@ -142,5 +146,9 @@ impl Handle {
         assert_eq!(tx.changes(), 1);
         tx.move_dependent(|tx| tx.commit())?;
         Ok(last_used)
+    }
+
+    pub fn walk_dir(&self) -> Result<Vec<WalkEntry>> {
+        crate::walk::walk_dir(&self.dir)
     }
 }

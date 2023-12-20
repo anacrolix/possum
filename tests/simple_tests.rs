@@ -10,7 +10,7 @@ use std::ops::Bound::Included;
 use std::ops::{RangeBounds, RangeInclusive};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::MetadataExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::thread::{scope, sleep};
 use std::time::Duration;
@@ -18,7 +18,6 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use fdlimit::raise_fd_limit;
 use itertools::Itertools;
-use maplit::hashmap;
 use possum::testing::*;
 use possum::walk::EntryType;
 use possum::Error::NoSuchKey;
@@ -159,7 +158,14 @@ fn clone_in_file() -> Result<()> {
 #[test]
 fn torrent_storage() -> Result<()> {
     let _ = raise_fd_limit();
-    let tempdir = PathBuf::from("torrent_storage");
+    // Running in the same directory messes with the disk analysis at the end of the test.
+    let (_, tempdir) = if false {
+        (None, PathBuf::from("torrent_storage"))
+    } else {
+        let tempdir = tempdir()?;
+        let path = tempdir.path().to_owned();
+        (Some(tempdir), path)
+    };
     dbg!(&tempdir);
     let handle = Handle::new(tempdir)?;
     let piece_size = 2 << 20;
@@ -227,7 +233,7 @@ fn torrent_storage() -> Result<()> {
     let completed_hash = hash_reader(completed_reader)?;
     assert_eq!(completed_hash, piece_data_hash);
     let handle_walk_entries = handle.walk_dir()?;
-    let counts = count_by_entry_types(&handle_walk_entries);
+    let _counts = count_by_entry_types(&handle_walk_entries);
     // ValuesFile count calculation might need changing if this doesn't hold.
     assert_eq!(block_size as u64 % handle.block_size(), 0);
     // This might all be reusable as a Handle current disk usage calculation.
@@ -332,7 +338,7 @@ fn read_and_writes_different_handles() -> Result<()> {
         writer.join().unwrap()?;
         anyhow::Ok(())
     })?;
-    let handle = Handle::new(dir)?;
+    let _handle = Handle::new(dir)?;
     Ok(())
 }
 

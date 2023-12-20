@@ -29,6 +29,7 @@ use anyhow::Result;
 use anyhow::{bail, Context};
 use chrono::NaiveDateTime;
 use clonefile::clonefile;
+pub use error::Error;
 use exclusive_file::ExclusiveFile;
 pub use handle::Handle;
 use log::debug;
@@ -40,13 +41,12 @@ use rusqlite::types::ValueRef::{Null, Real};
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{params, Connection, ToSql, Transaction};
-use tempfile::{tempdir_in, TempDir};
+use tempfile::TempDir;
+pub use walk::Entry as WalkEntry;
 use ErrorKind::InvalidInput;
 
 use crate::clonefile::fclonefile;
 use crate::punchfile::punchfile;
-pub use error::Error;
-pub use walk::Entry as WalkEntry;
 
 // Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.
 type PubResult<T> = Result<T, Error>;

@@ -1,6 +1,7 @@
-use super::*;
 use std::fs::DirEntry as StdDirEntry;
 use std::fs::FileType;
+
+use super::*;
 
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Entry {

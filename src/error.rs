@@ -1,5 +1,6 @@
-use super::*;
 use thiserror::Error;
+
+use super::*;
 
 #[derive(Error, Debug, PartialEq)]
 pub enum Error {

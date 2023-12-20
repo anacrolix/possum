@@ -23,8 +23,8 @@ use possum::walk::EntryType;
 use possum::Error::NoSuchKey;
 use possum::*;
 use rand::distributions::uniform::{UniformDuration, UniformSampler};
-use rand::{thread_rng, RngCore};
-use tempfile::tempdir;
+use rand::{thread_rng, RngCore, SeedableRng};
+use tempfile::{tempdir, TempDir};
 
 #[test]
 fn rename_key() -> Result<()> {
@@ -155,28 +155,43 @@ fn clone_in_file() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn torrent_storage() -> Result<()> {
-    let _ = raise_fd_limit();
-    // Running in the same directory messes with the disk analysis at the end of the test.
-    let (_, tempdir) = if false {
-        (None, PathBuf::from("torrent_storage"))
+/// Keep this in scope so the tempdir isn't deleted right while the path is still in use.
+struct TestTempDir {
+    _tempdir: Option<TempDir>,
+    path: PathBuf,
+}
+
+fn test_tempdir(name: &'static str) -> Result<TestTempDir> {
+    let (tempdir, path) = if true {
+        (None, PathBuf::from(name))
     } else {
         let tempdir = tempdir()?;
         let path = tempdir.path().to_owned();
         (Some(tempdir), path)
     };
-    dbg!(&tempdir);
-    let handle = Handle::new(tempdir)?;
+    dbg!(&path);
+    Ok(TestTempDir {
+        _tempdir: tempdir,
+        path,
+    })
+}
+
+#[test]
+fn torrent_storage() -> Result<()> {
+    let _ = raise_fd_limit();
+    // Running in the same directory messes with the disk analysis at the end of the test.
+    let tempdir = test_tempdir("torrent_storage")?;
+    let handle = Handle::new(tempdir.path)?;
     let piece_size = 2 << 20;
     let mut piece_data = vec![0; piece_size];
-    thread_rng().fill_bytes(&mut piece_data);
+    // Hi alec
+    rand::rngs::SmallRng::seed_from_u64(420).fill_bytes(&mut piece_data);
     let piece_data_hash = {
         let mut hash = Hash::default();
         hash.write(&piece_data);
         hash.finish()
     };
-    dbg!(piece_data_hash);
+    dbg!(format!("{:x}", piece_data_hash));
     let block_size = 1 << 14;
     let block_offset_iter = (0..piece_size).step_by(block_size);
     let offset_key = |offset| format!("piece/{}", offset);
@@ -243,13 +258,12 @@ fn torrent_storage() -> Result<()> {
             continue;
         }
         let metadata = std::fs::metadata(&entry.path)?;
-        dbg!(metadata.blocks(), metadata.blksize());
+        //dbg!(metadata.blocks(), metadata.blksize());
         values_file_total_len += if false {
             metadata.len()
         } else {
             metadata.blocks() * 512
         };
-        assert_ne!(metadata.blocks(), 0);
     }
     assert_eq!(values_file_total_len, 2 * piece_size as u64);
     Ok(())

@@ -1,12 +1,16 @@
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
+
+use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context};
+
 use log::info;
+
 use possum::punchfile::punchfile;
-use possum::Handle;
+use possum::{seekhole, Handle};
 
 #[derive(clap::Subcommand)]
 enum Commands {
@@ -19,6 +23,10 @@ enum Commands {
         dir: PathBuf,
         #[command(subcommand)]
         command: DatabaseCommands,
+    },
+    // ( ͡° ͜ʖ ͡°)
+    ShowHoles {
+        file: PathBuf,
     },
 }
 
@@ -60,6 +68,20 @@ fn main() -> anyhow::Result<()> {
                     Ok(())
                 }
             }
+        }
+        ShowHoles { file: path } => {
+            let file = OpenOptions::new()
+                .read(true)
+                .open(path)
+                .context("opening file")?;
+            let raw_fd = file.as_raw_fd();
+            for region in seekhole::Iter::new_from_fd(raw_fd) {
+                match region {
+                    Ok(region) => println!("{:?}, length {}", region, region.end - region.start),
+                    Err(err) => println!("{:#?}", err),
+                }
+            }
+            Ok(())
         }
     }
 }

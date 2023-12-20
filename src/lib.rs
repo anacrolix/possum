@@ -1,16 +1,19 @@
 mod c_api;
 pub mod clonefile;
+mod cpathbuf;
 mod error;
 mod exclusive_file;
 mod handle;
 mod owned_cell;
+pub mod pathconf;
 pub mod punchfile;
+pub mod seekhole;
 pub mod testing;
 pub mod walk;
 
 use std::cmp::{max, min};
 use std::collections::{hash_map, HashMap, HashSet};
-use std::ffi::OsString;
+use std::ffi::{OsString};
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::{read_dir, File, OpenOptions};
 use std::io::SeekFrom::{End, Start};
@@ -47,6 +50,7 @@ use ErrorKind::InvalidInput;
 
 use crate::clonefile::fclonefile;
 use crate::punchfile::punchfile;
+use cpathbuf::CPathBuf;
 
 // Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.
 type PubResult<T> = Result<T, Error>;
@@ -735,6 +739,7 @@ fn punch_value(
     tx: &mut Transaction,
     block_size: u64,
 ) -> Result<()> {
+    dbg!("punching value", file_id, offset, length);
     // If we're not at a block boundary to begin with, find out how far back we can punch and
     // start there.
     if offset % block_size != 0 {
@@ -742,6 +747,7 @@ fn punch_value(
         length += offset - new_offset;
         offset = new_offset;
     }
+    dbg!("adjusted punch dimensions", file_id, offset, length);
     let mut file = open_file_id(OpenOptions::new().append(true), dir, file_id)?;
     // append doesn't mean our file position is at the end to begin with.
     let file_end = file.seek(End(0))?;

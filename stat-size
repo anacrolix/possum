@@ -1,1 +1,3 @@
-stat -f '%N: file size: %z, alloc blocks: %b, fs blksize: %k' "$@"
+set -eu
+alloc_size=$((`stat -f %b "$@"`*512))
+stat -f "%N: file size: %z, alloc blocks: %b, fs blksize: %k, alloc size: $alloc_size" "$@"

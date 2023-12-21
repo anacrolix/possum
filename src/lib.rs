@@ -13,7 +13,7 @@ pub mod walk;
 
 use std::cmp::{max, min};
 use std::collections::{hash_map, HashMap, HashSet};
-use std::ffi::{OsString};
+use std::ffi::OsString;
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::{read_dir, File, OpenOptions};
 use std::io::SeekFrom::{End, Start};

@@ -10,6 +10,7 @@ use anyhow::{anyhow, Context};
 use log::info;
 
 use possum::punchfile::punchfile;
+use possum::seekhole::file_regions;
 use possum::{seekhole, Handle};
 
 #[derive(clap::Subcommand)]
@@ -70,16 +71,13 @@ fn main() -> anyhow::Result<()> {
             }
         }
         ShowHoles { file: path } => {
-            let file = OpenOptions::new()
+            let mut file = OpenOptions::new()
                 .read(true)
                 .open(path)
                 .context("opening file")?;
             let raw_fd = file.as_raw_fd();
-            for region in seekhole::Iter::new_from_fd(raw_fd) {
-                match region {
-                    Ok(region) => println!("{:?}, length {}", region, region.end - region.start),
-                    Err(err) => println!("{:#?}", err),
-                }
+            for region in file_regions(&mut file)? {
+                println!("{:?}, length {}", region, region.length());
             }
             Ok(())
         }

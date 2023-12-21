@@ -92,10 +92,16 @@ impl Handle {
         })
     }
 
+    /// Starts a deferred transaction (the default). There is no guaranteed read-only transaction
+    /// mode. There might be pragmas that can limit to read only statements.
+    pub(crate) fn start_deferred_transaction_for_read(&self) -> rusqlite::Result<OwnedTx> {
+        self.start_transaction(|conn| conn.transaction())
+    }
+
     /// Begins a read transaction.
     pub fn read(&self) -> rusqlite::Result<Reader> {
         let reader = Reader {
-            owned_tx: self.start_transaction(|conn| conn.transaction())?,
+            owned_tx: self.start_deferred_transaction_for_read()?,
             handle: self,
             files: Default::default(),
         };

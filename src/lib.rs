@@ -258,6 +258,7 @@ impl<'handle> BatchWriter<'handle> {
     }
 
     pub fn commit(mut self) -> Result<WriteCommitResult> {
+        let mut punch_values = vec![];
         let mut transaction: OwnedTx = self.handle.start_immediate_transaction()?;
         let mut altered_files = HashSet::new();
         let mut write_commit_res = WriteCommitResult {
@@ -267,31 +268,12 @@ impl<'handle> BatchWriter<'handle> {
         for pw in self.pending_writes.drain(..) {
             let existing = delete_key(&transaction, &pw.key);
             match existing {
-                Ok(Value {
-                    file_id,
-                    file_offset,
-                    length,
-                    ..
-                }) => {
-                    let value_length = length;
-                    let msg = format!(
-                        "deleting value at {:?} {} {}",
-                        file_id, file_offset, value_length
-                    );
-                    debug!("{}", msg);
-                    // self.handle.clones.lock().unwrap().remove(&file_id);
-                    punch_value(
-                        &self.handle.dir,
-                        &file_id,
-                        file_offset,
-                        value_length,
-                        &mut transaction,
-                        self.handle.block_size(),
-                    )
-                    .context(msg)?;
+                Ok(value) => {
+                    let value_length = value.length;
                     if value_length != 0 {
-                        altered_files.insert(file_id);
+                        altered_files.insert(value.file_id.clone());
                     }
+                    punch_values.push(value);
                 }
                 Err(QueryReturnedNoRows) => (),
                 Err(err) => return Err(err.into()),
@@ -319,14 +301,46 @@ impl<'handle> BatchWriter<'handle> {
             }
             write_commit_res.count += 1;
         }
-        self.flush_exclusive_files();
         transaction.move_dependent(|tx| tx.commit().context("commit transaction"))?;
 
+        self.flush_exclusive_files();
+        // This has to happen after exclusive files are flushed or there's a tendency for hole
+        // punches to not persist. It doesn't fix the problem but it significantly reduces it.
+        self.punch_values(punch_values)?;
         // Forget any references to clones of files that have changed.
         for file_id in altered_files {
             self.handle.clones.lock().unwrap().remove(&file_id);
         }
         Ok(write_commit_res)
+    }
+
+    fn punch_values(&self, values: Vec<Value>) -> Result<()> {
+        let transaction = self.handle.start_deferred_transaction_for_read()?;
+        for Value {
+            file_id,
+            file_offset,
+            length,
+            ..
+        } in values
+        {
+            let value_length = length;
+            let msg = format!(
+                "deleting value at {:?} {} {}",
+                file_id, file_offset, value_length
+            );
+            debug!("{}", msg);
+            // self.handle.clones.lock().unwrap().remove(&file_id);
+            punch_value(
+                &self.handle.dir,
+                &file_id,
+                file_offset,
+                value_length,
+                &transaction,
+                self.handle.block_size(),
+            )
+            .context(msg)?;
+        }
+        Ok(())
     }
 
     /// Flush Writer's exclusive files and return them to the Handle pool.
@@ -361,7 +375,7 @@ impl Drop for BatchWriter<'_> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Value {
     file_id: FileId,
     file_offset: u64,
@@ -745,7 +759,7 @@ fn punch_value(
     file_id: &FileId,
     mut offset: u64,
     mut length: u64,
-    tx: &mut Transaction,
+    tx: &Transaction,
     block_size: u64,
 ) -> Result<()> {
     dbg!("punching value", file_id, offset, length);
@@ -783,11 +797,7 @@ fn punch_value(
 }
 
 /// Returns the end offset of the last active value before offset in the same file.
-fn query_last_end_offset(
-    tx: &mut Transaction,
-    file_id: &FileId,
-    offset: u64,
-) -> rusqlite::Result<u64> {
+fn query_last_end_offset(tx: &Transaction, file_id: &FileId, offset: u64) -> rusqlite::Result<u64> {
     tx.query_row(
         "select max(file_offset+value_length) as last_offset \
             from keys \

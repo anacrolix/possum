@@ -11,7 +11,7 @@ use log::info;
 
 use possum::punchfile::punchfile;
 use possum::seekhole::file_regions;
-use possum::{Handle};
+use possum::Handle;
 
 #[derive(clap::Subcommand)]
 enum Commands {
@@ -76,7 +76,6 @@ fn main() -> anyhow::Result<()> {
                     .read(true)
                     .open(&path)
                     .context("opening file")?;
-                let raw_fd = file.as_raw_fd();
                 for region in file_regions(&mut file)? {
                     println!(
                         "{}: {:?}, {}-{} (length {})",

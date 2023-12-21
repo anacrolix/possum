@@ -261,7 +261,7 @@ impl<'handle> BatchWriter<'handle> {
 
     pub fn commit(mut self) -> Result<WriteCommitResult> {
         let mut punch_values = vec![];
-        let mut transaction: OwnedTx = self.handle.start_immediate_transaction()?;
+        let transaction: OwnedTx = self.handle.start_immediate_transaction()?;
         let mut altered_files = HashSet::new();
         let mut write_commit_res = WriteCommitResult {
             last_used: None,
@@ -339,6 +339,8 @@ impl<'handle> BatchWriter<'handle> {
                 value_length,
                 &transaction,
                 self.handle.block_size(),
+                true,
+                true,
             )
             .context(msg)?;
         }
@@ -763,15 +765,17 @@ fn punch_value(
     mut length: u64,
     tx: &Transaction,
     block_size: u64,
+    greedy_start: bool,
+    check_hole: bool,
 ) -> Result<()> {
-    dbg!("punching value", file_id, offset, length);
+    let orig_offset = offset;
+    let orig_length = length;
     // Find out how far back we can punch and start there, correcting for block boundaries as we go.
-    // if offset % block_size != 0 {
-    let new_offset = ceil_multiple(query_last_end_offset(tx, file_id, offset)?, block_size);
-    length += offset - new_offset;
-    offset = new_offset;
-    // }
-    dbg!("adjusted punch dimensions", file_id, offset, length);
+    if offset % block_size != 0 || greedy_start {
+        let new_offset = ceil_multiple(query_last_end_offset(tx, file_id, offset)?, block_size);
+        length += offset - new_offset;
+        offset = new_offset;
+    }
     let mut file = open_file_id(OpenOptions::new().append(true), dir, file_id)?;
     // append doesn't mean our file position is at the end to begin with.
     let file_end = file.seek(End(0))?;
@@ -781,20 +785,26 @@ fn punch_value(
         // What if this is below the offset or negative?
         length -= end_offset % block_size;
     }
-    dbg!("punching", file_id, offset, length);
+    // We should never write past a known value, someone might be writing there.
+    assert!(offset < orig_offset + orig_length);
+    assert!(offset + length <= orig_offset + orig_length);
     let offset = offset.try_into()?;
     let length = length.try_into()?;
-    dbg!("punching", file_id, offset, length);
+    debug!("punching {} {} for {}", file_id, offset, length);
     punchfile(file.as_raw_fd(), offset, length).with_context(|| format!("length {}", length))?;
     // fcntl(file.as_raw_fd(), nix::fcntl::F_FULLFSYNC)?;
     // file.flush()?;
-    match seek_hole_whence(file.as_raw_fd(), offset, seekhole::Data).unwrap() {
-        Some(seek_offset) if seek_offset >= offset + length => {}
-        None => {}
-        otherwise => {
-            panic!("punched hole didn't appear: {:?}", otherwise)
-        }
-    };
+    if check_hole {
+        match seek_hole_whence(file.as_raw_fd(), offset, seekhole::Data).unwrap() {
+            // Data starts after the hole we just punched.
+            Some(seek_offset) if seek_offset >= offset + length => {}
+            // There's no data after the hole we just punched.
+            None => {}
+            otherwise => {
+                panic!("punched hole didn't appear: {:?}", otherwise)
+            }
+        };
+    }
     Ok(())
 }
 

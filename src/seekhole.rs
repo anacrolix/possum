@@ -1,5 +1,5 @@
 use super::*;
-use libc::SEEK_END;
+use libc::{ENXIO, SEEK_END};
 use nix::errno::errno;
 use nix::libc::{SEEK_DATA, SEEK_HOLE};
 use std::ffi::c_int;
@@ -10,7 +10,7 @@ type SeekWhence = c_int;
 
 /// Using i64 rather than off_t to enforce 64-bit offsets (the libc wrappers all use type aliases
 /// anyway).
-fn seek_hole_whence(
+pub fn seek_hole_whence(
     fd: RawFd,
     offset: i64,
     whence: impl Into<SeekWhence>,
@@ -18,8 +18,13 @@ fn seek_hole_whence(
     // lseek64?
     match lseek(fd, offset, whence) {
         Ok(offset) => Ok(Some(offset)),
-        Err(ENXIO) => Ok(None),
-        Err(errno) => Err(Error::from_raw_os_error(errno)),
+        Err(errno) => {
+            if errno == ENXIO {
+                Ok(None)
+            } else {
+                Err(Error::from_raw_os_error(errno))
+            }
+        }
     }
 }
 
@@ -62,7 +67,7 @@ impl std::ops::Not for RegionType {
     }
 }
 
-use RegionType::*;
+pub use RegionType::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Region {
@@ -85,7 +90,6 @@ pub fn file_regions(file: &mut File) -> Result<Vec<Region>> {
         let mut offset = 0;
         let mut whence = Data;
         loop {
-            dbg!(offset, whence);
             let new_offset = match seek_hole_whence(fd, offset, whence)? {
                 Some(a) => a,
                 None => match whence {
@@ -115,6 +119,7 @@ pub fn file_regions(file: &mut File) -> Result<Vec<Region>> {
         last_offset = offset;
         output.push(region);
     }
+    assert_eq!(output, regions_iter_to_vec(file).unwrap());
     Ok(output)
 }
 
@@ -140,12 +145,14 @@ impl Iter {
 impl Iterator for Iter {
     type Item = Result<Region>;
 
+    // We don't enter a final state, I think fused iterators are for that purpose. Plus it's valid
+    // for an iterator to start working again if the file changes.
     fn next(&mut self) -> Option<Self::Item> {
         let first_whence = !self.last_whence;
         let mut whence = first_whence;
         // This only runs twice. Once with each whence, starting with the one we didn't try last.
         loop {
-            dbg!(self.offset, whence);
+            // dbg!(self.offset, whence);
             match seek_hole_whence(self.fd, self.offset, whence) {
                 Ok(Some(offset)) if offset != self.offset => {
                     let region = Region {
@@ -165,6 +172,9 @@ impl Iterator for Iter {
                 break;
             }
         }
+        // We do this when both SEEK_DATA and SEEK_HOLE fail to move the offset. If a file ends in
+        // data, SEEK_HOLE will always get to the end, but if it ends in a hole, SEEK_HOLE will get
+        // stuck. Therefore, SEEK_END will progress past a final hole.
         match lseek(self.fd, 0, SEEK_END) {
             Err(errno) => Some(Err(Error::from_raw_os_error(errno).into())),
             Ok(offset) => {
@@ -176,6 +186,9 @@ impl Iterator for Iter {
                         start: self.offset,
                         end: offset,
                     };
+                    // Now that we're at the end of the file, the most likely reason for further
+                    // successful seeks would be new data being written. Therefore we want to ensure
+                    // SEEK_DATA is tried first.
                     self.last_whence = Hole;
                     self.offset = offset;
                     Some(Ok(region))
@@ -183,6 +196,12 @@ impl Iterator for Iter {
             }
         }
     }
+}
+
+fn regions_iter_to_vec(file: &mut File) -> Result<Vec<Region>> {
+    let fd = file.as_raw_fd();
+    let itered: Vec<_> = Iter::new(fd).collect::<Result<Vec<_>>>()?;
+    Ok(itered)
 }
 
 #[cfg(test)]

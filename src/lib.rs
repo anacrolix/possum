@@ -35,8 +35,10 @@ use clonefile::clonefile;
 pub use error::Error;
 use exclusive_file::ExclusiveFile;
 pub use handle::Handle;
+use libc::F_FULLFSYNC;
 use log::debug;
 use memmap2::Mmap;
+use nix::fcntl::fcntl;
 use num::Integer;
 use positioned_io::ReadAt;
 use rand::Rng;
@@ -44,12 +46,14 @@ use rusqlite::types::ValueRef::{Null, Real};
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{params, Connection, ToSql, Transaction};
+use std::os::unix::fs::OpenOptionsExt;
 use tempfile::TempDir;
 pub use walk::Entry as WalkEntry;
 use ErrorKind::InvalidInput;
 
 use crate::clonefile::fclonefile;
 use crate::punchfile::punchfile;
+use crate::seekhole::seek_hole_whence;
 use cpathbuf::CPathBuf;
 
 // Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.
@@ -275,6 +279,7 @@ impl<'handle> BatchWriter<'handle> {
                         file_id, file_offset, value_length
                     );
                     debug!("{}", msg);
+                    // self.handle.clones.lock().unwrap().remove(&file_id);
                     punch_value(
                         &self.handle.dir,
                         &file_id,
@@ -314,27 +319,31 @@ impl<'handle> BatchWriter<'handle> {
             }
             write_commit_res.count += 1;
         }
+        self.flush_exclusive_files();
         transaction.move_dependent(|tx| tx.commit().context("commit transaction"))?;
-        {
-            let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
-            // dbg!(
-            //     "adding {} exclusive files to handle",
-            //     self.exclusive_files.len()
-            // );
-            for mut ef in self.exclusive_files.drain(..) {
-                ef.committed().unwrap();
-                assert!(handle_exclusive_files.insert(ef.id.clone(), ef).is_none());
-            }
-            // dbg!(
-            //     "handle has {} exclusive files",
-            //     handle_exclusive_files.len()
-            // );
-        }
+
         // Forget any references to clones of files that have changed.
         for file_id in altered_files {
             self.handle.clones.lock().unwrap().remove(&file_id);
         }
         Ok(write_commit_res)
+    }
+
+    /// Flush Writer's exclusive files and return them to the Handle pool.
+    fn flush_exclusive_files(&mut self) {
+        let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
+        // dbg!(
+        //     "adding {} exclusive files to handle",
+        //     self.exclusive_files.len()
+        // );
+        for mut ef in self.exclusive_files.drain(..) {
+            ef.committed().unwrap();
+            assert!(handle_exclusive_files.insert(ef.id.clone(), ef).is_none());
+        }
+        // dbg!(
+        //     "handle has {} exclusive files",
+        //     handle_exclusive_files.len()
+        // );
     }
 }
 
@@ -740,13 +749,12 @@ fn punch_value(
     block_size: u64,
 ) -> Result<()> {
     dbg!("punching value", file_id, offset, length);
-    // If we're not at a block boundary to begin with, find out how far back we can punch and
-    // start there.
-    if offset % block_size != 0 {
-        let new_offset = ceil_multiple(query_last_end_offset(tx, file_id, offset)?, block_size);
-        length += offset - new_offset;
-        offset = new_offset;
-    }
+    // Find out how far back we can punch and start there, correcting for block boundaries as we go.
+    // if offset % block_size != 0 {
+    let new_offset = ceil_multiple(query_last_end_offset(tx, file_id, offset)?, block_size);
+    length += offset - new_offset;
+    offset = new_offset;
+    // }
     dbg!("adjusted punch dimensions", file_id, offset, length);
     let mut file = open_file_id(OpenOptions::new().append(true), dir, file_id)?;
     // append doesn't mean our file position is at the end to begin with.
@@ -757,13 +765,24 @@ fn punch_value(
         // What if this is below the offset or negative?
         length -= end_offset % block_size;
     }
-    debug!("punching {} at {} for {}", file_id, offset, length);
-    punchfile(file, offset.try_into()?, length.try_into()?)
-        .with_context(|| format!("length {}", length))?;
+    dbg!("punching", file_id, offset, length);
+    let offset = offset.try_into()?;
+    let length = length.try_into()?;
+    dbg!("punching", file_id, offset, length);
+    punchfile(file.as_raw_fd(), offset, length).with_context(|| format!("length {}", length))?;
+    // fcntl(file.as_raw_fd(), nix::fcntl::F_FULLFSYNC)?;
+    // file.flush()?;
+    match seek_hole_whence(file.as_raw_fd(), offset, seekhole::Data).unwrap() {
+        Some(seek_offset) if seek_offset >= offset + length => {}
+        None => {}
+        otherwise => {
+            panic!("punched hole didn't appear: {:?}", otherwise)
+        }
+    };
     Ok(())
 }
 
-// Returns the end offset of the last active value before offset in the same file.
+/// Returns the end offset of the last active value before offset in the same file.
 fn query_last_end_offset(
     tx: &mut Transaction,
     file_id: &FileId,
@@ -781,13 +800,6 @@ fn query_last_end_offset(
             res.map(|v| v.unwrap_or_default())
         },
     )
-    .or_else(|err| {
-        if matches!(err, rusqlite::Error::QueryReturnedNoRows) {
-            Ok(0)
-        } else {
-            Err(err)
-        }
-    })
 }
 
 fn to_usize_io<F>(from: F) -> io::Result<usize>

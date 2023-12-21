@@ -27,7 +27,7 @@ enum Commands {
     },
     // ( ͡° ͜ʖ ͡°)
     ShowHoles {
-        file: PathBuf,
+        files: Vec<PathBuf>,
     },
 }
 
@@ -70,14 +70,23 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         }
-        ShowHoles { file: path } => {
-            let mut file = OpenOptions::new()
-                .read(true)
-                .open(path)
-                .context("opening file")?;
-            let raw_fd = file.as_raw_fd();
-            for region in file_regions(&mut file)? {
-                println!("{:?}, length {}", region, region.length());
+        ShowHoles { files: paths } => {
+            for path in paths {
+                let mut file = OpenOptions::new()
+                    .read(true)
+                    .open(&path)
+                    .context("opening file")?;
+                let raw_fd = file.as_raw_fd();
+                for region in file_regions(&mut file)? {
+                    println!(
+                        "{}: {:?}, {}-{} (length {})",
+                        path.display(),
+                        region.region_type,
+                        region.start,
+                        region.end,
+                        region.length()
+                    );
+                }
             }
             Ok(())
         }

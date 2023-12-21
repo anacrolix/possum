@@ -11,7 +11,7 @@ use log::info;
 
 use possum::punchfile::punchfile;
 use possum::seekhole::file_regions;
-use possum::{seekhole, Handle};
+use possum::{Handle};
 
 #[derive(clap::Subcommand)]
 enum Commands {

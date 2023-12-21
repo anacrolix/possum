@@ -208,11 +208,11 @@ fn regions_iter_to_vec(file: &mut File) -> Result<Vec<Region>> {
 mod tests {
     use super::*;
     use crate::pathconf::path_min_hole_size;
-    use crate::seekhole;
+    
     use crate::testing::write_random_tempfile;
-    use itertools::Itertools;
+    
     use std::env::temp_dir;
-    use std::os::fd::{AsRawFd, IntoRawFd};
+    use std::os::fd::{AsRawFd};
 
     fn get_regions(file: &mut File) -> Result<Vec<Region>> {
         let fd = file.as_raw_fd();
@@ -222,7 +222,7 @@ mod tests {
         Ok(vec)
     }
 
-    #[test]
+    #[self::test]
     fn just_a_hole() -> Result<()> {
         let os_temp_dir = temp_dir();
         let mut min_hole_size = path_min_hole_size(&os_temp_dir)?;

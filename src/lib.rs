@@ -35,10 +35,10 @@ use clonefile::clonefile;
 pub use error::Error;
 use exclusive_file::ExclusiveFile;
 pub use handle::Handle;
-use libc::F_FULLFSYNC;
+
 use log::debug;
 use memmap2::Mmap;
-use nix::fcntl::fcntl;
+
 use num::Integer;
 use positioned_io::ReadAt;
 use rand::Rng;
@@ -46,7 +46,7 @@ use rusqlite::types::ValueRef::{Null, Real};
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{params, Connection, ToSql, Transaction};
-use std::os::unix::fs::OpenOptionsExt;
+
 use tempfile::TempDir;
 pub use walk::Entry as WalkEntry;
 use ErrorKind::InvalidInput;
@@ -55,6 +55,8 @@ use crate::clonefile::fclonefile;
 use crate::punchfile::punchfile;
 use crate::seekhole::seek_hole_whence;
 use cpathbuf::CPathBuf;
+
+pub use test_log::test;
 
 // Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.
 type PubResult<T> = Result<T, Error>;
@@ -838,7 +840,7 @@ const TO_USIZE_IO_ERR_PAYLOAD: &str = "can't convert to usize";
 mod tests {
     use super::*;
 
-    #[test]
+    #[self::test]
     fn test_to_usize_io() -> Result<()> {
         // Check u32 MAX converts to u32 (usize on 32 bit system) without error.
         assert_eq!(convert_int_io::<_, u32>(u32::MAX as u64)?, u32::MAX);

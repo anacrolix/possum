@@ -18,6 +18,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use fdlimit::raise_fd_limit;
 use itertools::Itertools;
+use possum::test;
 use possum::testing::*;
 use possum::walk::EntryType;
 use possum::Error::NoSuchKey;

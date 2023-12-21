@@ -4,9 +4,12 @@ use std::io::SeekFrom::End;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
-use anyhow::Context;
-use log::info;
+use anyhow::anyhow;
+
+use nix::errno::Errno;
 use nix::fcntl::FlockArg::LockExclusiveNonblock;
+
+const EWOULDBLOCK: Errno = Errno::EWOULDBLOCK;
 
 use super::*;
 use crate::FileId;
@@ -40,7 +43,6 @@ impl ExclusiveFile {
     }
 
     pub(crate) fn new(dir: impl AsRef<Path>) -> anyhow::Result<ExclusiveFile> {
-        let mut last_err = None;
         for _ in 0..10000 {
             let id = random_file_name().into();
             let file = OpenOptions::new()
@@ -51,10 +53,7 @@ impl ExclusiveFile {
                 Ok(file) => file,
                 Err(err) => return Err(err.into()),
             };
-            if let Err(err) = nix::fcntl::flock(file.as_raw_fd(), LockExclusiveNonblock) {
-                last_err = Some(err)
-            } else {
-                info!("opened with exclusive file id {}", id);
+            if try_lock_file(&mut file)? {
                 let end = file.seek(End(0))?;
                 return Ok(ExclusiveFile {
                     inner: file,
@@ -64,12 +63,13 @@ impl ExclusiveFile {
                 });
             }
         }
-        Err(last_err.unwrap()).context("gave up trying to create exclusive file")
+        bail!("gave up trying to create exclusive file")
     }
 
     pub(crate) fn from_file(mut file: File, id: FileId) -> anyhow::Result<ExclusiveFile> {
-        nix::fcntl::flock(file.as_raw_fd(), LockExclusiveNonblock)?;
-        info!("opened with exclusive file id {:?}", id);
+        if !try_lock_file(&mut file)? {
+            bail!("file is locked");
+        }
         let end = file.seek(End(0))?;
         Ok(ExclusiveFile {
             inner: file,
@@ -92,5 +92,18 @@ impl ExclusiveFile {
 impl Drop for ExclusiveFile {
     fn drop(&mut self) {
         // dbg!(self);
+    }
+}
+
+fn try_lock_file(file: &mut File) -> nix::Result<bool> {
+    match nix::fcntl::flock(file.as_raw_fd(), LockExclusiveNonblock) {
+        Ok(()) => Ok(true),
+        Err(errno) => {
+            if errno == EWOULDBLOCK {
+                Ok(false)
+            } else {
+                Err(errno)
+            }
+        }
     }
 }

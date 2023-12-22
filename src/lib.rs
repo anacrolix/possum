@@ -56,6 +56,7 @@ use crate::punchfile::punchfile;
 use crate::seekhole::seek_hole_whence;
 use cpathbuf::CPathBuf;
 
+#[cfg(test)]
 pub use test_log::test;
 
 // Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.

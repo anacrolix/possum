@@ -1,7 +1,6 @@
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
 
-use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 

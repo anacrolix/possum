@@ -39,8 +39,6 @@ fn lseek(fd: RawFd, offset: i64, whence: impl Into<SeekWhence>) -> Result<i64, i
     Ok(new_offset)
 }
 
-type Whence = RegionType;
-
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum RegionType {
     Hole,
@@ -208,11 +206,11 @@ fn regions_iter_to_vec(file: &mut File) -> Result<Vec<Region>> {
 mod tests {
     use super::*;
     use crate::pathconf::path_min_hole_size;
-    
+
     use crate::testing::write_random_tempfile;
-    
+
     use std::env::temp_dir;
-    use std::os::fd::{AsRawFd};
+    use std::os::fd::AsRawFd;
 
     fn get_regions(file: &mut File) -> Result<Vec<Region>> {
         let fd = file.as_raw_fd();

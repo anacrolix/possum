@@ -4,8 +4,6 @@ use std::io::SeekFrom::End;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
-use anyhow::anyhow;
-
 use nix::errno::Errno;
 use nix::fcntl::FlockArg::LockExclusiveNonblock;
 
@@ -113,9 +111,8 @@ fn try_lock_file(file: &mut File) -> nix::Result<bool> {
 mod tests {
     use self::test;
     use super::*;
-    use nix::libc::{_exit, fork};
+
     use std::os::fd::FromRawFd;
-    use tempfile::tempfile;
 
     #[test]
     fn flock_behaviour() -> Result<()> {

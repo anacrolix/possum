@@ -240,6 +240,7 @@ fn delete_key(conn: &Connection, key: &[u8]) -> rusqlite::Result<Value> {
 impl<'handle> BatchWriter<'handle> {
     fn get_exclusive_file(&mut self) -> Result<ExclusiveFile> {
         if let Some(ef) = self.exclusive_files.pop() {
+            debug!("reusing exclusive file from writer");
             return Ok(ef);
         }
         self.handle.get_exclusive_file()
@@ -252,6 +253,10 @@ impl<'handle> BatchWriter<'handle> {
             value_length: value.value_length,
             value_file_id: value.exclusive_file.id.clone(),
         });
+        debug!(
+            "pushing exclusive file {} into writer",
+            value.exclusive_file.id
+        );
         self.exclusive_files.push(value.exclusive_file);
         Ok(())
     }
@@ -357,6 +362,7 @@ impl<'handle> BatchWriter<'handle> {
         // );
         for mut ef in self.exclusive_files.drain(..) {
             ef.committed().unwrap();
+            debug!("returning exclusive file {} to handle", ef.id);
             assert!(handle_exclusive_files.insert(ef.id.clone(), ef).is_none());
         }
         // dbg!(

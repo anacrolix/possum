@@ -18,6 +18,7 @@ use std::time::Duration;
 use anyhow::{anyhow, Context, Result};
 use fdlimit::raise_fd_limit;
 use itertools::Itertools;
+use log::debug;
 use possum::testing::*;
 use possum::walk::EntryType;
 use possum::Error::NoSuchKey;
@@ -177,8 +178,16 @@ fn test_tempdir(name: &'static str) -> Result<TestTempDir> {
     })
 }
 
-#[test]
+use std::prelude::rust_2021::test as std_test;
+
+#[std_test]
 fn torrent_storage() -> Result<()> {
+    // Need to set this globally when testing, but you can't know what test will run first. At least
+    // if this is the only test to run, it will be guaranteed to run first.
+    let _ = env_logger::builder()
+        .is_test(true)
+        .format_timestamp_micros()
+        .try_init();
     let _ = raise_fd_limit();
     // Running in the same directory messes with the disk analysis at the end of the test.
     let tempdir = test_tempdir("torrent_storage")?;
@@ -203,6 +212,7 @@ fn torrent_storage() -> Result<()> {
             let piece_data = &piece_data;
             join_handles.push(scope.spawn(move || -> Result<()> {
                 let key = offset_key(offset);
+                debug!("starting block write");
                 handle.single_write_from(
                     key.into_bytes(),
                     &piece_data[offset..offset + block_size],
@@ -215,6 +225,7 @@ fn torrent_storage() -> Result<()> {
         }
         anyhow::Ok(())
     })?;
+    debug!("starting piece");
     let mut reader = handle.read()?;
     let values = block_offset_iter
         .map(|offset| {

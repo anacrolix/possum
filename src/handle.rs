@@ -14,13 +14,23 @@ impl Handle {
 
     pub(crate) fn get_exclusive_file(&self) -> Result<ExclusiveFile> {
         let mut files = self.exclusive_files.lock().unwrap();
-        if let Some((_, file)) = files.drain().next() {
+        // How do we avoid cloning the key and skipping the unnecessary remove check? Do we need a
+        // pop method on HashMap?
+        if let Some(id) = files.keys().next().cloned() {
+            let file = files.remove(&id).unwrap();
+            debug_assert_eq!(id, file.id);
+            debug!("using exclusive file {} from handle", &file.id);
             return Ok(file);
         }
         if let Some(file) = self.open_existing_exclusive_file()? {
+            debug!("opened existing values file {}", file.id);
             return Ok(file);
         }
-        ExclusiveFile::new(&self.dir)
+        let ret = ExclusiveFile::new(&self.dir);
+        if let Ok(file) = &ret {
+            debug!("created new exclusive file {}", file.id);
+        }
+        ret
     }
 
     fn open_existing_exclusive_file(&self) -> Result<Option<ExclusiveFile>> {

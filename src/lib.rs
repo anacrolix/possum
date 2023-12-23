@@ -333,16 +333,16 @@ impl<'handle> BatchWriter<'handle> {
             );
             debug!("{}", msg);
             // self.handle.clones.lock().unwrap().remove(&file_id);
-            punch_value(
-                &self.handle.dir,
-                &file_id,
-                file_offset,
-                value_length,
-                &transaction,
-                self.handle.block_size(),
-                true,
-                true,
-            )
+            punch_value(PunchValueOptions {
+                dir: &self.handle.dir,
+                file_id: &file_id,
+                offset: file_offset,
+                length: value_length,
+                tx: &transaction,
+                block_size: self.handle.block_size(),
+                greedy_start: self.handle.greedy_holes,
+                check_hole: true,
+            })
             .context(msg)?;
         }
         Ok(())
@@ -758,17 +758,29 @@ impl AsRef<FileId> for FileId {
     }
 }
 
-// Can't do this as &mut self for dumb Rust reasons.
-fn punch_value(
-    dir: &Path,
-    file_id: &FileId,
-    mut offset: u64,
-    mut length: u64,
-    tx: &Transaction,
+struct PunchValueOptions<'a> {
+    dir: &'a Path,
+    file_id: &'a FileId,
+    offset: u64,
+    length: u64,
+    tx: &'a Transaction<'a>,
     block_size: u64,
     greedy_start: bool,
     check_hole: bool,
-) -> Result<()> {
+}
+
+// Can't do this as &mut self for dumb Rust reasons.
+fn punch_value(opts: PunchValueOptions) -> Result<()> {
+    let PunchValueOptions {
+        dir,
+        file_id,
+        mut offset,
+        mut length,
+        tx,
+        block_size,
+        greedy_start,
+        check_hole,
+    } = opts;
     let orig_offset = offset;
     let orig_length = length;
     // Find out how far back we can punch and start there, correcting for block boundaries as we go.

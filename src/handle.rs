@@ -5,6 +5,7 @@ pub struct Handle {
     pub(crate) exclusive_files: Mutex<HashMap<FileId, ExclusiveFile>>,
     pub(crate) dir: PathBuf,
     pub(crate) clones: Mutex<FileCloneCache>,
+    pub(crate) greedy_holes: bool,
 }
 
 impl Handle {
@@ -72,6 +73,11 @@ impl Handle {
             exclusive_files: Default::default(),
             dir,
             clones: Default::default(),
+            greedy_holes: match std::env::var("POSSUM_GREEDY_HOLES") {
+                Ok(value) => value.parse()?,
+                Err(std::env::VarError::NotPresent) => true,
+                Err(err) => return Err(err.into()),
+            },
         };
         Ok(handle)
     }

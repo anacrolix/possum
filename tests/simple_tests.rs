@@ -12,7 +12,7 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::thread::{scope, sleep};
+use std::thread::sleep;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
@@ -180,8 +180,38 @@ fn test_tempdir(name: &'static str) -> Result<TestTempDir> {
 
 use std::prelude::rust_2021::test as std_test;
 
+struct TorrentStorageOpts {
+    piece_size: usize,
+    block_size: usize,
+    static_tempdir_name: &'static str,
+}
+
 #[std_test]
-fn torrent_storage() -> Result<()> {
+fn torrent_storage_small() -> Result<()> {
+    let block_size = 4096;
+    torrent_storage_inner(TorrentStorageOpts {
+        block_size,
+        piece_size: 4 * block_size,
+        static_tempdir_name: "torrent_storage_small",
+    })
+}
+
+#[std_test]
+fn torrent_storage_big() -> Result<()> {
+    let block_size = 4096;
+    torrent_storage_inner(TorrentStorageOpts {
+        block_size,
+        piece_size: 2 << 20,
+        static_tempdir_name: "torrent_storage_big",
+    })
+}
+
+fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
+    let TorrentStorageOpts {
+        piece_size,
+        block_size,
+        ..
+    } = opts;
     // Need to set this globally when testing, but you can't know what test will run first. At least
     // if this is the only test to run, it will be guaranteed to run first.
     let _ = env_logger::builder()
@@ -190,9 +220,8 @@ fn torrent_storage() -> Result<()> {
         .try_init();
     let _ = raise_fd_limit();
     // Running in the same directory messes with the disk analysis at the end of the test.
-    let tempdir = test_tempdir("torrent_storage")?;
+    let tempdir = test_tempdir(opts.static_tempdir_name)?;
     let handle = Handle::new(tempdir.path)?;
-    let piece_size = 2 << 20;
     let mut piece_data = vec![0; piece_size];
     // Hi alec
     rand::rngs::SmallRng::seed_from_u64(420).fill_bytes(&mut piece_data);
@@ -202,16 +231,17 @@ fn torrent_storage() -> Result<()> {
         hash.finish()
     };
     dbg!(format!("{:x}", piece_data_hash));
-    let block_size = 1 << 14;
     let block_offset_iter = (0..piece_size).step_by(block_size);
     let offset_key = |offset| format!("piece/{}", offset);
     std::thread::scope(|scope| {
         let mut join_handles = vec![];
-        for offset in block_offset_iter.clone() {
-            let handle = &handle;
+        for (index, offset) in block_offset_iter.clone().enumerate() {
             let piece_data = &piece_data;
+            let start_delay = Duration::from_micros(1000 * (index / 2) as u64);
+            let handle = &handle;
             join_handles.push(scope.spawn(move || -> Result<()> {
                 let key = offset_key(offset);
+                sleep(start_delay);
                 debug!("starting block write");
                 handle.single_write_from(
                     key.into_bytes(),
@@ -356,7 +386,7 @@ fn read_and_writes_different_handles() -> Result<()> {
     // let dir = tempdir.path().to_owned();
     let dir = PathBuf::from("herp");
     let key = "incr".as_bytes();
-    scope(|scope| {
+    std::thread::scope(|scope| {
         let reader = scope.spawn(|| read_consecutive_integers(dir.clone(), key, &range));
         let range = range.clone();
         let writer = scope.spawn(|| write_consecutive_integers(dir.clone(), key, range));

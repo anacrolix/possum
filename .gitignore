@@ -1,8 +1,9 @@
 /target
 /dir/
+/locky
 
 # TODO: Use a common persistent test directory
-/torrent_storage/
+/torrent_storage*/
 /big_set_get/
 /herp/
 /benchmark_get_exists/

@@ -1,4 +1,5 @@
 # TODO: Do this in build.rs instead
 
+.PHONY: possum.h
 possum.h:
-	cbindgen --output $@ --lang c
+	cbindgen --lang c -c ./cbindgen.toml --output $@

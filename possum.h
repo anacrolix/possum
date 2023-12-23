@@ -2,10 +2,16 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <sys/stat.h>
 
-typedef struct BatchWriter BatchWriter;
+struct BatchWriter;
 
-typedef struct Handle Handle;
+struct Handle;
+
+struct Stat {
+  timespec last_used;
+  uint64_t size;
+};
 
 struct Handle *possum_new(const char *path);
 
@@ -18,3 +24,8 @@ size_t possum_single_write_buf(struct Handle *handle,
                                size_t value_size);
 
 struct BatchWriter *possum_new_writer(struct Handle *handle);
+
+bool possum_single_stat(const struct Handle *handle,
+                        const unsigned char *key,
+                        size_t key_size,
+                        struct Stat *out_stat);

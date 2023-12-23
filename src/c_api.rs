@@ -37,7 +37,7 @@ pub extern "C" fn possum_single_write_buf(
     value: *const u8,
     value_size: size_t,
 ) -> size_t {
-    let key_vec = unsafe { slice::from_raw_parts(key, key_size) }.to_vec();
+    let key_vec = byte_vec_from_ptr_and_size(key, key_size);
     let value_slice = unsafe { slice::from_raw_parts(value, value_size) };
     const ERR_SENTINEL: usize = usize::MAX;
     let handle = unsafe { &*handle };
@@ -51,8 +51,47 @@ pub extern "C" fn possum_single_write_buf(
     }
 }
 
+fn byte_vec_from_ptr_and_size(ptr: *const c_uchar, size: size_t) -> Vec<u8> {
+    unsafe { slice::from_raw_parts(ptr, size) }.to_vec()
+}
+
 #[no_mangle]
 pub extern "C" fn possum_new_writer(handle: *mut Handle) -> *mut BatchWriter<'static> {
     let handle = unsafe { &*handle };
     Box::into_raw(Box::new(handle.new_writer().unwrap()))
+}
+
+pub use libc::timespec;
+
+#[repr(C)]
+pub struct Stat {
+    last_used: libc::timespec,
+    size: u64,
+}
+
+#[no_mangle]
+pub extern "C" fn possum_single_stat(
+    handle: *const Handle,
+    key: *const c_uchar,
+    key_size: size_t,
+    out_stat: *mut Stat,
+) -> bool {
+    match unsafe { handle.as_ref() }
+        .unwrap()
+        .read_single(byte_vec_from_ptr_and_size(key, key_size))
+        .unwrap()
+    {
+        Some(value) => {
+            let stat_in_rust = Stat {
+                size: value.length(),
+                last_used: libc::timespec {
+                    tv_sec: value.last_used().timestamp(),
+                    tv_nsec: value.last_used.timestamp_subsec_nanos().try_into().unwrap(),
+                },
+            };
+            unsafe { *out_stat = stat_in_rust };
+            true
+        }
+        None => false,
+    }
 }

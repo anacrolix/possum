@@ -1,0 +1,3 @@
+sys_includes = ["sys/stat.h"]
+style = "tag"
+language = "C"

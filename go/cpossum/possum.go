@@ -6,6 +6,7 @@ package possumC
 */
 import "C"
 import (
+	"github.com/anacrolix/generics"
 	"unsafe"
 )
 
@@ -20,4 +21,12 @@ func NewHandle(dir string) *Handle {
 
 func DropHandle(handle *Handle) {
 	C.possum_drop(handle)
+}
+
+type FileInfo struct {
+	cStat C.Stat
+}
+
+func SingleStat(handle *Handle, key string) (opt generics.Option[FileInfo]) {
+	opt.Ok = C.possum_single_stat(handle, unsafe.StringData(key), len(key), &opt.Value.cStat)
 }

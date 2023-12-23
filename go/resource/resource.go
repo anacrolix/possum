@@ -4,11 +4,12 @@ import (
 	"github.com/anacrolix/missinggo/v2/resource"
 	possum "github.com/anacrolix/possum/go"
 	"io"
+	"io/fs"
 	"os"
 )
 
 type Provider struct {
-	Handle possum.Handle
+	Handle *possum.Handle
 }
 
 func (p Provider) NewInstance(s string) (resource.Instance, error) {
@@ -22,7 +23,7 @@ var _ resource.Provider = Provider{}
 
 type instance struct {
 	key    string
-	handle possum.Handle
+	handle *possum.Handle
 }
 
 func (i instance) Get() (io.ReadCloser, error) {
@@ -35,8 +36,13 @@ func (i instance) Put(reader io.Reader) error {
 	panic("implement me")
 }
 
-func (i instance) Stat() (os.FileInfo, error) {
-	i.handle.
+func (i instance) Stat() (fi os.FileInfo, err error) {
+	fi, ok := i.handle.SingleStat(i.key)
+	if !ok {
+		err = fs.ErrNotExist
+		return
+	}
+	return
 }
 
 func (i instance) ReadAt(p []byte, off int64) (n int, err error) {

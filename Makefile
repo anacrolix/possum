@@ -2,4 +2,4 @@
 
 .PHONY: possum.h
 possum.h:
-	cbindgen --lang c -c ./cbindgen.toml --output $@
+	cbindgen --output $@

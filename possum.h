@@ -4,14 +4,16 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
-struct BatchWriter;
+typedef struct BatchWriter BatchWriter;
 
-struct Handle;
+typedef struct Handle Handle;
 
-struct Stat {
+typedef struct timespec timespec;
+
+typedef struct Stat {
   timespec last_used;
   uint64_t size;
-};
+} Stat;
 
 struct Handle *possum_new(const char *path);
 

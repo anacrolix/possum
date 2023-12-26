@@ -4,6 +4,7 @@ mod cpathbuf;
 mod error;
 mod exclusive_file;
 mod handle;
+mod item;
 mod owned_cell;
 pub mod pathconf;
 pub mod punchfile;
@@ -24,7 +25,7 @@ use std::os::fd::{AsRawFd, RawFd};
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::str;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 use std::{fs, io};
 
@@ -32,13 +33,12 @@ use anyhow::Result;
 use anyhow::{bail, Context};
 use chrono::NaiveDateTime;
 use clonefile::clonefile;
+use cpathbuf::CPathBuf;
 pub use error::Error;
 use exclusive_file::ExclusiveFile;
 pub use handle::Handle;
-
 use log::debug;
 use memmap2::Mmap;
-
 use num::Integer;
 use positioned_io::ReadAt;
 use rand::Rng;
@@ -46,21 +46,18 @@ use rusqlite::types::ValueRef::{Null, Real};
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{params, Connection, ToSql, Transaction};
-
 use tempfile::TempDir;
+#[cfg(test)]
+pub use test_log::test;
 pub use walk::Entry as WalkEntry;
 use ErrorKind::InvalidInput;
 
 use crate::clonefile::fclonefile;
 use crate::punchfile::punchfile;
 use crate::seekhole::seek_hole_whence;
-use cpathbuf::CPathBuf;
 
-#[cfg(test)]
-pub use test_log::test;
-
-// Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.
-type PubResult<T> = Result<T, Error>;
+/// Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.
+pub type PubResult<T> = Result<T, Error>;
 
 #[derive(Debug)]
 struct FileClone {
@@ -221,9 +218,19 @@ impl WriteCommitResult {
     }
 }
 
+const VALUE_COLUMN_NAMES: &[&str] = &["file_id", "file_offset", "value_length", "last_used"];
+
+fn value_columns_sql() -> &'static str {
+    static ONCE: OnceLock<String> = OnceLock::new();
+    ONCE.get_or_init(|| VALUE_COLUMN_NAMES.join(", ")).as_str()
+}
+
 fn delete_key(conn: &Connection, key: &[u8]) -> rusqlite::Result<Value> {
     conn.query_row(
-        "delete from keys where key=? returning file_id, file_offset, value_length, last_used",
+        &format!(
+            "delete from keys where key=? returning {}",
+            value_columns_sql()
+        ),
         [key],
         |row| {
             let file_id: FileId = row.get(0)?;
@@ -392,6 +399,18 @@ pub struct Value {
     file_offset: u64,
     length: u64,
     last_used: Timestamp,
+}
+
+impl Value {
+    fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        let file_id: FileId = row.get(0)?;
+        Ok(Value {
+            file_id,
+            file_offset: row.get(1)?,
+            length: row.get(2)?,
+            last_used: row.get(3)?,
+        })
+    }
 }
 
 impl AsRef<Value> for Value {

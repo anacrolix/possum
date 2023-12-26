@@ -28,6 +28,21 @@ func (me Handle) SingleStat(key string) (fi FileInfo, ok bool) {
 	return FileInfo{stat.Value, key}, true
 }
 
+func (me Handle) PutBuf(key string, buf []byte) error {
+	written, err := possumC.WriteSingleBuf(me.cHandle, key, buf)
+	if err != nil {
+		return err
+	}
+	if written != uint(len(buf)) {
+		panic("expected an error")
+	}
+	return err
+}
+
+func (me Handle) ListKeys(prefix string) (keys []string, err error) {
+	return possumC.ListKeys(me.cHandle, prefix)
+}
+
 type FileInfo struct {
 	cStat possumC.Stat
 	name  string

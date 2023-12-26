@@ -13,7 +13,7 @@ type Provider struct {
 }
 
 func (p Provider) NewInstance(s string) (resource.Instance, error) {
-	return instance{
+	return &instance{
 		key:    s,
 		handle: p.Handle,
 	}, nil
@@ -26,17 +26,20 @@ type instance struct {
 	handle *possum.Handle
 }
 
-func (i instance) Get() (io.ReadCloser, error) {
+func (i *instance) Get() (io.ReadCloser, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (i instance) Put(reader io.Reader) error {
-	//TODO implement me
-	panic("implement me")
+func (i *instance) Put(reader io.Reader) (err error) {
+	b, err := io.ReadAll(reader)
+	if err != nil {
+		return
+	}
+	return i.handle.PutBuf(i.key, b)
 }
 
-func (i instance) Stat() (fi os.FileInfo, err error) {
+func (i *instance) Stat() (fi os.FileInfo, err error) {
 	fi, ok := i.handle.SingleStat(i.key)
 	if !ok {
 		err = fs.ErrNotExist
@@ -45,19 +48,35 @@ func (i instance) Stat() (fi os.FileInfo, err error) {
 	return
 }
 
-func (i instance) ReadAt(p []byte, off int64) (n int, err error) {
+func (i *instance) ReadAt(p []byte, off int64) (n int, err error) {
+}
+
+func (i *instance) WriteAt(bytes []byte, i2 int64) (int, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (i instance) WriteAt(bytes []byte, i2 int64) (int, error) {
-	//TODO implement me
-	panic("implement me")
+func (i *instance) Delete() error {
+	// TODO: Just check the value doesn't exist for now.
+	_, err := i.Stat()
+	if err != nil {
+		return nil
+	}
+	panic("not implemented")
 }
 
-func (i instance) Delete() error {
-	//TODO implement me
-	panic("implement me")
-}
+var _ interface {
+	resource.Instance
+	resource.DirInstance
+} = (*instance)(nil)
 
-var _ resource.Instance = instance{}
+func (i *instance) Readdirnames() (names []string, err error) {
+	subKeys, err := i.handle.ListKeys(i.key + "/")
+	if err != nil {
+		return
+	}
+	// For now let's just return all the keys. If they have slashes, it might not be what the caller
+	// expects.
+	names = subKeys
+	return
+}

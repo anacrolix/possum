@@ -1,9 +1,10 @@
 //! Syscall wrappers for hole punching, system configuration, hole-seeking ( ͡° ͜ʖ ͡°), file cloning
 //! etc.
 
-use crate::CPathBuf;
 use std::os::fd::RawFd;
 use std::path::Path;
+
+use crate::CPathBuf;
 
 /// _PC_MIN_HOLE_SIZE is 27 on Darwin.
 /// https://github.com/apple/darwin-xnu/blob/main/bsd/sys/unistd.h. It doesn't seem to be defined

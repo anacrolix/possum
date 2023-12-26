@@ -258,6 +258,7 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
     debug!("starting piece");
     let mut reader = handle.read()?;
     let values = block_offset_iter
+        .clone()
         .map(|offset| {
             anyhow::Ok(
                 reader
@@ -308,7 +309,22 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
         };
     }
     assert_eq!(values_file_total_len, 2 * piece_size as u64);
+    assert_eq!(handle.list_items("a".as_bytes())?.len(), 0);
+    assert_eq!(handle.list_items("c".as_bytes())?.len(), 1);
+    let offsets_starting_with_1 = offsets_starting_with(block_offset_iter, "1").count();
+    assert_ne!(offsets_starting_with_1, 0);
+    assert_eq!(
+        handle.list_items("piece/1".as_bytes())?.len(),
+        offsets_starting_with_1
+    );
     Ok(())
+}
+
+fn offsets_starting_with<'a>(
+    offsets: impl Iterator<Item = usize> + 'a,
+    prefix: &'a str,
+) -> impl Iterator<Item = usize> + '_ {
+    offsets.filter(move |offset| offset.to_string().starts_with(prefix))
 }
 
 #[test]
@@ -394,7 +410,13 @@ fn read_and_writes_different_handles() -> Result<()> {
         writer.join().unwrap()?;
         anyhow::Ok(())
     })?;
-    let _handle = Handle::new(dir)?;
+    let handle = Handle::new(dir)?;
+    let keys: Vec<_> = handle
+        .list_items("".as_bytes())?
+        .into_iter()
+        .map(|item| item.key)
+        .collect();
+    assert_eq!(keys, vec!["incr".as_bytes()]);
     Ok(())
 }
 

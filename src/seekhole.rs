@@ -1,10 +1,12 @@
-use super::*;
-use libc::{ENXIO, SEEK_END};
-use nix::errno::errno;
-use nix::libc::{SEEK_DATA, SEEK_HOLE};
 use std::ffi::c_int;
 use std::io::Error;
 use std::os::fd::RawFd;
+
+use libc::{ENXIO, SEEK_END};
+use nix::errno::errno;
+use nix::libc::{SEEK_DATA, SEEK_HOLE};
+
+use super::*;
 
 type SeekWhence = c_int;
 
@@ -204,13 +206,12 @@ fn regions_iter_to_vec(file: &mut File) -> Result<Vec<Region>> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::pathconf::path_min_hole_size;
-
-    use crate::testing::write_random_tempfile;
-
     use std::env::temp_dir;
     use std::os::fd::AsRawFd;
+
+    use super::*;
+    use crate::pathconf::path_min_hole_size;
+    use crate::testing::write_random_tempfile;
 
     fn get_regions(file: &mut File) -> Result<Vec<Region>> {
         let fd = file.as_raw_fd();

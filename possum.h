@@ -4,30 +4,55 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
+typedef enum PossumError {
+  NoError,
+  NoSuchKey,
+  SqliteError,
+} PossumError;
+
 typedef struct BatchWriter BatchWriter;
 
 typedef struct Handle Handle;
 
-typedef struct timespec timespec;
+typedef const char *KeyPtr;
 
-typedef struct Stat {
-  timespec last_used;
+typedef size_t KeySize;
+
+typedef struct PossumTimestamp {
+  int64_t secs;
+  uint32_t nanos;
+} PossumTimestamp;
+
+typedef struct PossumStat {
+  struct PossumTimestamp last_used;
   uint64_t size;
-} Stat;
+} PossumStat;
+
+typedef struct possum_item {
+  KeyPtr key;
+  KeySize key_size;
+  struct PossumStat stat;
+} possum_item;
 
 struct Handle *possum_new(const char *path);
 
 void possum_drop(struct Handle *handle);
 
 size_t possum_single_write_buf(struct Handle *handle,
-                               const unsigned char *key,
-                               size_t key_size,
+                               KeyPtr key,
+                               KeySize key_size,
                                const uint8_t *value,
                                size_t value_size);
 
 struct BatchWriter *possum_new_writer(struct Handle *handle);
 
 bool possum_single_stat(const struct Handle *handle,
-                        const unsigned char *key,
+                        KeyPtr key,
                         size_t key_size,
-                        struct Stat *out_stat);
+                        struct PossumStat *out_stat);
+
+enum PossumError possum_list_keys(const struct Handle *handle,
+                                  const unsigned char *prefix,
+                                  size_t prefix_size,
+                                  struct possum_item **out_list,
+                                  size_t *out_list_len);

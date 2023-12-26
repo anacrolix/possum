@@ -170,7 +170,26 @@ impl Handle {
         Ok(last_used)
     }
 
+    /// Walks the underlying files in the possum directory.
     pub fn walk_dir(&self) -> Result<Vec<WalkEntry>> {
         crate::walk::walk_dir(&self.dir)
     }
+
+    pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
+        self.start_deferred_transaction_for_read()?
+            .prepare_cached(&format!(
+                "select {}, key from keys where substr(key, 1, octet_length(?1))=?1",
+                value_columns_sql()
+            ))?
+            .query_map([prefix], |row| {
+                Ok(Item {
+                    value: dbg!(Value::from_row(row))?,
+                    key: dbg!(row.get(VALUE_COLUMN_NAMES.len()))?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
 }
+
+use item::Item;

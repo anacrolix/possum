@@ -109,10 +109,10 @@ fn try_lock_file(file: &mut File) -> nix::Result<bool> {
 
 #[cfg(test)]
 mod tests {
+    use std::os::fd::FromRawFd;
+
     use self::test;
     use super::*;
-
-    use std::os::fd::FromRawFd;
 
     #[test]
     fn flock_behaviour() -> Result<()> {

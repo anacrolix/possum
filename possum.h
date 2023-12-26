@@ -8,6 +8,8 @@ typedef enum PossumError {
   NoError,
   NoSuchKey,
   SqliteError,
+  IoError,
+  AnyhowError,
 } PossumError;
 
 typedef struct BatchWriter BatchWriter;
@@ -56,3 +58,10 @@ enum PossumError possum_list_keys(const struct Handle *handle,
                                   size_t prefix_size,
                                   struct possum_item **out_list,
                                   size_t *out_list_len);
+
+enum PossumError possum_single_readat(const struct Handle *handle,
+                                      KeyPtr key,
+                                      KeySize key_size,
+                                      uint8_t *buf,
+                                      size_t *nbyte,
+                                      uint64_t offset);

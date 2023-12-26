@@ -84,3 +84,17 @@ func ListKeys(handle *Handle, prefix string) (keys []string, err error) {
 	}
 	return
 }
+
+func SingleReadAt(handle *Handle, key string, buf []byte, offset uint64) (n int, err error) {
+	var nByte C.size_t = C.size_t(len(buf))
+	err = mapError(C.possum_single_readat(
+		handle,
+		(*C.char)(unsafe.Pointer(unsafe.StringData(key))),
+		C.size_t(len(key)),
+		(*C.uchar)(unsafe.SliceData(buf)),
+		&nByte,
+		C.uint64_t(offset),
+	))
+	n = int(nByte)
+	return
+}

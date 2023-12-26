@@ -65,6 +65,7 @@ pub extern "C" fn possum_new_writer(handle: *mut Handle) -> *mut BatchWriter<'st
     Box::into_raw(Box::new(handle.new_writer().unwrap()))
 }
 
+use crate::c_api::PossumError::{AnyhowError, IoError, NoError};
 pub use libc::timespec;
 
 #[repr(C)]
@@ -166,6 +167,8 @@ pub enum PossumError {
     NoError,
     NoSuchKey,
     SqliteError,
+    IoError,
+    AnyhowError,
 }
 
 impl From<Error> for PossumError {
@@ -175,4 +178,40 @@ impl From<Error> for PossumError {
             Error::Sqlite(_) => PossumError::SqliteError,
         }
     }
+}
+
+impl From<io::Error> for PossumError {
+    fn from(_value: io::Error) -> Self {
+        IoError
+    }
+}
+
+impl From<anyhow::Error> for PossumError {
+    fn from(_value: anyhow::Error) -> Self {
+        AnyhowError
+    }
+}
+
+#[no_mangle]
+pub extern "C" fn possum_single_readat(
+    handle: *const Handle,
+    key: KeyPtr,
+    key_size: KeySize,
+    buf: *mut u8,
+    nbyte: *mut size_t,
+    offset: u64,
+) -> PossumError {
+    let key_vec = byte_vec_from_ptr_and_size(key, key_size);
+    let value = match unsafe { handle.as_ref() }.unwrap().read_single(key_vec) {
+        Ok(Some(value)) => value,
+        Ok(None) => return PossumError::NoSuchKey,
+        Err(err) => return err.into(),
+    };
+    let read_buf = unsafe { slice::from_raw_parts_mut(buf, *nbyte) };
+    let r_nbyte = match value.read_at(offset, read_buf) {
+        Err(err) => return err.into(),
+        Ok(ok) => ok,
+    };
+    unsafe { *nbyte = r_nbyte };
+    NoError
 }

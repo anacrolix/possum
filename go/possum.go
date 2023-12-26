@@ -43,6 +43,10 @@ func (me Handle) ListKeys(prefix string) (keys []string, err error) {
 	return possumC.ListKeys(me.cHandle, prefix)
 }
 
+func (me Handle) SingleReadAt(key string, off int64, p []byte) (n int, err error) {
+	return possumC.SingleReadAt(me.cHandle, key, p, uint64(off))
+}
+
 type FileInfo struct {
 	cStat possumC.Stat
 	name  string

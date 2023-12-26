@@ -183,8 +183,8 @@ impl Handle {
             ))?
             .query_map([prefix], |row| {
                 Ok(Item {
-                    value: dbg!(Value::from_row(row))?,
-                    key: dbg!(row.get(VALUE_COLUMN_NAMES.len()))?,
+                    value: Value::from_row(row)?,
+                    key: row.get(VALUE_COLUMN_NAMES.len())?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()

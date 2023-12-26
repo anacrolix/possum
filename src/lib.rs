@@ -114,32 +114,34 @@ impl BeginWriteValue<'_, '_> {
         // TODO: Delete the file if this errors?
         let exclusive_file = ExclusiveFile::open(dst_path)?;
         Ok(ValueWriter {
-            value_length: exclusive_file.next_write_offset,
             exclusive_file,
             value_file_offset: 0,
         })
     }
 
     pub fn begin(self) -> Result<ValueWriter> {
-        let exclusive_file = self.batch.get_exclusive_file()?;
+        let mut exclusive_file = self.batch.get_exclusive_file()?;
         Ok(ValueWriter {
-            value_file_offset: exclusive_file.next_write_offset,
-            value_length: 0,
+            value_file_offset: exclusive_file.next_write_offset()?,
             exclusive_file,
         })
     }
 }
 
+// TODO: Implement Drop for ValueWriter?
 #[derive(Debug)]
 pub struct ValueWriter {
     exclusive_file: ExclusiveFile,
     value_file_offset: u64,
-    value_length: u64,
 }
 
 impl ValueWriter {
+    pub fn get_file(&mut self) -> Result<&mut File> {
+        Ok(&mut self.exclusive_file.inner)
+    }
+
     pub fn copy_from(&mut self, mut value: impl Read) -> Result<u64> {
-        let value_file_offset = self.exclusive_file.next_write_offset;
+        let value_file_offset = self.exclusive_file.next_write_offset()?;
         let value_length = match std::io::copy(&mut value, &mut self.exclusive_file.inner) {
             Ok(ok) => ok,
             Err(err) => {
@@ -150,18 +152,17 @@ impl ValueWriter {
                 return Err(err.into());
             }
         };
-        self.value_length += value_length;
-        self.exclusive_file.next_write_offset += value_length;
         Ok(value_length)
+    }
+
+    pub fn value_length(&mut self) -> io::Result<u64> {
+        Ok(self.exclusive_file.next_write_offset()? - self.value_file_offset)
     }
 }
 
 impl Write for ValueWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let n = self.exclusive_file.inner.write(buf)?;
-        self.exclusive_file.next_write_offset += n as u64;
-        self.value_length += n as u64;
-        Ok(n)
+        self.exclusive_file.inner.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
@@ -253,11 +254,11 @@ impl<'handle> BatchWriter<'handle> {
         self.handle.get_exclusive_file()
     }
 
-    pub fn stage_write(&mut self, key: Vec<u8>, value: ValueWriter) -> anyhow::Result<()> {
+    pub fn stage_write(&mut self, key: Vec<u8>, mut value: ValueWriter) -> anyhow::Result<()> {
         self.pending_writes.push(PendingWrite {
             key,
             value_file_offset: value.value_file_offset,
-            value_length: value.value_length,
+            value_length: value.value_length()?,
             value_file_id: value.exclusive_file.id.clone(),
         });
         debug!(

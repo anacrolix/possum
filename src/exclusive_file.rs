@@ -1,6 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::io::Seek;
-use std::io::SeekFrom::End;
+use std::io::SeekFrom::{Current, End};
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
@@ -16,7 +16,6 @@ use crate::FileId;
 pub(crate) struct ExclusiveFile {
     pub(crate) inner: File,
     pub(crate) id: FileId,
-    pub(crate) next_write_offset: u64,
     last_committed_offset: u64,
 }
 
@@ -52,13 +51,7 @@ impl ExclusiveFile {
                 Err(err) => return Err(err.into()),
             };
             if try_lock_file(&mut file)? {
-                let end = file.seek(End(0))?;
-                return Ok(ExclusiveFile {
-                    inner: file,
-                    id,
-                    next_write_offset: end,
-                    last_committed_offset: end,
-                });
+                return Self::from_file(file, id);
             }
         }
         bail!("gave up trying to create exclusive file")
@@ -72,18 +65,24 @@ impl ExclusiveFile {
         Ok(ExclusiveFile {
             inner: file,
             id,
-            next_write_offset: end,
             last_committed_offset: end,
         })
     }
 
     pub(crate) fn committed(&mut self) -> io::Result<()> {
-        self.last_committed_offset = self.next_write_offset;
+        self.last_committed_offset = self.inner.seek(Current(0))?;
         if false {
             self.inner.flush()
         } else {
             Ok(())
         }
+    }
+
+    /// The exclusive file offset that writing should occur at. Maybe it shouldn't need to be
+    /// mutable since it shouldn't actually shift the file position, however it may decide to cache
+    /// it in the future.
+    pub(crate) fn next_write_offset(&mut self) -> io::Result<u64> {
+        self.inner.seek(Current(0))
     }
 }
 

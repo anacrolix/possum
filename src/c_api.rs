@@ -60,9 +60,33 @@ fn byte_vec_from_ptr_and_size(ptr: *const c_char, size: size_t) -> Vec<u8> {
 }
 
 #[no_mangle]
-pub extern "C" fn possum_new_writer(handle: *mut Handle) -> *mut BatchWriter<'static> {
+pub extern "C" fn possum_new_writer(handle: *mut Handle) -> PossumWriter {
     let handle = unsafe { &*handle };
     Box::into_raw(Box::new(handle.new_writer().unwrap()))
+}
+
+pub type PossumValueWriter = *mut ValueWriter;
+
+#[no_mangle]
+pub extern "C" fn possum_start_new_value(
+    writer: PossumWriter,
+    value: *mut PossumValueWriter,
+) -> PossumError {
+    let v = match unsafe { writer.as_mut() }.unwrap().new_value().begin() {
+        Err(err) => return err.into(),
+        Ok(ok) => Box::into_raw(Box::new(ok)),
+    };
+    unsafe { *value = v };
+    NoError
+}
+
+#[no_mangle]
+pub extern "C" fn possum_value_writer_fd(value: PossumValueWriter) -> RawFd {
+    unsafe { value.as_mut() }
+        .unwrap()
+        .get_file()
+        .unwrap()
+        .as_raw_fd()
 }
 
 use crate::c_api::PossumError::{AnyhowError, IoError, NoError};
@@ -215,3 +239,5 @@ pub extern "C" fn possum_single_readat(
     unsafe { *nbyte = r_nbyte };
     NoError
 }
+
+pub type PossumWriter = *mut BatchWriter<'static>;

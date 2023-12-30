@@ -109,8 +109,8 @@ pub struct PossumTimestamp {
     nanos: u32,
 }
 
-impl From<&Timestamp> for PossumTimestamp {
-    fn from(value: &Timestamp) -> Self {
+impl From<Timestamp> for PossumTimestamp {
+    fn from(value: Timestamp) -> Self {
         Self {
             secs: value.timestamp(),
             nanos: value.timestamp_subsec_nanos(),

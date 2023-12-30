@@ -276,7 +276,11 @@ impl<'handle> BatchWriter<'handle> {
         BeginWriteValue { batch: self }
     }
 
-    pub fn commit(mut self) -> Result<WriteCommitResult> {
+    pub fn commit(self) -> Result<WriteCommitResult> {
+        self.commit_inner(|| {})
+    }
+
+    pub fn commit_inner(mut self, before_write: impl Fn()) -> Result<WriteCommitResult> {
         let mut punch_values = vec![];
         let transaction: OwnedTx = self.handle.start_immediate_transaction()?;
         let mut altered_files = HashSet::new();
@@ -285,6 +289,7 @@ impl<'handle> BatchWriter<'handle> {
             count: 0,
         };
         for pw in self.pending_writes.drain(..) {
+            before_write();
             let existing = delete_key(&transaction, &pw.key);
             match existing {
                 Ok(value) => {
@@ -440,8 +445,8 @@ impl Value {
         self.length
     }
 
-    pub fn last_used(&self) -> &Timestamp {
-        &self.last_used
+    pub fn last_used(&self) -> Timestamp {
+        self.last_used
     }
 }
 

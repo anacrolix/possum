@@ -76,12 +76,14 @@ func ListKeys(handle *Handle, prefix string) (keys []string, err error) {
 	}
 	itemsSlice := unsafe.Slice(items, uint(itemsLen))
 	keys = make([]string, itemsLen)
-	for i := range keys {
+	for i, from := range itemsSlice {
 		keys[i] = C.GoStringN(
-			(*C.char)(itemsSlice[i].key),
-			C.int(itemsSlice[i].key_size),
+			(*C.char)(from.key),
+			C.int(from.key_size),
 		)
+		C.free(unsafe.Pointer(from.key))
 	}
+	C.free(unsafe.Pointer(items))
 	return
 }
 

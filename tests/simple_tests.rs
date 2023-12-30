@@ -413,33 +413,6 @@ fn reads_update_last_used() -> Result<()> {
 }
 
 #[test]
-fn last_used_consistent_between_pending_writes() -> Result<()> {
-    let handle = Handle::new(tempdir()?.into_path())?;
-    let key1 = Vec::from("hello");
-    let key2 = "hola".as_bytes().to_vec();
-    let value = "mundo".as_bytes();
-    let mut writer = handle.new_writer()?;
-    let mut value_writer_1 = writer.new_value().begin()?;
-    assert_eq!(
-        value.len(),
-        value_writer_1.copy_from(value)?.try_into().unwrap()
-    );
-    let mut value_writer_2 = writer.new_value().begin()?;
-    assert_eq!(
-        value.len(),
-        value_writer_2.copy_from(value)?.try_into().unwrap()
-    );
-    writer.stage_write(key1.clone(), value_writer_1)?;
-    writer.stage_write(key2.clone(), value_writer_2)?;
-    writer.commit_inner(|| sleep(LAST_USED_RESOLUTION))?;
-    let mut reader = handle.read()?;
-    let first_ts = reader.add(&key1)?.unwrap().last_used();
-    let second_ts = reader.add(&key2)?.unwrap().last_used();
-    assert_eq!(first_ts, second_ts);
-    Ok(())
-}
-
-#[test]
 fn read_and_writes_different_handles() -> Result<()> {
     let range = 0..=10;
     let tempdir = test_tempdir("read_and_writes_different_handles")?;

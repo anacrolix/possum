@@ -10,6 +10,8 @@ pub mod pathconf;
 pub mod punchfile;
 pub mod seekhole;
 pub mod testing;
+#[cfg(test)]
+mod tests;
 pub mod walk;
 
 use std::cmp::{max, min};
@@ -280,7 +282,7 @@ impl<'handle> BatchWriter<'handle> {
         self.commit_inner(|| {})
     }
 
-    pub fn commit_inner(mut self, before_write: impl Fn()) -> Result<WriteCommitResult> {
+    fn commit_inner(mut self, before_write: impl Fn()) -> Result<WriteCommitResult> {
         let mut punch_values = vec![];
         let transaction: OwnedTx = self.handle.start_immediate_transaction()?;
         let mut altered_files = HashSet::new();
@@ -914,34 +916,3 @@ fn make_to_usize_io_error() -> io::Error {
 
 const TO_USIZE_IO_ERROR_KIND: ErrorKind = InvalidInput;
 const TO_USIZE_IO_ERR_PAYLOAD: &str = "can't convert to usize";
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[self::test]
-    fn test_to_usize_io() -> Result<()> {
-        // Check u32 MAX converts to u32 (usize on 32 bit system) without error.
-        assert_eq!(convert_int_io::<_, u32>(u32::MAX as u64)?, u32::MAX);
-        // Check that u64 out of u32 bounds fails.
-        if let Err(err) = convert_int_io::<_, u32>(u32::MAX as u64 + 1) {
-            assert_eq!(err.kind(), TO_USIZE_IO_ERROR_KIND);
-            // Check that TryFromIntError isn't leaked.
-            assert!(err
-                .get_ref()
-                .unwrap()
-                .downcast_ref::<TryFromIntError>()
-                .is_none());
-            assert_eq!(err.get_ref().unwrap().to_string(), TO_USIZE_IO_ERR_PAYLOAD);
-        } else {
-            panic!("expected failure")
-        }
-        // This checks that usize always converts to u64 (hope you don't have a 128 bit system). We
-        // can't test u32 to u64 because it's infallible convert_int_io expects TryFromIntError.
-        assert_eq!(
-            convert_int_io::<_, u64>(u32::MAX as usize)?,
-            u32::MAX as u64
-        );
-        Ok(())
-    }
-}

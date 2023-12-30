@@ -821,7 +821,7 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
         length -= end_offset % block_size;
     }
     // We should never write past a known value, someone might be writing there.
-    assert!(offset < orig_offset + orig_length);
+    assert!(offset <= orig_offset + orig_length);
     assert!(offset + length <= orig_offset + orig_length);
     let offset = offset.try_into()?;
     let length = length.try_into()?;

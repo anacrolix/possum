@@ -23,6 +23,7 @@ enum Commands {
     },
     // ( ͡° ͜ʖ ͡°)
     ShowHoles {
+        #[arg(required=true,num_args=1..)]
         files: Vec<PathBuf>,
     },
 }

@@ -16,7 +16,7 @@ use std::cmp::{max, min};
 use std::collections::{hash_map, HashMap, HashSet};
 use std::ffi::OsString;
 use std::fmt::{Debug, Display, Formatter};
-use std::fs::{read_dir, File, OpenOptions};
+use std::fs::{read_dir, remove_dir, remove_dir_all, remove_file, File, OpenOptions};
 use std::io::SeekFrom::{End, Start};
 use std::io::{ErrorKind, Read, Seek, Write};
 use std::num::TryFromIntError;
@@ -39,6 +39,7 @@ use exclusive_file::ExclusiveFile;
 pub use handle::Handle;
 use log::debug;
 use memmap2::Mmap;
+use nix::fcntl::FlockArg::{LockExclusiveNonblock, LockSharedNonblock};
 use num::Integer;
 use positioned_io::ReadAt;
 use rand::Rng;
@@ -53,8 +54,10 @@ pub use walk::Entry as WalkEntry;
 use ErrorKind::InvalidInput;
 
 use crate::clonefile::fclonefile;
+use crate::exclusive_file::try_lock_file;
 use crate::punchfile::punchfile;
 use crate::seekhole::seek_hole_whence;
+use crate::walk::walk_dir;
 
 /// Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.
 pub type PubResult<T> = Result<T, Error>;
@@ -505,10 +508,18 @@ where
     V: AsRef<Value>,
     S: AsRef<Snapshot>,
 {
+    // This can be probably be extracted on initialization of SnapshotValue instead.
+    fn file_clone(&self) -> &Arc<Mutex<FileClone>> {
+        self.snapshot
+            .as_ref()
+            .file_clones
+            .get(&self.value.as_ref().file_id)
+            .unwrap()
+    }
+
     pub fn view<R>(&self, f: impl FnOnce(&[u8]) -> R) -> io::Result<R> {
         let value = self.value.as_ref();
-        let file_id = &value.file_id;
-        let file_clone = self.snapshot.as_ref().file_clones.get(file_id).unwrap();
+        let file_clone = self.file_clone();
         let start = to_usize_io(value.file_offset)?;
         let usize_length = to_usize_io(value.length)?;
         let end = usize::checked_add(start, usize_length).ok_or_else(make_to_usize_io_error)?;
@@ -522,14 +533,7 @@ where
         buf = buf
             .split_at_mut(min(buf.len() as u64, value.length) as usize)
             .0;
-        let mut file_clone = self
-            .snapshot
-            .as_ref()
-            .file_clones
-            .get(&value.file_id)
-            .unwrap()
-            .lock()
-            .unwrap();
+        let mut file_clone = self.file_clone().lock().unwrap();
         let file = &mut file_clone.file;
         file.seek(Start(value.file_offset))?;
         file.read(buf).map_err(Into::into)
@@ -537,6 +541,12 @@ where
 
     pub fn new_reader(&self) -> impl Read + '_ {
         positioned_io::Cursor::new(self)
+    }
+
+    /// For testing: Leak a reference to the snapshot tempdir so it's not cleaned up when all
+    /// references are forgotten. This could possibly be used from internal tests instead.
+    pub fn leak_snapshot_dir(&self) {
+        std::mem::forget(Arc::clone(&self.file_clone().lock().unwrap().tempdir))
     }
 }
 
@@ -633,7 +643,7 @@ impl<'a> Reader<'a> {
             None => {
                 let mut builder = tempfile::Builder::new();
                 builder.prefix(SNAPSHOT_DIR_NAME_PREFIX);
-                let new = Arc::new(builder.tempdir_in(src_dir)?);
+                let new = Arc::new(dbg!(builder.tempdir_in(src_dir)?));
                 *tempdir = Some(new);
                 tempdir.as_ref().unwrap()
             }
@@ -645,12 +655,14 @@ impl<'a> Reader<'a> {
         )?;
         let mut file = open_file_id(OpenOptions::new().read(true), tempdir_path, &file_id)?;
         let len = file.seek(End(0))?;
+        try_lock_file(&mut file, LockSharedNonblock)?;
         let file_clone = Arc::new(Mutex::new(FileClone {
             file,
             tempdir: tempdir.clone(),
             mmap: None,
             len,
         }));
+
         cache.insert(file_id, file_clone.clone());
         Ok(file_clone)
     }
@@ -843,6 +855,35 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
                 panic!("punched hole didn't appear: {:?}", otherwise)
             }
         };
+    }
+    Ok(())
+}
+
+fn delete_unused_snapshots(dir: &Path) -> Result<()> {
+    use walk::EntryType::*;
+    for entry in walk_dir(dir)? {
+        match entry.entry_type {
+            SnapshotDir => {
+                let res = remove_dir(&entry.path);
+                debug!("removing snapshot dir {:?}: {:?}", &entry.path, res);
+            }
+            SnapshotValue => {
+                let mut file = std::fs::File::open(&entry.path)?;
+                if try_lock_file(&mut file, LockExclusiveNonblock)? {
+                    let res = remove_file(&entry.path);
+                    debug!("removing snapshot value file {:?}: {:?}", &entry.path, res);
+                    let _ = remove_dir_all(
+                        entry
+                            .path
+                            .parent()
+                            .expect("snapshot values must have a parent dir"),
+                    );
+                } else {
+                    debug!("not deleting {:?}, still in use", &entry.path);
+                }
+            }
+            _ => {}
+        }
     }
     Ok(())
 }

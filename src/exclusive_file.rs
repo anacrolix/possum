@@ -5,7 +5,7 @@ use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
 use nix::errno::Errno;
-use nix::fcntl::FlockArg::LockExclusiveNonblock;
+use nix::fcntl::FlockArg;
 
 const EWOULDBLOCK: Errno = Errno::EWOULDBLOCK;
 
@@ -50,7 +50,7 @@ impl ExclusiveFile {
                 Ok(file) => file,
                 Err(err) => return Err(err.into()),
             };
-            if try_lock_file(&mut file)? {
+            if try_lock_file_exclusive(&mut file)? {
                 return Self::from_file(file, id);
             }
         }
@@ -58,7 +58,7 @@ impl ExclusiveFile {
     }
 
     pub(crate) fn from_file(mut file: File, id: FileId) -> anyhow::Result<ExclusiveFile> {
-        if !try_lock_file(&mut file)? {
+        if !try_lock_file_exclusive(&mut file)? {
             bail!("file is locked");
         }
         let end = file.seek(End(0))?;
@@ -92,8 +92,14 @@ impl Drop for ExclusiveFile {
     }
 }
 
-fn try_lock_file(file: &mut File) -> nix::Result<bool> {
-    let flock_res = nix::fcntl::flock(file.as_raw_fd(), LockExclusiveNonblock);
+fn try_lock_file_exclusive(file: &mut File) -> nix::Result<bool> {
+    try_lock_file(file, LockExclusiveNonblock)
+}
+
+pub(crate) use nix::fcntl::FlockArg::*;
+
+pub(crate) fn try_lock_file(file: &mut File, arg: FlockArg) -> nix::Result<bool> {
+    let flock_res = nix::fcntl::flock(file.as_raw_fd(), arg);
     match flock_res {
         Ok(()) => Ok(true),
         Err(errno) => {
@@ -116,23 +122,23 @@ mod tests {
     #[test]
     fn flock_behaviour() -> Result<()> {
         let mut file = tempfile::NamedTempFile::new()?;
-        assert!(try_lock_file(file.as_file_mut())?);
+        assert!(try_lock_file_exclusive(file.as_file_mut())?);
         // Taking an existing lock for the same underlying file succeeds.
-        assert!(try_lock_file(file.as_file_mut())?);
+        assert!(try_lock_file_exclusive(file.as_file_mut())?);
         let mut second_handle = File::open(file.path())?;
         // You can't take the lock from another file instance.
-        assert!(!try_lock_file(&mut second_handle)?);
+        assert!(!try_lock_file_exclusive(&mut second_handle)?);
         let mut file_dup = unsafe { File::from_raw_fd(libc::dup(file.as_raw_fd())) };
-        assert!(!try_lock_file(&mut second_handle)?);
+        assert!(!try_lock_file_exclusive(&mut second_handle)?);
         // You can take the existing lock from a file descriptor to the same file.
-        assert!(try_lock_file(&mut file_dup)?);
+        assert!(try_lock_file_exclusive(&mut file_dup)?);
         drop(file);
-        assert!(!try_lock_file(&mut second_handle)?);
+        assert!(!try_lock_file_exclusive(&mut second_handle)?);
         // Still holding the lock because the original file still exist.
-        assert!(try_lock_file(&mut file_dup)?);
+        assert!(try_lock_file_exclusive(&mut file_dup)?);
         drop(file_dup);
-        assert!(try_lock_file(&mut second_handle)?);
-        assert!(try_lock_file(&mut second_handle)?);
+        assert!(try_lock_file_exclusive(&mut second_handle)?);
+        assert!(try_lock_file_exclusive(&mut second_handle)?);
         Ok(())
     }
 }

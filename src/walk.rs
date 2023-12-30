@@ -40,7 +40,7 @@ impl TryFrom<&StdDirEntry> for DirEntry {
     }
 }
 
-pub(crate) fn walk_dir<P>(dir: P) -> Result<Vec<Entry>>
+pub fn walk_dir<P>(dir: P) -> Result<Vec<Entry>>
 where
     P: AsRef<Path>,
 {

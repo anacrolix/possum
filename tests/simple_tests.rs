@@ -20,7 +20,7 @@ use fdlimit::raise_fd_limit;
 use itertools::Itertools;
 use log::debug;
 use possum::testing::*;
-use possum::walk::EntryType;
+use possum::walk::{walk_dir, EntryType};
 use possum::Error::NoSuchKey;
 use possum::*;
 use rand::distributions::uniform::{UniformDuration, UniformSampler};
@@ -376,6 +376,44 @@ fn big_set_get() -> Result<()> {
 }
 
 #[test]
+fn cleanup_snapshots() -> Result<()> {
+    let tempdir = test_tempdir("cleanup_snapshots")?;
+    let count_snapshot_dirs = || {
+        walk_dir(tempdir.path.clone())
+            .unwrap()
+            .iter()
+            .filter(|entry| entry.entry_type == SnapshotDir)
+            .count()
+    };
+    let handle = Handle::new(tempdir.path.clone())?;
+    handle.single_write_from("hello".as_bytes().to_vec(), "world".as_bytes())?;
+    let value = handle.read_single("hello".as_bytes())?.unwrap();
+    assert_eq!(count_snapshot_dirs(), 1);
+    drop(handle);
+    // Value holds on to a snapshot dir.
+    assert_eq!(count_snapshot_dirs(), 1);
+    let _handle = Handle::new(tempdir.path.clone())?;
+    // Another handle does not clean up the snapshot dir because there's a lock on a value file
+    // inside it.
+    assert_eq!(count_snapshot_dirs(), 1);
+    drop(value);
+    assert_eq!(count_snapshot_dirs(), 0);
+    let handle = Handle::new(tempdir.path.clone())?;
+    assert_eq!(count_snapshot_dirs(), 0);
+    let value = handle.read_single("hello".as_bytes())?.unwrap();
+    assert_eq!(count_snapshot_dirs(), 1);
+    // This time leak the snapshot dir so it's still around after we drop everything.
+    value.leak_snapshot_dir();
+    drop(value);
+    drop(handle);
+    assert_eq!(count_snapshot_dirs(), 1);
+    // This will clean up the unused snapshot dir that was leaked earlier.
+    let _handle = Handle::new(tempdir.path.clone());
+    assert_eq!(count_snapshot_dirs(), 0);
+    Ok(())
+}
+
+#[test]
 fn reads_update_last_used() -> Result<()> {
     let handle = Handle::new(tempdir()?.into_path())?;
     let key = Vec::from("hello");
@@ -398,9 +436,8 @@ fn reads_update_last_used() -> Result<()> {
 #[test]
 fn read_and_writes_different_handles() -> Result<()> {
     let range = 0..=10;
-    // let tempdir = tempdir()?;
-    // let dir = tempdir.path().to_owned();
-    let dir = PathBuf::from("herp");
+    let tempdir = test_tempdir("read_and_writes_different_handles")?;
+    let dir = tempdir.path;
     let key = "incr".as_bytes();
     std::thread::scope(|scope| {
         let reader = scope.spawn(|| read_consecutive_integers(dir.clone(), key, &range));

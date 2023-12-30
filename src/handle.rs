@@ -1,4 +1,5 @@
 use super::*;
+use log::error;
 
 pub struct Handle {
     pub(crate) conn: Mutex<Connection>,
@@ -53,6 +54,7 @@ impl Handle {
     pub fn new(dir: PathBuf) -> Result<Self> {
         fs::create_dir_all(&dir)?;
         let sqlite_version = rusqlite::version_number();
+        // TODO: Why?
         if sqlite_version < 3042000 {
             bail!(
                 "sqlite version {} below minimum {}",
@@ -68,6 +70,9 @@ impl Handle {
                 .context("set conn locking mode exclusive")?;
         }
         init_manifest_schema(&conn).context("initing manifest schema")?;
+        if let Err(err) = delete_unused_snapshots(&dir) {
+            error!("error deleting unused snapshots: {}", err);
+        }
         let handle = Self {
             conn: Mutex::new(conn),
             exclusive_files: Default::default(),

@@ -25,7 +25,7 @@ use possum::Error::NoSuchKey;
 use possum::*;
 use rand::distributions::uniform::{UniformDuration, UniformSampler};
 use rand::{thread_rng, RngCore, SeedableRng};
-use tempfile::{tempdir, TempDir};
+use tempfile::tempdir;
 use test_log::test;
 
 #[test]
@@ -155,27 +155,6 @@ fn clone_in_file() -> Result<()> {
         file,
     )?;
     Ok(())
-}
-
-/// Keep this in scope so the tempdir isn't deleted right while the path is still in use.
-struct TestTempDir {
-    _tempdir: Option<TempDir>,
-    path: PathBuf,
-}
-
-fn test_tempdir(name: &'static str) -> Result<TestTempDir> {
-    let (tempdir, path) = if true {
-        (None, PathBuf::from(name))
-    } else {
-        let tempdir = tempdir()?;
-        let path = tempdir.path().to_owned();
-        (Some(tempdir), path)
-    };
-    dbg!(&path);
-    Ok(TestTempDir {
-        _tempdir: tempdir,
-        path,
-    })
 }
 
 use std::prelude::rust_2021::test as std_test;

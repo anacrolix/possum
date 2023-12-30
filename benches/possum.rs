@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
+use anyhow::Result;
 use criterion::{criterion_group, criterion_main, Criterion};
+use possum::testing::test_tempdir;
 use possum::Handle;
 
 mod clonefile;
@@ -48,6 +50,50 @@ pub fn benchmark_view_fallible(c: &mut Criterion) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn benchmark_list_keys_fallible(c: &mut Criterion) -> Result<()> {
+    let tempdir = test_tempdir("benchmark_list_keys")?;
+    let handle = Handle::new(tempdir.path)?;
+    let prefix_range = 0..=100;
+    let keys = |prefix| {
+        (0..100)
+            .map(|suffix| {
+                format!("{}/{}", prefix, prefix_range.end() * prefix + suffix).into_bytes()
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut writer = handle.new_writer()?;
+    for prefix in prefix_range.clone() {
+        for key in keys(prefix) {
+            let value = writer.new_value().begin()?;
+            writer.stage_write(key, value)?;
+            // handle.single_write_from(key, "".as_bytes())?;
+        }
+    }
+    writer.commit()?;
+    let exists_key = 1;
+    let exists_keys: Vec<String> = keys(exists_key)
+        .into_iter()
+        .map(|key| unsafe { String::from_utf8_unchecked(key) })
+        .collect();
+    let prefix = format!("{}/", exists_key).into_bytes();
+    c.bench_function("list", |b| {
+        b.iter(|| {
+            let items = handle.list_items(&prefix).unwrap();
+            for item in &items {
+                assert_eq!(item.value.length(), 0);
+            }
+            assert_eq!(
+                items
+                    .iter()
+                    .map(|item| std::str::from_utf8(&item.key).unwrap())
+                    .collect::<Vec<_>>(),
+                exists_keys
+            );
+        })
+    });
+    Ok(())
+}
+
 // This might be made generic using the Try trait.
 fn unwrap_fallible(
     f: impl FnOnce(&mut Criterion) -> anyhow::Result<()>,
@@ -63,10 +109,15 @@ fn benchmark_view(c: &mut Criterion) {
     unwrap_fallible(benchmark_view_fallible)(c)
 }
 
+fn benchmark_list_keys(c: &mut Criterion) {
+    unwrap_fallible(benchmark_list_keys_fallible)(c)
+}
+
 criterion_group!(
     benches,
     benchmark_read,
     benchmark_view,
+    benchmark_list_keys,
     clonefile::clonefile_benchmark
 );
 criterion_main!(benches);

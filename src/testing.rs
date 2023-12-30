@@ -4,7 +4,7 @@ use std::io::{copy, SeekFrom};
 
 use anyhow::{ensure, Result};
 use rand::Rng;
-use tempfile::NamedTempFile;
+use tempfile::{tempdir, NamedTempFile};
 use twox_hash::XxHash64;
 
 use super::*;
@@ -57,4 +57,25 @@ pub fn compare_reads(a: impl Read, b: impl Read) -> Result<()> {
     let bh = hash_reader(b)?;
     ensure!(ah == bh, "hash {} != {}", ah, bh);
     Ok(())
+}
+
+/// Keep this in scope so the tempdir isn't deleted right while the path is still in use.
+pub struct TestTempDir {
+    _tempdir: Option<TempDir>,
+    pub path: PathBuf,
+}
+
+pub fn test_tempdir(name: &'static str) -> Result<TestTempDir> {
+    let (tempdir, path) = if true {
+        (None, PathBuf::from(name))
+    } else {
+        let tempdir = tempdir()?;
+        let path = tempdir.path().to_owned();
+        (Some(tempdir), path)
+    };
+    dbg!(&path);
+    Ok(TestTempDir {
+        _tempdir: tempdir,
+        path,
+    })
 }

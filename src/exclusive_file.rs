@@ -1,6 +1,6 @@
 use std::fs::{File, OpenOptions};
 use std::io::Seek;
-use std::io::SeekFrom::{Current, End};
+use std::io::SeekFrom::End;
 use std::os::fd::AsRawFd;
 use std::path::{Path, PathBuf};
 
@@ -70,7 +70,7 @@ impl ExclusiveFile {
     }
 
     pub(crate) fn committed(&mut self) -> io::Result<()> {
-        self.last_committed_offset = self.inner.seek(Current(0))?;
+        self.last_committed_offset = self.inner.stream_position()?;
         if false {
             self.inner.flush()
         } else {
@@ -82,7 +82,7 @@ impl ExclusiveFile {
     /// mutable since it shouldn't actually shift the file position, however it may decide to cache
     /// it in the future.
     pub(crate) fn next_write_offset(&mut self) -> io::Result<u64> {
-        self.inner.seek(Current(0))
+        self.inner.stream_position()
     }
 }
 

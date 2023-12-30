@@ -131,7 +131,7 @@ impl Handle {
 
     pub fn read_single(&self, key: &[u8]) -> Result<Option<SnapshotValue<Value, Snapshot>>> {
         let mut reader = self.read()?;
-        let Some(value) = reader.add(&key)? else {
+        let Some(value) = reader.add(key)? else {
             return Ok(None);
         };
         let snapshot = reader.begin()?;

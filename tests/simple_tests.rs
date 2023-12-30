@@ -485,7 +485,7 @@ where
     sleep(RACE_SLEEP_DURATION);
     let mut last_i = None;
     loop {
-        let Some(value) = handle.read_single(&key)? else {
+        let Some(value) = handle.read_single(key)? else {
             continue;
         };
         let mut s = String::new();

@@ -185,7 +185,7 @@ pub extern "C" fn possum_list_keys(
                 key_size,
             )
         };
-        let dest = unsafe { (*out_list).offset(index as isize) };
+        let dest = unsafe { (*out_list).add(index) };
         unsafe { *dest = c_item };
     }
     PossumError::NoError

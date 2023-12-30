@@ -1,6 +1,6 @@
 package possumC
 
-// #cgo LDFLAGS: -L ../../target/debug -lpossum
+// #cgo LDFLAGS: -lpossum
 // #include "../../possum.h"
 import "C"
 import (

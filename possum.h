@@ -16,9 +16,15 @@ typedef struct BatchWriter BatchWriter;
 
 typedef struct Handle Handle;
 
+typedef struct ValueWriter ValueWriter;
+
 typedef const char *KeyPtr;
 
 typedef size_t KeySize;
+
+typedef struct BatchWriter *PossumWriter;
+
+typedef struct ValueWriter *PossumValueWriter;
 
 typedef struct PossumTimestamp {
   int64_t secs;
@@ -46,7 +52,11 @@ size_t possum_single_write_buf(struct Handle *handle,
                                const uint8_t *value,
                                size_t value_size);
 
-struct BatchWriter *possum_new_writer(struct Handle *handle);
+PossumWriter possum_new_writer(struct Handle *handle);
+
+enum PossumError possum_start_new_value(PossumWriter writer, PossumValueWriter *value);
+
+int possum_value_writer_fd(PossumValueWriter value);
 
 bool possum_single_stat(const struct Handle *handle,
                         KeyPtr key,

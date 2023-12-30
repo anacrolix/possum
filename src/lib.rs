@@ -208,17 +208,10 @@ impl Deref for Timestamp {
 }
 
 pub struct WriteCommitResult {
-    // If the current time for sqlite3 doesn't change during a transaction, this might be obtainable
-    // from the sqlite3 VFS and so not require any insertions to occur.
-    last_used: Option<Timestamp>,
     count: usize,
 }
 
 impl WriteCommitResult {
-    pub fn last_used(&self) -> Option<Timestamp> {
-        self.last_used
-    }
-
     pub fn count(&self) -> usize {
         self.count
     }
@@ -286,10 +279,7 @@ impl<'handle> BatchWriter<'handle> {
         let mut punch_values = vec![];
         let transaction: OwnedTx = self.handle.start_immediate_transaction()?;
         let mut altered_files = HashSet::new();
-        let mut write_commit_res = WriteCommitResult {
-            last_used: None,
-            count: 0,
-        };
+        let mut write_commit_res = WriteCommitResult { count: 0 };
         for pw in self.pending_writes.drain(..) {
             before_write();
             let existing = delete_key(&transaction, &pw.key);
@@ -304,24 +294,17 @@ impl<'handle> BatchWriter<'handle> {
                 Err(QueryReturnedNoRows) => (),
                 Err(err) => return Err(err.into()),
             }
-            let last_used = transaction.query_row(
+            let inserted = transaction.execute(
                 "insert into keys (key, file_id, file_offset, value_length)\
-                values (?, ?, ?, ?)\
-                returning last_used",
+                values (?, ?, ?, ?)",
                 rusqlite::params!(
                     pw.key,
                     pw.value_file_id.as_str(),
                     pw.value_file_offset,
                     pw.value_length
                 ),
-                |row| row.get(0),
             )?;
-            // last_used should not change between sqlite3_step. I'm assuming for now this means all
-            // keys committed will have the same last_used.
-            assert_eq!(
-                write_commit_res.last_used.get_or_insert(last_used),
-                &last_used
-            );
+            assert_eq!(inserted, 1);
             if pw.value_length != 0 {
                 altered_files.insert(pw.value_file_id);
             }

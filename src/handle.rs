@@ -138,13 +138,17 @@ impl Handle {
         Ok(Some(snapshot.value(value)))
     }
 
-    pub fn single_write_from(&self, key: Vec<u8>, r: impl Read) -> Result<(u64, Timestamp)> {
+    pub fn single_write_from(
+        &self,
+        key: Vec<u8>,
+        r: impl Read,
+    ) -> Result<(u64, WriteCommitResult)> {
         let mut writer = self.new_writer()?;
         let mut value = writer.new_value().begin()?;
         let n = value.copy_from(r)?;
         writer.stage_write(key, value)?;
         let commit = writer.commit()?;
-        Ok((n, commit.last_used().unwrap()))
+        Ok((n, commit))
     }
 
     pub fn clone_from_fd(&mut self, key: Vec<u8>, fd: RawFd) -> Result<u64> {

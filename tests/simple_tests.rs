@@ -397,10 +397,9 @@ fn reads_update_last_used() -> Result<()> {
     let handle = Handle::new(tempdir()?.into_path())?;
     let key = Vec::from("hello");
     let value = "mundo".as_bytes();
-    let (n, write_ts) = handle.single_write_from(key.clone(), value)?;
+    let (n, _) = handle.single_write_from(key.clone(), value)?;
     assert_eq!(n, 5);
     let read_ts = handle.read_single(&key)?.unwrap().last_used();
-    assert!(read_ts >= write_ts);
     let mut rng = thread_rng();
     let uniform = UniformDuration::new(Duration::from_nanos(0), LAST_USED_RESOLUTION);
     for _ in 0..100 {

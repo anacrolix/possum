@@ -25,9 +25,10 @@ pub extern "C" fn possum_new(path: *const c_char) -> *mut Handle {
     Box::into_raw(Box::new(handle))
 }
 
-// This drops the Handle Box. Instead, if this is hard to use correctly from C, it could drop a top-level reference
-// count for the box. i.e. If this one goes, there's no way to work with the Handle, and when all other outstanding
-// operations on the Handle complete, it will drop the Handle for real.
+// This drops the Handle Box. Instead, if this is hard to use correctly from C, it could drop a
+// top-level reference count for the box. i.e. If this one goes, there's no way to work with the
+// Handle, and when all other outstanding operations on the Handle complete, it will drop the Handle
+// for real.
 #[no_mangle]
 pub extern "C" fn possum_drop(handle: *mut Handle) {
     drop(unsafe { Box::from_raw(handle) })
@@ -57,6 +58,10 @@ pub extern "C" fn possum_single_write_buf(
 
 fn byte_vec_from_ptr_and_size(ptr: *const c_char, size: size_t) -> Vec<u8> {
     unsafe { slice::from_raw_parts(ptr as *const c_uchar, size) }.to_vec()
+}
+
+fn slice_u8_from_key_parts<'a>(ptr: KeyPtr, size: size_t) -> &'a [u8] {
+    unsafe { slice::from_raw_parts(ptr as *const u8, size) }
 }
 
 #[no_mangle]
@@ -122,7 +127,7 @@ pub extern "C" fn possum_single_stat(
 ) -> bool {
     match unsafe { handle.as_ref() }
         .unwrap()
-        .read_single(byte_vec_from_ptr_and_size(key, key_size))
+        .read_single(unsafe { slice::from_raw_parts(key as *const u8, key_size) })
         .unwrap()
     {
         Some(value) => {
@@ -225,8 +230,8 @@ pub extern "C" fn possum_single_readat(
     nbyte: *mut size_t,
     offset: u64,
 ) -> PossumError {
-    let key_vec = byte_vec_from_ptr_and_size(key, key_size);
-    let value = match unsafe { handle.as_ref() }.unwrap().read_single(key_vec) {
+    let rust_key = slice_u8_from_key_parts(key, key_size);
+    let value = match unsafe { handle.as_ref() }.unwrap().read_single(rust_key) {
         Ok(Some(value)) => value,
         Ok(None) => return PossumError::NoSuchKey,
         Err(err) => return err.into(),

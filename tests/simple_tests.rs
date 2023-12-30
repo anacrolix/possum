@@ -44,15 +44,15 @@ fn rename_key() -> Result<()> {
         5
     );
     handle
-        .read_single("hello".as_bytes().to_vec())?
+        .read_single("hello".as_bytes())?
         .ok_or(NoSuchKey)?
         .view(|value| assert_eq!(value, value_bytes))?;
     handle.rename_item("hello".as_ref(), "borat".as_ref())?;
     handle
-        .read_single("borat".as_bytes().to_vec())?
+        .read_single("borat".as_bytes())?
         .expect("key should be renamed to borat")
         .view(|value| assert_eq!(value, value_bytes))?;
-    assert!(handle.read_single("hello".as_bytes().to_vec())?.is_none());
+    assert!(handle.read_single("hello".as_bytes())?.is_none());
     let handle_entries = handle_relative_walk_entries_hashset(&handle);
     let counts = count_by_entry_types(&handle_entries);
     assert_eq!(counts[&ValuesFile], 1);
@@ -149,7 +149,7 @@ fn clone_in_file() -> Result<()> {
     file.seek(Start(0))?;
     compare_reads(
         handle
-            .read_single(key.to_owned())?
+            .read_single(key)?
             .context("item should exist")?
             .new_reader(),
         file,
@@ -284,7 +284,7 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
     writer.stage_write(completed_key.clone(), completed)?;
     writer.commit()?;
     let completed_value = handle
-        .read_single(completed_key.clone())?
+        .read_single(&completed_key)?
         .expect("completed item should exist");
     dbg!(&completed_value);
     let completed_reader = completed_value.new_reader();
@@ -344,7 +344,7 @@ fn big_set_get() -> Result<()> {
     let completed_key = format!("completed/{:x}", piece_data_hash).into_bytes();
     handle.single_write_from(completed_key.clone(), &*piece_data)?;
     let completed_value = handle
-        .read_single(completed_key.clone())?
+        .read_single(&completed_key)?
         .expect("completed item should exist");
     dbg!(&completed_value);
     let mut piece_data_actual_single_read = vec![0; piece_size * 2];
@@ -382,14 +382,14 @@ fn reads_update_last_used() -> Result<()> {
     let value = "mundo".as_bytes();
     let (n, write_ts) = handle.single_write_from(key.clone(), value)?;
     assert_eq!(n, 5);
-    let read_ts = *handle.read_single(key.clone())?.unwrap().last_used();
+    let read_ts = *handle.read_single(&key)?.unwrap().last_used();
     assert!(read_ts >= write_ts);
     let mut rng = thread_rng();
     let uniform = UniformDuration::new(Duration::from_nanos(0), LAST_USED_RESOLUTION);
     for _ in 0..100 {
         let dither = uniform.sample(&mut rng);
         sleep(LAST_USED_RESOLUTION + dither);
-        let new_read_ts = *handle.read_single(key.clone())?.unwrap().last_used();
+        let new_read_ts = *handle.read_single(&key)?.unwrap().last_used();
         assert!(new_read_ts > read_ts);
     }
     Ok(())
@@ -448,7 +448,7 @@ where
     sleep(RACE_SLEEP_DURATION);
     let mut last_i = None;
     loop {
-        let Some(value) = handle.read_single(key.to_owned())? else {
+        let Some(value) = handle.read_single(&key)? else {
             continue;
         };
         let mut s = String::new();

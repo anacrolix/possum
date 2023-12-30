@@ -37,7 +37,7 @@ pub fn benchmark_view_fallible(c: &mut Criterion) -> anyhow::Result<()> {
         b.iter(|| {
             (|| -> anyhow::Result<()> {
                 handle
-                    .read_single(key.clone())?
+                    .read_single(&key)?
                     .expect("key should exist")
                     .view(|view_bytes| assert_eq!(view_bytes, value_bytes))?;
                 Ok(())

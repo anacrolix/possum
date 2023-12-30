@@ -451,12 +451,12 @@ pub struct Snapshot {
 }
 
 #[derive(Debug)]
-pub struct SnapshotValue<V, S> {
+pub struct SnapshotValue<V> {
     value: V,
-    snapshot: S,
+    cloned_file: Arc<Mutex<FileClone>>,
 }
 
-impl<V, S> Deref for SnapshotValue<V, S> {
+impl<V> Deref for SnapshotValue<V> {
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
@@ -465,31 +465,20 @@ impl<V, S> Deref for SnapshotValue<V, S> {
 }
 
 impl Snapshot {
-    pub fn value<V>(&mut self, value: V) -> SnapshotValue<V, &mut Snapshot>
+    pub fn value<V>(&self, value: V) -> SnapshotValue<V>
     where
         V: AsRef<Value>,
     {
         SnapshotValue {
+            cloned_file: Arc::clone(self.file_clones.get(&value.as_ref().file_id).unwrap()),
             value,
-            snapshot: self,
-        }
-    }
-
-    pub fn with_value<V>(self, value: V) -> SnapshotValue<V, Self>
-    where
-        V: AsRef<Value>,
-    {
-        SnapshotValue {
-            value,
-            snapshot: self,
         }
     }
 }
 
-impl<V, S> ReadAt for SnapshotValue<V, S>
+impl<V> ReadAt for SnapshotValue<V>
 where
     V: AsRef<Value>,
-    S: AsRef<Snapshot>,
 {
     fn read_at(&self, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
         // TODO: Create a thiserror or io::Error for non-usize pos.
@@ -503,18 +492,13 @@ where
     }
 }
 
-impl<V, S> SnapshotValue<V, S>
+impl<V> SnapshotValue<V>
 where
     V: AsRef<Value>,
-    S: AsRef<Snapshot>,
 {
     // This can be probably be extracted on initialization of SnapshotValue instead.
     fn file_clone(&self) -> &Arc<Mutex<FileClone>> {
-        self.snapshot
-            .as_ref()
-            .file_clones
-            .get(&self.value.as_ref().file_id)
-            .unwrap()
+        &self.cloned_file
     }
 
     pub fn view<R>(&self, f: impl FnOnce(&[u8]) -> R) -> io::Result<R> {
@@ -643,7 +627,7 @@ impl<'a> Reader<'a> {
             None => {
                 let mut builder = tempfile::Builder::new();
                 builder.prefix(SNAPSHOT_DIR_NAME_PREFIX);
-                let new = Arc::new(dbg!(builder.tempdir_in(src_dir)?));
+                let new = Arc::new(builder.tempdir_in(src_dir)?);
                 *tempdir = Some(new);
                 tempdir.as_ref().unwrap()
             }

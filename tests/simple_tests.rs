@@ -103,7 +103,7 @@ fn set_get() -> Result<()> {
     writer.commit()?;
     let mut reader = handle.read()?;
     let value = reader.add("hello".as_bytes())?.expect("key should exist");
-    let mut snapshot = reader.begin()?;
+    let snapshot = reader.begin()?;
     snapshot
         .value(&value)
         .view(|read_value_bytes| assert_eq!(read_value_bytes, value_bytes))?;
@@ -129,7 +129,7 @@ fn set_get_reader() -> Result<()> {
     writer.commit()?;
     let mut reader = handle.read()?;
     let value = reader.add("hello".as_bytes())?.expect("key should exist");
-    let mut snapshot = reader.begin()?;
+    let snapshot = reader.begin()?;
     let mut reader_bytes = vec![];
     snapshot
         .value(&value)
@@ -267,7 +267,7 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let mut snapshot = reader.begin()?;
+    let snapshot = reader.begin()?;
     let mut stored_hash = Hash::default();
     let mut writer = handle.new_writer()?;
     let mut completed = writer.new_value().begin()?;

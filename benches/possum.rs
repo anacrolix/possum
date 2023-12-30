@@ -16,7 +16,7 @@ pub fn benchmark_read_fallible(c: &mut Criterion) -> anyhow::Result<()> {
             (|| -> anyhow::Result<()> {
                 let mut reader = handle.read()?;
                 let value = reader.add("hello".as_bytes())?.expect("key should exist");
-                let mut snapshot = reader.begin()?;
+                let snapshot = reader.begin()?;
                 let read_len = snapshot.value(&value).read(&mut buf)?;
                 assert_eq!(read_len, value_bytes.len());
                 Ok(())

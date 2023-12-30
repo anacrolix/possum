@@ -129,13 +129,13 @@ impl Handle {
         Ok(reader)
     }
 
-    pub fn read_single(&self, key: &[u8]) -> Result<Option<SnapshotValue<Value, Snapshot>>> {
+    pub fn read_single(&self, key: &[u8]) -> Result<Option<SnapshotValue<Value>>> {
         let mut reader = self.read()?;
         let Some(value) = reader.add(key)? else {
             return Ok(None);
         };
         let snapshot = reader.begin()?;
-        Ok(Some(snapshot.with_value(value)))
+        Ok(Some(snapshot.value(value)))
     }
 
     pub fn single_write_from(&self, key: Vec<u8>, r: impl Read) -> Result<(u64, Timestamp)> {

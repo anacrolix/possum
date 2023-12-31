@@ -55,3 +55,19 @@ fn last_used_consistent_between_pending_writes() -> Result<()> {
     assert_eq!(first_ts, second_ts);
     Ok(())
 }
+
+#[test]
+fn test_inc_array() {
+    let inc_and_ret = |arr: &[u8]| {
+        let mut arr = arr.to_vec();
+        if inc_big_endian_array(&mut arr[..]) {
+            Some(arr)
+        } else {
+            None
+        }
+    };
+    assert_eq!(inc_and_ret(&[0]), Some(vec![1]));
+    assert_eq!(inc_and_ret(&[]), None);
+    assert_eq!(inc_and_ret(&[0xff]), None);
+    assert_eq!(inc_and_ret(&[0xfe, 0xff]), Some(vec![0xff, 0]));
+}

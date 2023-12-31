@@ -899,3 +899,17 @@ fn make_to_usize_io_error() -> io::Error {
 
 const TO_USIZE_IO_ERROR_KIND: ErrorKind = InvalidInput;
 const TO_USIZE_IO_ERR_PAYLOAD: &str = "can't convert to usize";
+
+/// Increments the right most byte, overflowing leftwards. Returns false if incrementing the array
+/// overflows the available bytes.
+fn inc_big_endian_array(arr: &mut [u8]) -> bool {
+    for e in arr.iter_mut().rev() {
+        if *e == u8::MAX {
+            *e = 0
+        } else {
+            *e = *e + 1;
+            return true;
+        }
+    }
+    return false;
+}

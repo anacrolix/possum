@@ -185,12 +185,37 @@ impl Handle {
     }
 
     pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
+        let range_end = {
+            let mut prefix = prefix.to_owned();
+            if inc_big_endian_array(&mut prefix) {
+                Some(prefix)
+            } else {
+                None
+            }
+        };
+        match range_end {
+            None => self.list_items_inner(
+                &format!(
+                    "select {}, key from keys where key >= ?",
+                    value_columns_sql()
+                ),
+                [prefix],
+            ),
+            Some(range_end) => self.list_items_inner(
+                &format!(
+                    "select {}, key from keys where key >= ? and key < ?",
+                    value_columns_sql()
+                ),
+                rusqlite::params![prefix, range_end],
+            ),
+        }
+    }
+
+    fn list_items_inner(&self, sql: &str, params: impl rusqlite::Params) -> PubResult<Vec<Item>> {
         self.start_deferred_transaction_for_read()?
-            .prepare_cached(&format!(
-                "select {}, key from keys where substr(key, 1, octet_length(?1))=?1",
-                value_columns_sql()
-            ))?
-            .query_map([prefix], |row| {
+            .prepare_cached(sql)
+            .unwrap()
+            .query_map(params, |row| {
                 Ok(Item {
                     value: Value::from_row(row)?,
                     key: row.get(VALUE_COLUMN_NAMES.len())?,

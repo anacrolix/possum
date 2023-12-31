@@ -3,7 +3,7 @@ use std::fs::{File, OpenOptions};
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use log::info;
 use possum::punchfile::punchfile;
 use possum::seekhole::file_regions;
@@ -31,6 +31,8 @@ enum Commands {
 #[derive(clap::Subcommand, Clone)]
 enum DatabaseCommands {
     WriteFile { file: OsString },
+    ListKeys { prefix: String },
+    ReadKey { key: String },
 }
 
 #[derive(clap::Parser)]
@@ -56,13 +58,33 @@ fn main() -> anyhow::Result<()> {
         Database { dir, command } => {
             info!("sqlite version: {}", rusqlite::version());
             let handle = Handle::new(dir)?;
+            use DatabaseCommands::*;
             match command {
-                DatabaseCommands::WriteFile { file } => {
+                WriteFile { file } => {
                     let key = Path::new(&file)
                         .file_name()
                         .ok_or_else(|| anyhow!("can't extract file name"))?;
                     let file = File::open(&file).with_context(|| format!("opening {:?}", key))?;
                     handle.single_write_from(key.to_os_string().into_vec(), file)?;
+                    Ok(())
+                }
+                ListKeys { prefix } => {
+                    let items = handle.list_items(prefix.as_bytes())?;
+                    for item in items {
+                        println!("{}", unsafe { std::str::from_utf8_unchecked(&item.key) })
+                    }
+                    Ok(())
+                }
+                ReadKey { key } => {
+                    let Some(value) = handle.read_single(key.as_bytes())? else {
+                        bail!("key not found")
+                    };
+                    let mut r = value.new_reader();
+                    let n = std::io::copy(&mut r, &mut std::io::stdout())?;
+                    dbg!(n, value.length());
+                    if n != value.length() {
+                        bail!("read {} bytes, expected {}", n, value.length());
+                    }
                     Ok(())
                 }
             }

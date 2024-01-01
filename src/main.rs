@@ -7,7 +7,7 @@ use anyhow::{anyhow, bail, Context};
 use log::info;
 use possum::punchfile::punchfile;
 use possum::seekhole::file_regions;
-use possum::Handle;
+use possum::{query_last_end_offset, FileId, Handle, MANIFEST_DB_FILE_NAME};
 
 #[derive(clap::Subcommand)]
 enum Commands {
@@ -25,6 +25,12 @@ enum Commands {
     ShowHoles {
         #[arg(required=true,num_args=1..)]
         files: Vec<PathBuf>,
+    },
+    /// This is a debugging command to check how far back a greedy hole punch will go.
+    LastEndOffset {
+        dir: PathBuf,
+        file: String,
+        offset: u64,
     },
 }
 
@@ -106,6 +112,14 @@ fn main() -> anyhow::Result<()> {
                     );
                 }
             }
+            Ok(())
+        }
+        LastEndOffset { dir, file, offset } => {
+            let mut conn = rusqlite::Connection::open(dir.join(MANIFEST_DB_FILE_NAME))?;
+            let tx = conn.transaction()?;
+            let file_id = file.into();
+            let last_end = query_last_end_offset(&tx, &file_id, offset)?;
+            println!("{}", last_end);
             Ok(())
         }
     }

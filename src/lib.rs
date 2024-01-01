@@ -684,7 +684,7 @@ fn random_file_name() -> OsString {
     OsString::from_vec(begin)
 }
 
-const MANIFEST_DB_FILE_NAME: &str = "manifest.db";
+pub const MANIFEST_DB_FILE_NAME: &str = "manifest.db";
 
 fn valid_file_name(file_name: &str) -> bool {
     if file_name.starts_with(MANIFEST_DB_FILE_NAME) {
@@ -694,7 +694,7 @@ fn valid_file_name(file_name: &str) -> bool {
 }
 
 #[derive(Clone, Eq, PartialEq, Hash)]
-struct FileId(OsString);
+pub struct FileId(OsString);
 
 impl From<OsString> for FileId {
     fn from(value: OsString) -> Self {
@@ -815,7 +815,7 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
     assert!(offset + length <= orig_offset + orig_length);
     let offset = offset.try_into()?;
     let length = length.try_into()?;
-    debug!("punching {} {} for {}", file_id, offset, length);
+    debug!(target: "punching", "punching {} {} for {}", file_id, offset, length);
     punchfile(file.as_raw_fd(), offset, length).with_context(|| format!("length {}", length))?;
     // fcntl(file.as_raw_fd(), nix::fcntl::F_FULLFSYNC)?;
     // file.flush()?;
@@ -863,7 +863,11 @@ fn delete_unused_snapshots(dir: &Path) -> Result<()> {
 }
 
 /// Returns the end offset of the last active value before offset in the same file.
-fn query_last_end_offset(tx: &Transaction, file_id: &FileId, offset: u64) -> rusqlite::Result<u64> {
+pub fn query_last_end_offset(
+    tx: &Transaction,
+    file_id: &FileId,
+    offset: u64,
+) -> rusqlite::Result<u64> {
     tx.query_row(
         "select max(file_offset+value_length) as last_offset \
             from keys \

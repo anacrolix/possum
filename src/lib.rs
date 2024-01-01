@@ -299,7 +299,7 @@ impl<'handle> BatchWriter<'handle> {
                 values (?, ?, ?, ?)",
                 rusqlite::params!(
                     pw.key,
-                    pw.value_file_id.as_str(),
+                    pw.value_file_id,
                     pw.value_file_offset,
                     pw.value_length
                 ),

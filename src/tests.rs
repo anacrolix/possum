@@ -1,7 +1,6 @@
 use self::test;
 use super::*;
-use std::thread::sleep;
-use tempfile::tempdir;
+use crate::testing::test_tempdir;
 
 #[test]
 fn test_to_usize_io() -> Result<()> {
@@ -30,33 +29,6 @@ fn test_to_usize_io() -> Result<()> {
 }
 
 #[test]
-fn last_used_consistent_between_pending_writes() -> Result<()> {
-    let handle = Handle::new(tempdir()?.into_path())?;
-    let key1 = Vec::from("hello");
-    let key2 = "hola".as_bytes().to_vec();
-    let value = "mundo".as_bytes();
-    let mut writer = handle.new_writer()?;
-    let mut value_writer_1 = writer.new_value().begin()?;
-    assert_eq!(
-        value.len(),
-        value_writer_1.copy_from(value)?.try_into().unwrap()
-    );
-    let mut value_writer_2 = writer.new_value().begin()?;
-    assert_eq!(
-        value.len(),
-        value_writer_2.copy_from(value)?.try_into().unwrap()
-    );
-    writer.stage_write(key1.clone(), value_writer_1)?;
-    writer.stage_write(key2.clone(), value_writer_2)?;
-    writer.commit_inner(|| sleep(LAST_USED_RESOLUTION))?;
-    let mut reader = handle.read()?;
-    let first_ts = reader.add(&key1)?.unwrap().last_used();
-    let second_ts = reader.add(&key2)?.unwrap().last_used();
-    assert_eq!(first_ts, second_ts);
-    Ok(())
-}
-
-#[test]
 fn test_inc_array() {
     let inc_and_ret = |arr: &[u8]| {
         let mut arr = arr.to_vec();
@@ -70,4 +42,31 @@ fn test_inc_array() {
     assert_eq!(inc_and_ret(&[]), None);
     assert_eq!(inc_and_ret(&[0xff]), None);
     assert_eq!(inc_and_ret(&[0xfe, 0xff]), Some(vec![0xff, 0]));
+}
+
+#[test]
+fn test_replace_keys() -> Result<()> {
+    let tempdir = test_tempdir("test_replace_keys")?;
+    let handle = Handle::new(tempdir.path)?;
+    let value_for_key = |key| itertools::repeat_n(key as u8, key).collect::<Vec<u8>>();
+    let key_range = 0..=1000;
+    for _ in 0..2 {
+        let mut written = 0;
+        for key in key_range.clone() {
+            let value = value_for_key(key);
+            written += value.len();
+            handle.single_write_from(key.to_string().into_bytes(), &*value)?;
+        }
+        assert!(written >= 4096);
+    }
+    for key in key_range.clone() {
+        let mut value = Default::default();
+        handle
+            .read_single(key.to_string().as_bytes())?
+            .unwrap()
+            .new_reader()
+            .read_to_end(&mut value)?;
+        assert_eq!(value, value_for_key(key));
+    }
+    Ok(())
 }

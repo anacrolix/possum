@@ -6,13 +6,16 @@ use std::ptr::{copy_nonoverlapping, null_mut};
 use std::slice;
 
 use libc::{calloc, malloc, size_t};
-use log::error;
+use log::{error, warn};
 
 pub type KeyPtr = *const c_char;
 pub type KeySize = size_t;
 
 #[no_mangle]
 pub extern "C" fn possum_new(path: *const c_char) -> *mut Handle {
+    if let Err(err) = env_logger::try_init() {
+        warn!("error initing env_logger: {}", err);
+    }
     let c_str = unsafe { CStr::from_ptr(path) };
     let path_buf: PathBuf = OsStr::from_bytes(c_str.to_bytes()).into();
     let handle = match Handle::new(path_buf.clone()) {

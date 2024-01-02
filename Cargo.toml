@@ -2,6 +2,8 @@
 name = "possum"
 version = "0.1.0"
 edition = "2021"
+description = "concurrent disk-backed cache supporting efficient direct file I/O, transactions, and snapshots using file cloning and sparse files"
+license = "MPL-2.0"
 
 [lib]
 crate-type = ["staticlib", "cdylib", "lib"]
@@ -9,9 +11,9 @@ crate-type = ["staticlib", "cdylib", "lib"]
 [dependencies]
 anyhow = { version = "1.0.75", features = ["backtrace"] }
 clap = { version = "4.4.2", features = ["derive"] }
-libc = { git = "https://github.com/rust-lang/libc.git" }
+libc = { version = "0.2.149" }
 # Need sqlite3 3.42 or later.
-rusqlite = { git = "https://github.com/rusqlite/rusqlite.git", features = ["bundled"] }
+rusqlite = { version = "0.30.0", features = ["bundled"] }
 log = "0.4.20"
 env_logger = "0.10.0"
 nix = { version = "0.27.1", features = ["fs", "process"] }

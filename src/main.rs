@@ -87,7 +87,7 @@ fn main() -> anyhow::Result<()> {
                     };
                     let mut r = value.new_reader();
                     let n = std::io::copy(&mut r, &mut std::io::stdout())?;
-                    dbg!(n, value.length());
+                    // dbg!(n, value.length());
                     if n != value.length() {
                         bail!("read {} bytes, expected {}", n, value.length());
                     }

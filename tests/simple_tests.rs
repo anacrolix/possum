@@ -308,9 +308,8 @@ fn offsets_starting_with<'a>(
 
 #[test]
 fn big_set_get() -> Result<()> {
-    let tempdir = PathBuf::from("big_set_get");
-    dbg!(&tempdir);
-    let handle = Handle::new(tempdir)?;
+    let tempdir = test_tempdir("big_set_get")?;
+    let handle = Handle::new(tempdir.path)?;
     let piece_size = 2 << 20;
     let mut piece_data = vec![0; piece_size];
     thread_rng().fill_bytes(&mut piece_data);

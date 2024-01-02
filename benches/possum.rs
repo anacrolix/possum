@@ -1,3 +1,5 @@
+#![allow(clippy::unused_unit)]
+
 use std::path::PathBuf;
 
 use anyhow::Result;

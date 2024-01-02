@@ -40,16 +40,15 @@ typedef struct PossumStat {
   uint64_t size;
 } PossumStat;
 
-typedef struct possum_item {
-  KeyPtr key;
-  KeySize key_size;
-  struct PossumStat stat;
-} possum_item;
-
 typedef struct PossumBuf {
   const char *ptr;
   size_t size;
 } PossumBuf;
+
+typedef struct PossumItem {
+  struct PossumBuf key;
+  struct PossumStat stat;
+} PossumItem;
 
 typedef uint64_t PossumOffset;
 
@@ -74,11 +73,10 @@ bool possum_single_stat(const struct Handle *handle,
                         size_t key_size,
                         struct PossumStat *out_stat);
 
-enum PossumError possum_list_keys(const struct Handle *handle,
-                                  const unsigned char *prefix,
-                                  size_t prefix_size,
-                                  struct possum_item **out_list,
-                                  size_t *out_list_len);
+enum PossumError possum_list_items(const struct Handle *handle,
+                                   struct PossumBuf prefix,
+                                   struct PossumItem **out_list,
+                                   size_t *out_list_len);
 
 enum PossumError possum_single_readat(const struct Handle *handle,
                                       KeyPtr key,
@@ -96,10 +94,15 @@ enum PossumError possum_reader_add(struct PossumReader *reader,
 enum PossumError possum_reader_begin(struct PossumReader *reader);
 
 /**
- * Consumes the
+ * Consumes the reader, invalidating all values produced from it.
  */
 enum PossumError possum_reader_end(struct PossumReader *reader);
 
 enum PossumError possum_value_read_at(const struct PossumValue *value,
                                       struct PossumBuf *buf,
                                       PossumOffset offset);
+
+enum PossumError possum_reader_list_items(const struct PossumReader *reader,
+                                          struct PossumBuf prefix,
+                                          struct PossumItem **out_items,
+                                          size_t *out_len);

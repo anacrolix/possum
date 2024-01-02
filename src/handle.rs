@@ -1,5 +1,6 @@
-use super::*;
 use log::error;
+
+use super::*;
 
 pub struct Handle {
     pub(crate) conn: Mutex<Connection>,
@@ -185,44 +186,7 @@ impl Handle {
     }
 
     pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
-        let range_end = {
-            let mut prefix = prefix.to_owned();
-            if inc_big_endian_array(&mut prefix) {
-                Some(prefix)
-            } else {
-                None
-            }
-        };
-        match range_end {
-            None => self.list_items_inner(
-                &format!(
-                    "select {}, key from keys where key >= ?",
-                    value_columns_sql()
-                ),
-                [prefix],
-            ),
-            Some(range_end) => self.list_items_inner(
-                &format!(
-                    "select {}, key from keys where key >= ? and key < ?",
-                    value_columns_sql()
-                ),
-                rusqlite::params![prefix, range_end],
-            ),
-        }
-    }
-
-    fn list_items_inner(&self, sql: &str, params: impl rusqlite::Params) -> PubResult<Vec<Item>> {
-        self.start_deferred_transaction_for_read()?
-            .prepare_cached(sql)
-            .unwrap()
-            .query_map(params, |row| {
-                Ok(Item {
-                    value: Value::from_row(row)?,
-                    key: row.get(VALUE_COLUMN_NAMES.len())?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(Into::into)
+        list_items(&*self.start_deferred_transaction_for_read()?, prefix)
     }
 }
 

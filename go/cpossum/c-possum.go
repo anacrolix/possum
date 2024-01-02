@@ -6,12 +6,23 @@ import "C"
 import (
 	"errors"
 	"github.com/anacrolix/generics"
+	"io/fs"
 	"math"
+	"runtime"
 	"time"
 	"unsafe"
 )
 
-type Handle = C.Handle
+func mapError(err uint32) error {
+	switch err {
+	case C.NoError:
+		return nil
+	case C.NoSuchKey:
+		return fs.ErrNotExist
+	default:
+		panic(err)
+	}
+}
 
 type Stat = C.PossumStat
 
@@ -23,6 +34,8 @@ func (me Stat) LastUsed() time.Time {
 func (me Stat) Size() int64 {
 	return int64(me.size)
 }
+
+type Handle = C.Handle
 
 func NewHandle(dir string) *Handle {
 	cDir := C.CString(dir)
@@ -54,36 +67,33 @@ func WriteSingleBuf(handle *Handle, key string, buf []byte) (written uint, err e
 	return
 }
 
-func mapError(err uint32) error {
-	switch err {
-	case C.NoError:
-		return nil
-	default:
-		panic(err)
+func goListItems(items *C.PossumItem, itemsLen C.size_t) (goItems []Item) {
+	itemsSlice := unsafe.Slice(items, uint(itemsLen))
+	goItems = make([]Item, itemsLen)
+	for i, from := range itemsSlice {
+		to := &goItems[i]
+		to.Key = C.GoStringN(
+			(*C.char)(from.key.ptr),
+			C.int(from.key.size),
+		)
+		C.free(unsafe.Pointer(from.key.ptr))
+		to.Stat = from.stat
 	}
+	C.free(unsafe.Pointer(items))
+	return
 }
 
-func ListKeys(handle *Handle, prefix string) (keys []string, err error) {
-	var items *C.possum_item
+func HandleListItems(handle *Handle, prefix string) (items []Item, err error) {
+	var cItems *C.PossumItem
 	var itemsLen C.size_t
-	err = mapError(C.possum_list_keys(
+	err = mapError(C.possum_list_items(
 		handle,
-		(*C.uchar)(unsafe.StringData(prefix)),
-		C.size_t(len(prefix)),
-		&items, &itemsLen))
+		BufFromString(prefix),
+		&cItems, &itemsLen))
 	if err != nil {
 		return
 	}
-	itemsSlice := unsafe.Slice(items, uint(itemsLen))
-	keys = make([]string, itemsLen)
-	for i, from := range itemsSlice {
-		keys[i] = C.GoStringN(
-			(*C.char)(from.key),
-			C.int(from.key_size),
-		)
-		C.free(unsafe.Pointer(from.key))
-	}
-	C.free(unsafe.Pointer(items))
+	items = goListItems(cItems, itemsLen)
 	return
 }
 
@@ -108,8 +118,6 @@ func NewReader(handle *Handle) (r Reader, err error) {
 	return
 }
 
-type Value = *C.PossumValue
-
 func BufFromString(s string) C.PossumBuf {
 	return C.PossumBuf{(*C.char)(unsafe.Pointer(unsafe.StringData(s))), C.size_t(len(s))}
 }
@@ -123,17 +131,39 @@ func ReaderAdd(r Reader, key string) (v Value, err error) {
 	return
 }
 
-func ValueReadAt(v Value, buf []byte, offset int64) (n int, err error) {
-	pBuf := BufFromBytes(buf)
-	err = mapError(C.possum_value_read_at(v, &pBuf, C.uint64_t(offset)))
-	n = int(pBuf.size)
-	return
-}
-
 func ReaderBegin(r Reader) error {
 	return mapError(C.possum_reader_begin(r))
 }
 
 func ReaderEnd(r Reader) error {
 	return mapError(C.possum_reader_end(r))
+}
+
+func ReaderListItems(r Reader, prefix string) (items []Item, err error) {
+	var cItems *C.PossumItem
+	var itemsLen C.size_t
+	err = mapError(C.possum_reader_list_items(r, BufFromString(prefix), &cItems, &itemsLen))
+	if err != nil {
+		return
+	}
+	items = goListItems(cItems, itemsLen)
+	return
+}
+
+type Value = *C.PossumValue
+
+func ValueReadAt(v Value, buf []byte, offset int64) (n int, err error) {
+	pBuf := BufFromBytes(buf)
+	var pin runtime.Pinner
+	pin.Pin(&pBuf)
+	pin.Pin(pBuf.ptr)
+	defer pin.Unpin()
+	err = mapError(C.possum_value_read_at(v, &pBuf, C.uint64_t(offset)))
+	n = int(pBuf.size)
+	return
+}
+
+type Item struct {
+	Key string
+	Stat
 }

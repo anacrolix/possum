@@ -40,15 +40,15 @@ func (me Handle) PutBuf(key string, buf []byte) error {
 }
 
 func (me Handle) ListKeys(prefix string) (keys []string, err error) {
-	return possumC.ListKeys(me.cHandle, prefix)
+	items, err := possumC.HandleListItems(me.cHandle, prefix)
+	for _, item := range items {
+		keys = append(keys, item.Key)
+	}
+	return
 }
 
 func (me Handle) SingleReadAt(key string, off int64, p []byte) (n int, err error) {
 	return possumC.SingleReadAt(me.cHandle, key, p, uint64(off))
-}
-
-type Reader struct {
-	pc possumC.Reader
 }
 
 func (me Handle) NewReader() (r Reader, err error) {
@@ -56,8 +56,8 @@ func (me Handle) NewReader() (r Reader, err error) {
 	return
 }
 
-type Value struct {
-	c possumC.Value
+type Reader struct {
+	pc possumC.Reader
 }
 
 func (r Reader) Add(key string) (v Value, err error) {
@@ -71,6 +71,14 @@ func (r Reader) Begin() error {
 
 func (r Reader) End() error {
 	return possumC.ReaderEnd(r.pc)
+}
+
+func (r Reader) ListItems(prefix string) ([]Item, error) {
+	return possumC.ReaderListItems(r.pc, prefix)
+}
+
+type Value struct {
+	c possumC.Value
 }
 
 func (v Value) ReadAt(p []byte, off int64) (n int, err error) {
@@ -105,3 +113,5 @@ func (f FileInfo) IsDir() bool {
 func (f FileInfo) Sys() any {
 	return f.cStat
 }
+
+type Item = possumC.Item

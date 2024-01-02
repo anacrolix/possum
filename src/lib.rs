@@ -57,6 +57,7 @@ use ErrorKind::InvalidInput;
 
 use crate::clonefile::fclonefile;
 use crate::exclusive_file::try_lock_file;
+use crate::item::Item;
 use crate::punchfile::punchfile;
 use crate::seekhole::seek_hole_whence;
 use crate::walk::walk_dir;
@@ -598,6 +599,10 @@ impl<'a> Reader<'a> {
         Ok(Snapshot { file_clones })
     }
 
+    pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
+        list_items(self.owned_tx.deref(), prefix)
+    }
+
     fn get_file_clone(
         file_id: FileId,
         tempdir: &mut Option<Arc<TempDir>>,
@@ -910,9 +915,55 @@ fn inc_big_endian_array(arr: &mut [u8]) -> bool {
         if *e == u8::MAX {
             *e = 0
         } else {
-            *e = *e + 1;
+            *e += 1;
             return true;
         }
     }
-    return false;
+    false
+}
+
+fn list_items(tx: &Transaction, prefix: &[u8]) -> PubResult<Vec<Item>> {
+    let range_end = {
+        let mut prefix = prefix.to_owned();
+        if inc_big_endian_array(&mut prefix) {
+            Some(prefix)
+        } else {
+            None
+        }
+    };
+    match range_end {
+        None => list_items_inner(
+            tx,
+            &format!(
+                "select {}, key from keys where key >= ?",
+                value_columns_sql()
+            ),
+            [prefix],
+        ),
+        Some(range_end) => list_items_inner(
+            tx,
+            &format!(
+                "select {}, key from keys where key >= ? and key < ?",
+                value_columns_sql()
+            ),
+            rusqlite::params![prefix, range_end],
+        ),
+    }
+}
+
+fn list_items_inner(
+    tx: &Transaction,
+    sql: &str,
+    params: impl rusqlite::Params,
+) -> PubResult<Vec<Item>> {
+    tx.prepare_cached(sql)
+        .unwrap()
+        .query_map(params, |row| {
+            Ok(Item {
+                value: Value::from_row(row)?,
+                key: row.get(VALUE_COLUMN_NAMES.len())?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
 }

@@ -1,12 +1,14 @@
-use super::*;
-
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 use std::ffi::{c_char, c_uchar, CStr, OsStr};
 use std::mem::size_of;
+use std::pin::Pin;
 use std::ptr::{copy_nonoverlapping, null_mut};
 use std::slice;
 
 use libc::{calloc, malloc, size_t};
 use log::{error, warn};
+
+use super::*;
 
 pub type KeyPtr = *const c_char;
 pub type KeySize = size_t;
@@ -26,7 +28,7 @@ impl AsRef<[u8]> for PossumBuf {
 }
 
 impl PossumBuf {
-    fn as_mut_slice(&self) -> &mut [u8] {
+    fn as_mut_slice(&mut self) -> &mut [u8] {
         let ptr = self.ptr as *mut u8;
         unsafe { slice::from_raw_parts_mut(ptr, self.size) }
     }
@@ -38,9 +40,19 @@ pub enum PossumValue {
 }
 
 pub struct PossumReader {
-    rust_reader: Reader<'static>,
-    values: Vec<PossumValue>,
+    // Removed when converted to a snapshot. Specific to the C API so as to not need to expose
+    // Snapshot, and to convert Values automatically when a snapshot starts.
+    rust_reader: Option<Reader<'static>>,
+    values: Vec<Pin<Box<PossumValue>>>,
 }
+
+// impl Deref for PossumReader {
+//     type Target = Reader<'static>;
+//
+//     fn deref(&self) -> &Self::Target {
+//         &self.rust_reader
+//     }
+// }
 
 #[no_mangle]
 pub extern "C" fn possum_new(path: *const c_char) -> *mut Handle {
@@ -128,8 +140,9 @@ pub extern "C" fn possum_value_writer_fd(value: PossumValueWriter) -> RawFd {
         .as_raw_fd()
 }
 
-use crate::c_api::PossumError::{AnyhowError, IoError, NoError, SqliteError};
 pub use libc::timespec;
+
+use crate::c_api::PossumError::{AnyhowError, IoError, NoError, SqliteError};
 
 #[repr(C)]
 pub struct PossumStat {
@@ -177,36 +190,31 @@ pub extern "C" fn possum_single_stat(
 }
 
 #[repr(C)]
-pub struct possum_item {
-    key: KeyPtr,
-    key_size: KeySize,
+pub struct PossumItem {
+    key: PossumBuf,
     stat: PossumStat,
 }
 
-#[no_mangle]
-pub extern "C" fn possum_list_keys(
-    handle: *const Handle,
-    prefix: *const c_uchar,
-    prefix_size: size_t,
-    out_list: *mut *mut possum_item,
+/// Converts a sequence of Items to C PossumItems. The caller must free both the keys and the
+/// out_list. key_prefix_size is the amount of the key prefix to trim in the output, because the
+/// keys may be listed from the same prefix.
+fn items_list_to_c(
+    key_prefix_size: size_t,
+    items: Vec<Item>,
+    out_list: *mut *mut PossumItem,
     out_list_len: *mut size_t,
-) -> PossumError {
-    let items = match unsafe { handle.as_ref() }
-        .unwrap()
-        .list_items(unsafe { slice::from_raw_parts(prefix, prefix_size) })
-    {
-        Ok(items) => items,
-        Err(err) => return err.into(),
-    };
+) {
     unsafe {
-        *out_list = calloc(size_of::<possum_item>(), items.len()) as *mut possum_item;
+        *out_list = calloc(size_of::<PossumItem>(), items.len()) as *mut PossumItem;
         *out_list_len = items.len();
     }
     for (index, item) in items.iter().enumerate() {
-        let key_size = item.key.len() - prefix_size;
-        let c_item = possum_item {
-            key: unsafe { malloc(key_size) } as KeyPtr,
-            key_size,
+        let key_size = item.key.len() - key_prefix_size;
+        let c_item = PossumItem {
+            key: PossumBuf {
+                ptr: unsafe { malloc(key_size) } as KeyPtr,
+                size: key_size,
+            },
             stat: PossumStat {
                 last_used: item.value.last_used().into(),
                 size: item.value.length(),
@@ -214,14 +222,31 @@ pub extern "C" fn possum_list_keys(
         };
         unsafe {
             copy_nonoverlapping(
-                item.key[prefix_size..].as_ptr(),
-                c_item.key as *mut u8,
+                item.key[key_prefix_size..].as_ptr(),
+                c_item.key.ptr as *mut u8,
                 key_size,
             )
         };
         let dest = unsafe { (*out_list).add(index) };
         unsafe { *dest = c_item };
     }
+}
+
+#[no_mangle]
+pub extern "C" fn possum_list_items(
+    handle: *const Handle,
+    prefix: PossumBuf,
+    out_list: *mut *mut PossumItem,
+    out_list_len: *mut size_t,
+) -> PossumError {
+    let items = match unsafe { handle.as_ref() }
+        .unwrap()
+        .list_items(prefix.as_ref())
+    {
+        Ok(items) => items,
+        Err(err) => return err.into(),
+    };
+    items_list_to_c(prefix.size, items, out_list, out_list_len);
     NoError
 }
 
@@ -235,6 +260,8 @@ pub enum PossumError {
 }
 
 use PossumError::*;
+
+use crate::item::Item;
 
 impl From<Error> for PossumError {
     fn from(value: Error) -> Self {
@@ -299,7 +326,7 @@ pub extern "C" fn possum_reader_new(
         Err(err) => return err.into(),
     };
     *reader = Box::into_raw(Box::new(PossumReader {
-        rust_reader,
+        rust_reader: Some(rust_reader),
         values: Default::default(),
     }));
     NoError
@@ -312,28 +339,28 @@ pub extern "C" fn possum_reader_add(
     value: *mut *const PossumValue,
 ) -> PossumError {
     let reader = unsafe { reader.as_mut() }.unwrap();
-    let rust_value = match reader.rust_reader.add(key.as_ref()) {
+    let rust_value = match reader.rust_reader.as_mut().unwrap().add(key.as_ref()) {
         Ok(None) => return NoSuchKey,
         Ok(Some(value)) => value,
         Err(err) => return err.into(),
     };
     let new_value = PossumValue::ReaderValue(rust_value);
-    reader.values.push(new_value);
-    let out_value: *const PossumValue = reader.values.last().unwrap();
+    reader.values.push(Box::pin(new_value));
+    let out_value: *const PossumValue = &*reader.values.last().unwrap().as_ref().as_ref();
     unsafe { *value = out_value };
     NoError
 }
 
 #[no_mangle]
 pub extern "C" fn possum_reader_begin(reader: *mut PossumReader) -> PossumError {
-    let mut reader = unsafe { reader.read() };
-    let snapshot = match reader.rust_reader.begin() {
+    let reader = unsafe { &mut *reader };
+    let snapshot = match reader.rust_reader.take().unwrap().begin() {
         Ok(snapshot) => snapshot,
         Err(err) => return err.into(),
     };
     for value in &mut reader.values {
         // Modify the enum in place using values it contains.
-        take_mut::take(value, |value| {
+        take_mut::take(&mut *value.as_mut(), |value| {
             if let PossumValue::ReaderValue(reader_value) = value {
                 PossumValue::SnapshotValue(snapshot.value(reader_value.clone()))
             } else {
@@ -341,10 +368,10 @@ pub extern "C" fn possum_reader_begin(reader: *mut PossumReader) -> PossumError 
             }
         });
     }
-    unimplemented!()
+    NoError
 }
 
-/// Consumes the
+/// Consumes the reader, invalidating all values produced from it.
 #[no_mangle]
 pub extern "C" fn possum_reader_end(reader: *mut PossumReader) -> PossumError {
     drop(unsafe { Box::from_raw(reader) });
@@ -368,5 +395,27 @@ pub extern "C" fn possum_value_read_at(
             buf.size = ok;
         }
     }
+    NoError
+}
+
+#[no_mangle]
+pub extern "C" fn possum_reader_list_items(
+    reader: *const PossumReader,
+    prefix: PossumBuf,
+    out_items: *mut *mut PossumItem,
+    out_len: *mut size_t,
+) -> PossumError {
+    let reader = unsafe { &*reader };
+    items_list_to_c(
+        prefix.size,
+        reader
+            .rust_reader
+            .as_ref()
+            .unwrap()
+            .list_items(prefix.as_ref())
+            .unwrap(),
+        out_items,
+        out_len,
+    );
     NoError
 }

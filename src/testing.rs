@@ -66,14 +66,13 @@ pub struct TestTempDir {
 }
 
 pub fn test_tempdir(name: &'static str) -> Result<TestTempDir> {
-    let (tempdir, path) = if true {
+    let (tempdir, path) = if false {
         (None, PathBuf::from(name))
     } else {
         let tempdir = tempdir()?;
         let path = tempdir.path().to_owned();
         (Some(tempdir), path)
     };
-    dbg!(&path);
     Ok(TestTempDir {
         _tempdir: tempdir,
         path,

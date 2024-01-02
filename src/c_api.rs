@@ -97,7 +97,7 @@ pub extern "C" fn possum_value_writer_fd(value: PossumValueWriter) -> RawFd {
         .as_raw_fd()
 }
 
-use crate::c_api::PossumError::{AnyhowError, IoError, NoError};
+use crate::c_api::PossumError::{AnyhowError, IoError, NoError, SqliteError};
 pub use libc::timespec;
 
 #[repr(C)]
@@ -191,7 +191,7 @@ pub extern "C" fn possum_list_keys(
         let dest = unsafe { (*out_list).add(index) };
         unsafe { *dest = c_item };
     }
-    PossumError::NoError
+    NoError
 }
 
 #[repr(C)]
@@ -203,12 +203,20 @@ pub enum PossumError {
     AnyhowError,
 }
 
+use PossumError::*;
+
 impl From<Error> for PossumError {
     fn from(value: Error) -> Self {
         match value {
-            Error::NoSuchKey => PossumError::NoSuchKey,
-            Error::Sqlite(_) => PossumError::SqliteError,
+            Error::NoSuchKey => NoSuchKey,
+            Error::Sqlite(_) => SqliteError,
         }
+    }
+}
+
+impl From<rusqlite::Error> for PossumError {
+    fn from(_value: rusqlite::Error) -> Self {
+        SqliteError
     }
 }
 
@@ -249,3 +257,27 @@ pub extern "C" fn possum_single_readat(
 }
 
 pub type PossumWriter = *mut BatchWriter<'static>;
+
+pub type Reader = *mut crate::Reader<'static>;
+
+#[no_mangle]
+pub extern "C" fn possum_reader_new(handle: *const Handle, reader: *mut Reader) -> PossumError {
+    let handle = unsafe { handle.as_ref() }.unwrap();
+    let reader = unsafe { reader.as_mut() }.unwrap();
+    let rust_reader = match handle.read() {
+        Ok(ok) => ok,
+        Err(err) => return err.into(),
+    };
+    *reader = Box::into_raw(Box::new(rust_reader));
+    NoError
+}
+
+#[no_mangle]
+pub extern "C" fn possum_reader_add(reader: Reader, key: KeyPtr, key_size: KeySize) -> PossumError {
+    let reader = unsafe { reader.as_mut() }.unwrap();
+    match reader.add(slice_u8_from_key_parts(key, key_size)) {
+        Ok(None) => NoSuchKey,
+        Ok(_value) => unimplemented!(),
+        Err(err) => err.into(),
+    }
+}

@@ -94,6 +94,66 @@ pub fn benchmark_list_keys_fallible(c: &mut Criterion) -> Result<()> {
     Ok(())
 }
 
+// This is several benchmarks grouped together since I discovered that it doesn't make much
+// difference anyway. One problem is that the initialization outside a bench/iter routine for any
+// benchmark is always run, even if the benchmark itself isn't.
+pub fn multiple_benchmarks_fallible(c: &mut Criterion) -> Result<()> {
+    {
+        let tempdir = test_tempdir("benchmark_read_multiple_keys")?;
+        let handle = Handle::new(tempdir.path)?;
+        let batch_size = 10;
+        let keys = {
+            (0..batch_size)
+                .map(|suffix: i32| suffix.to_ne_bytes())
+                .collect::<Vec<_>>()
+        };
+        let mut writer = handle.new_writer()?;
+        for key in &keys {
+            let mut value = writer.new_value().begin()?;
+            value.copy_from(&key[..])?;
+            writer.stage_write(key.to_vec(), value)?;
+        }
+        writer.commit()?;
+        let mut group = c.benchmark_group("batch_read");
+        group.bench_function("existing", |b| {
+            b.iter(|| -> () {
+                (|| -> Result<()> {
+                    let mut reader = handle.read()?;
+                    for key in &keys {
+                        assert!(reader.add(key.as_slice())?.is_some());
+                    }
+                    reader.begin()?;
+                    Ok(())
+                })()
+                .unwrap()
+            });
+        });
+        group.bench_function("missing", |b| {
+            b.iter(|| -> () {
+                (|| -> Result<()> {
+                    let mut reader = handle.read()?;
+                    for key in (batch_size..batch_size * 2).map(i32::to_ne_bytes) {
+                        assert!(reader.add(key.as_slice())?.is_none());
+                    }
+                    reader.begin()?;
+                    Ok(())
+                })()
+                .unwrap()
+            });
+        });
+    }
+    {
+        let test_tempdir = test_tempdir("benchmark_transactions")?;
+        let handle = Handle::new(test_tempdir.path)?;
+        let mut group = c.benchmark_group("transactions");
+        group.bench_function("read", |b| b.iter(|| handle.read().unwrap()));
+        group.bench_function("writer", |b| {
+            b.iter(|| handle.new_writer().unwrap().commit().unwrap())
+        });
+    }
+    Ok(())
+}
+
 // This might be made generic using the Try trait.
 fn unwrap_fallible(
     f: impl FnOnce(&mut Criterion) -> anyhow::Result<()>,
@@ -113,11 +173,16 @@ fn benchmark_list_keys(c: &mut Criterion) {
     unwrap_fallible(benchmark_list_keys_fallible)(c)
 }
 
+fn multiple_benchmarks(c: &mut Criterion) {
+    unwrap_fallible(multiple_benchmarks_fallible)(c)
+}
+
 criterion_group!(
     benches,
     benchmark_read,
     benchmark_view,
     benchmark_list_keys,
+    multiple_benchmarks,
     clonefile::clonefile_benchmark
 );
 criterion_main!(benches);

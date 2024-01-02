@@ -7,7 +7,7 @@ use anyhow::{anyhow, bail, Context};
 use log::info;
 use possum::punchfile::punchfile;
 use possum::seekhole::file_regions;
-use possum::{query_last_end_offset, FileId, Handle, MANIFEST_DB_FILE_NAME};
+use possum::{query_last_end_offset, Handle, MANIFEST_DB_FILE_NAME};
 
 #[derive(clap::Subcommand)]
 enum Commands {

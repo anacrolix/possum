@@ -26,6 +26,7 @@ thiserror = "1.0.50"
 itertools = "0.12.0"
 maplit = "1.0.2"
 rand = { version = "0.8.5", features = ["small_rng"] }
+take_mut = "0.2.2"
 
 [dev-dependencies]
 criterion = "0.5.1"

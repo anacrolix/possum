@@ -47,6 +47,36 @@ func (me Handle) SingleReadAt(key string, off int64, p []byte) (n int, err error
 	return possumC.SingleReadAt(me.cHandle, key, p, uint64(off))
 }
 
+type Reader struct {
+	pc possumC.Reader
+}
+
+func (me Handle) NewReader() (r Reader, err error) {
+	r.pc, err = possumC.NewReader(me.cHandle)
+	return
+}
+
+type Value struct {
+	c possumC.Value
+}
+
+func (r Reader) Add(key string) (v Value, err error) {
+	v.c, err = possumC.ReaderAdd(r.pc, key)
+	return
+}
+
+func (r Reader) Begin() error {
+	return possumC.ReaderBegin(r.pc)
+}
+
+func (r Reader) End() error {
+	return possumC.ReaderEnd(r.pc)
+}
+
+func (v Value) ReadAt(p []byte, off int64) (n int, err error) {
+	return possumC.ValueReadAt(v.c, p, off)
+}
+
 type FileInfo struct {
 	cStat possumC.Stat
 	name  string

@@ -486,7 +486,6 @@ impl<V> SnapshotValue<V>
 where
     V: AsRef<Value>,
 {
-    // This can be probably be extracted on initialization of SnapshotValue instead.
     fn file_clone(&self) -> &Arc<Mutex<FileClone>> {
         &self.cloned_file
     }

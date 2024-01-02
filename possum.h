@@ -16,6 +16,10 @@ typedef struct BatchWriter BatchWriter;
 
 typedef struct Handle Handle;
 
+typedef struct PossumReader PossumReader;
+
+typedef struct PossumValue PossumValue;
+
 typedef struct ValueWriter ValueWriter;
 
 typedef const char *KeyPtr;
@@ -41,6 +45,13 @@ typedef struct possum_item {
   KeySize key_size;
   struct PossumStat stat;
 } possum_item;
+
+typedef struct PossumBuf {
+  const char *ptr;
+  size_t size;
+} PossumBuf;
+
+typedef uint64_t PossumOffset;
 
 struct Handle *possum_new(const char *path);
 
@@ -75,3 +86,20 @@ enum PossumError possum_single_readat(const struct Handle *handle,
                                       uint8_t *buf,
                                       size_t *nbyte,
                                       uint64_t offset);
+
+enum PossumError possum_reader_new(const struct Handle *handle, struct PossumReader **reader);
+
+enum PossumError possum_reader_add(struct PossumReader *reader,
+                                   struct PossumBuf key,
+                                   const struct PossumValue **value);
+
+enum PossumError possum_reader_begin(struct PossumReader *reader);
+
+/**
+ * Consumes the
+ */
+enum PossumError possum_reader_end(struct PossumReader *reader);
+
+enum PossumError possum_value_read_at(const struct PossumValue *value,
+                                      struct PossumBuf *buf,
+                                      PossumOffset offset);

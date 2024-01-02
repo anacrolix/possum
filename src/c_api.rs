@@ -10,6 +10,37 @@ use log::{error, warn};
 
 pub type KeyPtr = *const c_char;
 pub type KeySize = size_t;
+pub type PossumWriter = *mut BatchWriter<'static>;
+pub type PossumOffset = u64;
+
+#[repr(C)]
+pub struct PossumBuf {
+    ptr: *const c_char,
+    size: size_t,
+}
+
+impl AsRef<[u8]> for PossumBuf {
+    fn as_ref(&self) -> &[u8] {
+        slice_u8_from_key_parts(self.ptr, self.size)
+    }
+}
+
+impl PossumBuf {
+    fn as_mut_slice(&self) -> &mut [u8] {
+        let ptr = self.ptr as *mut u8;
+        unsafe { slice::from_raw_parts_mut(ptr, self.size) }
+    }
+}
+
+pub enum PossumValue {
+    ReaderValue(Value),
+    SnapshotValue(SnapshotValue<Value>),
+}
+
+pub struct PossumReader {
+    rust_reader: Reader<'static>,
+    values: Vec<PossumValue>,
+}
 
 #[no_mangle]
 pub extern "C" fn possum_new(path: *const c_char) -> *mut Handle {
@@ -256,28 +287,86 @@ pub extern "C" fn possum_single_readat(
     NoError
 }
 
-pub type PossumWriter = *mut BatchWriter<'static>;
-
-pub type Reader = *mut crate::Reader<'static>;
-
 #[no_mangle]
-pub extern "C" fn possum_reader_new(handle: *const Handle, reader: *mut Reader) -> PossumError {
+pub extern "C" fn possum_reader_new(
+    handle: *const Handle,
+    reader: *mut *mut PossumReader,
+) -> PossumError {
     let handle = unsafe { handle.as_ref() }.unwrap();
     let reader = unsafe { reader.as_mut() }.unwrap();
     let rust_reader = match handle.read() {
         Ok(ok) => ok,
         Err(err) => return err.into(),
     };
-    *reader = Box::into_raw(Box::new(rust_reader));
+    *reader = Box::into_raw(Box::new(PossumReader {
+        rust_reader,
+        values: Default::default(),
+    }));
     NoError
 }
 
 #[no_mangle]
-pub extern "C" fn possum_reader_add(reader: Reader, key: KeyPtr, key_size: KeySize) -> PossumError {
+pub extern "C" fn possum_reader_add(
+    reader: *mut PossumReader,
+    key: PossumBuf,
+    value: *mut *const PossumValue,
+) -> PossumError {
     let reader = unsafe { reader.as_mut() }.unwrap();
-    match reader.add(slice_u8_from_key_parts(key, key_size)) {
-        Ok(None) => NoSuchKey,
-        Ok(_value) => unimplemented!(),
-        Err(err) => err.into(),
+    let rust_value = match reader.rust_reader.add(key.as_ref()) {
+        Ok(None) => return NoSuchKey,
+        Ok(Some(value)) => value,
+        Err(err) => return err.into(),
+    };
+    let new_value = PossumValue::ReaderValue(rust_value);
+    reader.values.push(new_value);
+    let out_value: *const PossumValue = reader.values.last().unwrap();
+    unsafe { *value = out_value };
+    NoError
+}
+
+#[no_mangle]
+pub extern "C" fn possum_reader_begin(reader: *mut PossumReader) -> PossumError {
+    let mut reader = unsafe { reader.read() };
+    let snapshot = match reader.rust_reader.begin() {
+        Ok(snapshot) => snapshot,
+        Err(err) => return err.into(),
+    };
+    for value in &mut reader.values {
+        // Modify the enum in place using values it contains.
+        take_mut::take(value, |value| {
+            if let PossumValue::ReaderValue(reader_value) = value {
+                PossumValue::SnapshotValue(snapshot.value(reader_value.clone()))
+            } else {
+                panic!("expected reader value");
+            }
+        });
     }
+    unimplemented!()
+}
+
+/// Consumes the
+#[no_mangle]
+pub extern "C" fn possum_reader_end(reader: *mut PossumReader) -> PossumError {
+    drop(unsafe { Box::from_raw(reader) });
+    NoError
+}
+
+#[no_mangle]
+pub extern "C" fn possum_value_read_at(
+    value: *const PossumValue,
+    buf: *mut PossumBuf,
+    offset: PossumOffset,
+) -> PossumError {
+    let value = unsafe { &*value };
+    let PossumValue::SnapshotValue(value) = value else {
+        panic!("reader snapshot must be taken");
+    };
+    let buf = unsafe { &mut *buf };
+    match value.read_at(offset, buf.as_mut_slice()) {
+        Err(err) => return err.into(),
+        Ok(ok) => {
+            buf.size = ok;
+        }
+    }
+    NoError
 }

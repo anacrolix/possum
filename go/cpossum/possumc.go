@@ -100,3 +100,40 @@ func SingleReadAt(handle *Handle, key string, buf []byte, offset uint64) (n int,
 	n = int(nByte)
 	return
 }
+
+type Reader = *C.PossumReader
+
+func NewReader(handle *Handle) (r Reader, err error) {
+	err = mapError(C.possum_reader_new(handle, &r))
+	return
+}
+
+type Value = *C.PossumValue
+
+func BufFromString(s string) C.PossumBuf {
+	return C.PossumBuf{(*C.char)(unsafe.Pointer(unsafe.StringData(s))), C.size_t(len(s))}
+}
+
+func BufFromBytes(b []byte) C.PossumBuf {
+	return C.PossumBuf{(*C.char)(unsafe.Pointer(unsafe.SliceData(b))), C.size_t(len(b))}
+}
+
+func ReaderAdd(r Reader, key string) (v Value, err error) {
+	err = mapError(C.possum_reader_add(r, BufFromString(key), &v))
+	return
+}
+
+func ValueReadAt(v Value, buf []byte, offset int64) (n int, err error) {
+	pBuf := BufFromBytes(buf)
+	err = mapError(C.possum_value_read_at(v, &pBuf, C.uint64_t(offset)))
+	n = int(pBuf.size)
+	return
+}
+
+func ReaderBegin(r Reader) error {
+	return mapError(C.possum_reader_begin(r))
+}
+
+func ReaderEnd(r Reader) error {
+	return mapError(C.possum_reader_end(r))
+}

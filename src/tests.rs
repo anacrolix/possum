@@ -1,5 +1,6 @@
 use self::test;
 use super::*;
+use crate::seekhole::{file_regions, Data, Hole, Region};
 use crate::testing::test_tempdir;
 
 #[test]
@@ -44,29 +45,77 @@ fn test_inc_array() {
     assert_eq!(inc_and_ret(&[0xfe, 0xff]), Some(vec![0xff, 0]));
 }
 
+/// Show that replacing keys doesn't cause a key earlier in the same values file to be punched. This
+/// occurred because there were file_id values in the manifest file that had the wrong type, and so
+/// the query that looked for the starting offset for hole punching would punch out the whole file
+/// thinking it was empty.
 #[test]
 fn test_replace_keys() -> Result<()> {
     let tempdir = test_tempdir("test_replace_keys")?;
-    let handle = Handle::new(tempdir.path)?;
-    let value_for_key = |key| itertools::repeat_n(key as u8, key).collect::<Vec<u8>>();
-    let key_range = 0..=1000;
-    for _ in 0..2 {
-        let mut written = 0;
-        for key in key_range.clone() {
-            let value = value_for_key(key);
-            written += value.len();
-            handle.single_write_from(key.to_string().into_bytes(), &*value)?;
-        }
-        assert!(written >= 4096);
-    }
-    for key in key_range.clone() {
-        let mut value = Default::default();
-        handle
-            .read_single(key.to_string().as_bytes())?
-            .unwrap()
-            .new_reader()
-            .read_to_end(&mut value)?;
-        assert_eq!(value, value_for_key(key));
+    let handle = Handle::new(tempdir.path.clone())?;
+    let a = "a".as_bytes().to_vec();
+    let b = "b".as_bytes().to_vec();
+    let block_size: usize = handle.block_size().try_into()?;
+    let a_value = readable_repeated_bytes(1, block_size);
+    let b_value = readable_repeated_bytes(2, block_size);
+    let b_read = b_value.as_slice();
+    handle.single_write_from(a.clone(), a_value.as_slice())?;
+    handle.single_write_from(b.clone(), b_read)?;
+    handle.single_write_from(b.clone(), b_read)?;
+    let mut read_a = vec![];
+    handle
+        .read_single(&a)?
+        .unwrap()
+        .new_reader()
+        .read_to_end(&mut read_a)?;
+    // Check that the value for a hasn't been punched/zeroed.
+    assert_eq!(read_a, a_value);
+    let entries = handle.walk_dir()?;
+    let values_files: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry.entry_type == walk::EntryType::ValuesFile)
+        .collect();
+    // Make sure there's only a single values file.
+    assert_eq!(values_files.len(), 1);
+    let value_file = values_files[0];
+    let mut file = File::open(&value_file.path)?;
+    let regions = file_regions(&mut file)?;
+    let end: i64 = file.seek(End(0))?.try_into()?;
+    let expected = vec![
+        // a
+        Region {
+            region_type: Data,
+            start: end - 3 * (block_size as i64),
+            end: end - 2 * (block_size as i64),
+        },
+        // last b
+        Region {
+            region_type: Hole,
+            start: end - 2 * (block_size as i64),
+            end: end - 1 * (block_size as i64),
+        },
+        // new b
+        Region {
+            region_type: Data,
+            start: end - 1 * (block_size as i64),
+            end,
+        },
+    ];
+    assert_eq!(regions[regions.len() - expected.len()..], expected);
+    assert!(regions.len() <= expected.len() + 1);
+    if regions.len() > expected.len() {
+        assert_eq!(
+            regions[..regions.len() - expected.len()],
+            [Region {
+                region_type: Hole,
+                start: 0,
+                end: end - expected.len() as i64 * (block_size as i64),
+            }]
+        )
     }
     Ok(())
+}
+
+fn readable_repeated_bytes(byte: u8, limit: usize) -> Vec<u8> {
+    std::iter::repeat(byte).take(limit).collect()
 }

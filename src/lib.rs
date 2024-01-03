@@ -48,7 +48,7 @@ use rand::Rng;
 use rusqlite::types::ValueRef::{Null, Real};
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::Error::QueryReturnedNoRows;
-use rusqlite::{params, Connection, ToSql, Transaction};
+use rusqlite::{params, Connection, ToSql};
 use tempfile::TempDir;
 #[cfg(test)]
 pub use test_log::test;
@@ -307,7 +307,7 @@ impl<'handle> BatchWriter<'handle> {
             }
             write_commit_res.count += 1;
         }
-        transaction.move_dependent(|tx| tx.commit().context("commit transaction"))?;
+        transaction.commit().context("commit transaction")?;
 
         self.flush_exclusive_files();
         // This has to happen after exclusive files are flushed or there's a tendency for hole
@@ -497,8 +497,64 @@ where
 
 /// A Sqlite Transaction and the mutex guard on the Connection it came from.
 // Not in the handle module since it can be owned by types other than Handle.
-type OwnedTx<'handle> =
+pub struct OwnedTx<'handle> {
+    cell: OwnedTxInner<'handle>,
+}
+
+pub struct Transaction<'h> {
+    tx: rusqlite::Transaction<'h>,
+}
+
+/// This should probably go away when we want to control queries via Transaction, and require a
+/// special method to dive deeper for custom stuff.
+impl<'h> Deref for Transaction<'h> {
+    type Target = rusqlite::Transaction<'h>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.tx
+    }
+}
+
+impl<'a> From<rusqlite::Transaction<'a>> for Transaction<'a> {
+    fn from(tx: rusqlite::Transaction<'a>) -> Self {
+        Self { tx }
+    }
+}
+
+type OwnedTxInner<'handle> =
     owned_cell::OwnedCell<MutexGuard<'handle, Connection>, Transaction<'handle>>;
+
+impl<'a> From<OwnedTxInner<'a>> for OwnedTx<'a> {
+    fn from(cell: OwnedTxInner<'a>) -> Self {
+        Self { cell }
+    }
+}
+
+impl AsRef<Connection> for OwnedTx<'_> {
+    fn as_ref(&self) -> &Connection {
+        &self.cell
+    }
+}
+
+impl<'a> Deref for OwnedTx<'a> {
+    type Target = Transaction<'a>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.cell
+    }
+}
+
+impl<'a> OwnedTx<'a> {
+    fn commit(self) -> rusqlite::Result<()> {
+        self.cell.move_dependent(|tx| tx.tx.commit())
+    }
+}
+
+// impl AsRef<rusqlite::Connection> for OwnedTx<'_> {
+//     fn as_ref(&self) -> &Connection {
+//         self.cell
+//     }
+// }
 
 pub struct Reader<'handle> {
     owned_tx: OwnedTx<'handle>,
@@ -564,9 +620,7 @@ impl<'a> Reader<'a> {
                 .context("getting file clone")?,
             );
         }
-        self.owned_tx
-            .move_dependent(|tx| tx.commit())
-            .context("committing transaction")?;
+        self.owned_tx.commit().context("committing transaction")?;
         Ok(Snapshot { file_clones })
     }
 
@@ -846,7 +900,7 @@ fn delete_unused_snapshots(dir: &Path) -> Result<()> {
 
 /// Returns the end offset of the last active value before offset in the same file.
 pub fn query_last_end_offset(
-    tx: &Transaction,
+    tx: &rusqlite::Transaction,
     file_id: &FileId,
     offset: u64,
 ) -> rusqlite::Result<u64> {

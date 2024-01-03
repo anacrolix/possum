@@ -102,21 +102,25 @@ impl Handle {
 
     fn start_transaction(
         &self,
-        make_tx: impl FnOnce(&mut Connection) -> rusqlite::Result<Transaction<'_>>,
+        make_tx: impl FnOnce(&mut Connection) -> rusqlite::Result<rusqlite::Transaction<'_>>,
     ) -> rusqlite::Result<OwnedTx> {
         let guard = self.conn.lock().unwrap();
-        owned_cell::OwnedCell::try_make(guard, make_tx)
+        Ok(
+            owned_cell::OwnedCell::try_make(guard, |conn| make_tx(conn).map(Transaction::from))?
+                .into(),
+        )
     }
 
     pub(crate) fn start_immediate_transaction(&self) -> rusqlite::Result<OwnedTx> {
         self.start_transaction(|conn| {
             conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map(Into::into)
         })
     }
 
     /// Starts a deferred transaction (the default). There is no guaranteed read-only transaction
     /// mode. There might be pragmas that can limit to read only statements.
-    pub(crate) fn start_deferred_transaction_for_read(&self) -> rusqlite::Result<OwnedTx> {
+    pub fn start_deferred_transaction_for_read(&self) -> rusqlite::Result<OwnedTx> {
         self.start_transaction(|conn| conn.transaction())
     }
 
@@ -162,11 +166,11 @@ impl Handle {
 
     pub fn single_delete(&self, key: &[u8]) -> PubResult<Option<Value>> {
         let tx = self.start_deferred_transaction()?;
-        let deleted = delete_key(&tx, key)?;
+        let deleted = delete_key(tx.as_ref(), key)?;
         // Maybe it's okay just to commit anyway, since we have a deferred transaction and sqlite
         // might know nothing has changed.
         if let Some(value) = &deleted {
-            tx.move_dependent(|tx| tx.commit())?;
+            tx.commit()?;
             self.punch_values(&[value])?;
         }
         Ok(deleted)
@@ -196,7 +200,7 @@ impl Handle {
             Err(err) => Err(err.into()),
         }?;
         assert_eq!(tx.changes(), 1);
-        tx.move_dependent(|tx| tx.commit())?;
+        tx.commit()?;
         Ok(last_used)
     }
 

@@ -39,7 +39,7 @@ use cpathbuf::CPathBuf;
 pub use error::Error;
 use exclusive_file::ExclusiveFile;
 pub use handle::Handle;
-use log::debug;
+use log::{debug, warn};
 use memmap2::Mmap;
 use nix::fcntl::FlockArg::{LockExclusiveNonblock, LockSharedNonblock};
 use num::Integer;
@@ -761,29 +761,31 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
     let PunchValueOptions {
         dir,
         file_id,
-        mut offset,
-        mut length,
+        offset,
+        length,
         tx,
         block_size,
         greedy_start,
         check_hole,
     } = opts;
+    let mut offset = offset as i64;
+    let mut length = length as i64;
     let orig_offset = offset;
     let orig_length = length;
+    let block_size = block_size as i64;
     // Find out how far back we can punch and start there, correcting for block boundaries as we go.
     if offset % block_size != 0 || greedy_start {
-        let new_offset = ceil_multiple(query_last_end_offset(tx, file_id, offset)?, block_size);
+        let new_offset = ceil_multiple(
+            query_last_end_offset(tx, file_id, offset as u64)?,
+            block_size as u64,
+        ) as i64;
         // Because these are u64 we can't deal with overflow into negatives.
-        if new_offset > offset {
-            length -= new_offset - offset;
-        } else {
-            length += offset - new_offset;
-        }
+        length += offset - new_offset;
         offset = new_offset;
     }
     let mut file = open_file_id(OpenOptions::new().append(true), dir, file_id)?;
     // append doesn't mean our file position is at the end to begin with.
-    let file_end = file.seek(End(0))?;
+    let file_end = file.seek(End(0))? as i64;
     let end_offset = offset + length;
     // Does this handle ongoing writes to the same file?
     if end_offset < file_end {
@@ -806,7 +808,7 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
             // There's no data after the hole we just punched.
             None => {}
             otherwise => {
-                panic!("punched hole didn't appear: {:?}", otherwise)
+                warn!("punched hole didn't appear: {:?}", otherwise)
             }
         };
     }

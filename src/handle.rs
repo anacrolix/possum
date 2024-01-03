@@ -166,7 +166,7 @@ impl Handle {
 
     pub fn single_delete(&self, key: &[u8]) -> PubResult<Option<Value>> {
         let tx = self.start_deferred_transaction()?;
-        let deleted = delete_key(tx.as_ref(), key)?;
+        let deleted = tx.delete_key(key)?;
         // Maybe it's okay just to commit anyway, since we have a deferred transaction and sqlite
         // might know nothing has changed.
         if let Some(value) = &deleted {
@@ -236,7 +236,7 @@ impl Handle {
             // self.handle.clones.lock().unwrap().remove(&file_id);
             punch_value(PunchValueOptions {
                 dir: &self.dir,
-                file_id: &file_id,
+                file_id,
                 offset: *file_offset,
                 length: *value_length,
                 tx: &transaction,

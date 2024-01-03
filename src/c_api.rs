@@ -28,7 +28,7 @@ impl AsRef<[u8]> for PossumBuf {
 }
 
 impl PossumBuf {
-    fn as_mut_slice(&self) -> &mut [u8] {
+    fn as_mut_slice(&mut self) -> &mut [u8] {
         let ptr = self.ptr as *mut u8;
         unsafe { slice::from_raw_parts_mut(ptr, self.size) }
     }

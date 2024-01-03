@@ -225,21 +225,6 @@ fn value_columns_sql() -> &'static str {
     ONCE.get_or_init(|| VALUE_COLUMN_NAMES.join(", ")).as_str()
 }
 
-fn delete_key(conn: &Connection, key: &[u8]) -> rusqlite::Result<Option<Value>> {
-    match conn.query_row(
-        &format!(
-            "delete from keys where key=? returning {}",
-            value_columns_sql()
-        ),
-        [key],
-        Value::from_row,
-    ) {
-        Err(QueryReturnedNoRows) => Ok(None),
-        Ok(value) => Ok(Some(value)),
-        Err(err) => Err(err),
-    }
-}
-
 impl<'handle> BatchWriter<'handle> {
     fn get_exclusive_file(&mut self) -> Result<ExclusiveFile> {
         if let Some(ef) = self.exclusive_files.pop() {
@@ -279,7 +264,7 @@ impl<'handle> BatchWriter<'handle> {
         let mut write_commit_res = WriteCommitResult { count: 0 };
         for pw in self.pending_writes.drain(..) {
             before_write();
-            let existing = delete_key(&transaction, &pw.key);
+            let existing = transaction.delete_key(&pw.key);
             match existing {
                 Ok(Some(value)) => {
                     let value_length = value.length;
@@ -512,6 +497,23 @@ impl<'h> Deref for Transaction<'h> {
 
     fn deref(&self) -> &Self::Target {
         &self.tx
+    }
+}
+
+impl Transaction<'_> {
+    fn delete_key(&self, key: &[u8]) -> rusqlite::Result<Option<Value>> {
+        match self.query_row(
+            &format!(
+                "delete from keys where key=? returning {}",
+                value_columns_sql()
+            ),
+            [key],
+            Value::from_row,
+        ) {
+            Err(QueryReturnedNoRows) => Ok(None),
+            Ok(value) => Ok(Some(value)),
+            Err(err) => Err(err),
+        }
     }
 }
 
@@ -849,8 +851,6 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
     // We should never write past a known value, someone might be writing there.
     assert!(offset <= orig_offset + orig_length);
     assert!(offset + length <= orig_offset + orig_length);
-    let offset = offset.try_into()?;
-    let length = length.try_into()?;
     debug!(target: "punching", "punching {} {} for {}", file_id, offset, length);
     punchfile(file.as_raw_fd(), offset, length).with_context(|| format!("length {}", length))?;
     // fcntl(file.as_raw_fd(), nix::fcntl::F_FULLFSYNC)?;

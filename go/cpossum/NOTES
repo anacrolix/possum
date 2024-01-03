@@ -1,0 +1,2 @@
+Pinning is necessary for pointers to Go memory inside things pointed to Go pointers. Like
+PossumBuf.ptr when passing *PossumBuf to C.

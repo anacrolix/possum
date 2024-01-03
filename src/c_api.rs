@@ -1,5 +1,5 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
-use std::ffi::{c_char, c_uchar, CStr, OsStr};
+use std::ffi::{c_char, CStr, OsStr};
 use std::mem::size_of;
 use std::pin::Pin;
 use std::ptr::{copy_nonoverlapping, null_mut};
@@ -10,12 +10,11 @@ use log::{error, warn};
 
 use super::*;
 
-pub type KeyPtr = *const c_char;
-pub type KeySize = size_t;
 pub type PossumWriter = *mut BatchWriter<'static>;
 pub type PossumOffset = u64;
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct PossumBuf {
     ptr: *const c_char,
     size: size_t,
@@ -23,12 +22,13 @@ pub struct PossumBuf {
 
 impl AsRef<[u8]> for PossumBuf {
     fn as_ref(&self) -> &[u8] {
-        slice_u8_from_key_parts(self.ptr, self.size)
+        let ptr = self.ptr as *const u8;
+        unsafe { slice::from_raw_parts(ptr, self.size) }
     }
 }
 
 impl PossumBuf {
-    fn as_mut_slice(&mut self) -> &mut [u8] {
+    fn as_mut_slice(&self) -> &mut [u8] {
         let ptr = self.ptr as *mut u8;
         unsafe { slice::from_raw_parts_mut(ptr, self.size) }
     }
@@ -45,14 +45,6 @@ pub struct PossumReader {
     rust_reader: Option<Reader<'static>>,
     values: Vec<Pin<Box<PossumValue>>>,
 }
-
-// impl Deref for PossumReader {
-//     type Target = Reader<'static>;
-//
-//     fn deref(&self) -> &Self::Target {
-//         &self.rust_reader
-//     }
-// }
 
 #[no_mangle]
 pub extern "C" fn possum_new(path: *const c_char) -> *mut Handle {
@@ -83,13 +75,11 @@ pub extern "C" fn possum_drop(handle: *mut Handle) {
 #[no_mangle]
 pub extern "C" fn possum_single_write_buf(
     handle: *mut Handle,
-    key: KeyPtr,
-    key_size: KeySize,
-    value: *const u8,
-    value_size: size_t,
+    key: PossumBuf,
+    value: PossumBuf,
 ) -> size_t {
-    let key_vec = byte_vec_from_ptr_and_size(key, key_size);
-    let value_slice = unsafe { slice::from_raw_parts(value, value_size) };
+    let key_vec = key.as_ref().to_vec();
+    let value_slice = value.as_ref();
     const ERR_SENTINEL: usize = usize::MAX;
     let handle = unsafe { &*handle };
     match handle.single_write_from(key_vec, value_slice) {
@@ -100,14 +90,6 @@ pub extern "C" fn possum_single_write_buf(
             n
         }
     }
-}
-
-fn byte_vec_from_ptr_and_size(ptr: *const c_char, size: size_t) -> Vec<u8> {
-    unsafe { slice::from_raw_parts(ptr as *const c_uchar, size) }.to_vec()
-}
-
-fn slice_u8_from_key_parts<'a>(ptr: KeyPtr, size: size_t) -> &'a [u8] {
-    unsafe { slice::from_raw_parts(ptr as *const u8, size) }
 }
 
 #[no_mangle]
@@ -181,13 +163,12 @@ impl From<Timestamp> for PossumTimestamp {
 #[no_mangle]
 pub extern "C" fn possum_single_stat(
     handle: *const Handle,
-    key: KeyPtr,
-    key_size: size_t,
+    key: PossumBuf,
     out_stat: *mut PossumStat,
 ) -> bool {
     match unsafe { handle.as_ref() }
         .unwrap()
-        .read_single(unsafe { slice::from_raw_parts(key as *const u8, key_size) })
+        .read_single(key.as_ref())
         .unwrap()
     {
         Some(value) => {
@@ -222,7 +203,7 @@ fn items_list_to_c(
         let key_size = item.key.len() - key_prefix_size;
         let c_item = PossumItem {
             key: PossumBuf {
-                ptr: unsafe { malloc(key_size) } as KeyPtr,
+                ptr: unsafe { malloc(key_size) } as *const c_char,
                 size: key_size,
             },
             stat: PossumStat {
@@ -303,26 +284,25 @@ impl From<anyhow::Error> for PossumError {
 }
 
 #[no_mangle]
-pub extern "C" fn possum_single_readat(
+pub extern "C" fn possum_single_read_at(
     handle: *const Handle,
-    key: KeyPtr,
-    key_size: KeySize,
-    buf: *mut u8,
-    nbyte: *mut size_t,
+    key: PossumBuf,
+    buf: *mut PossumBuf,
     offset: u64,
 ) -> PossumError {
-    let rust_key = slice_u8_from_key_parts(key, key_size);
+    let rust_key = key.as_ref();
     let value = match unsafe { handle.as_ref() }.unwrap().read_single(rust_key) {
         Ok(Some(value)) => value,
         Ok(None) => return PossumError::NoSuchKey,
         Err(err) => return err.into(),
     };
-    let read_buf = unsafe { slice::from_raw_parts_mut(buf, *nbyte) };
+    let buf = unsafe { buf.as_mut() }.unwrap();
+    let read_buf = buf.as_mut_slice();
     let r_nbyte = match value.read_at(offset, read_buf) {
         Err(err) => return err.into(),
         Ok(ok) => ok,
     };
-    unsafe { *nbyte = r_nbyte };
+    buf.size = r_nbyte;
     NoError
 }
 

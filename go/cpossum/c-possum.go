@@ -13,7 +13,7 @@ import (
 	"unsafe"
 )
 
-func mapError(err uint32) error {
+func mapError(err C.PossumError) error {
 	switch err {
 	case C.NoError:
 		return nil
@@ -63,8 +63,7 @@ func SingleDelete(handle *Handle, key string) (opt generics.Option[Stat], err er
 func SingleStat(handle *Handle, key string) (opt generics.Option[Stat]) {
 	opt.Ok = bool(C.possum_single_stat(
 		handle,
-		(*C.char)(unsafe.Pointer(unsafe.StringData(key))),
-		C.size_t(len(key)),
+		BufFromString(key),
 		&opt.Value,
 	))
 	return
@@ -73,10 +72,8 @@ func SingleStat(handle *Handle, key string) (opt generics.Option[Stat]) {
 func WriteSingleBuf(handle *Handle, key string, buf []byte) (written uint, err error) {
 	written = uint(C.possum_single_write_buf(
 		handle,
-		(*C.char)(unsafe.Pointer(unsafe.StringData(key))),
-		C.size_t(len(key)),
-		(*C.uchar)(unsafe.SliceData(buf)),
-		C.size_t(len(buf)),
+		BufFromString(key),
+		BufFromBytes(buf),
 	))
 	if written == math.MaxUint {
 		err = errors.New("unknown possum error")
@@ -115,16 +112,17 @@ func HandleListItems(handle *Handle, prefix string) (items []Item, err error) {
 }
 
 func SingleReadAt(handle *Handle, key string, buf []byte, offset uint64) (n int, err error) {
-	var nByte C.size_t = C.size_t(len(buf))
-	err = mapError(C.possum_single_readat(
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	pBuf := BufFromBytes(buf)
+	pinner.Pin(pBuf.ptr)
+	err = mapError(C.possum_single_read_at(
 		handle,
-		(*C.char)(unsafe.Pointer(unsafe.StringData(key))),
-		C.size_t(len(key)),
-		(*C.uchar)(unsafe.SliceData(buf)),
-		&nByte,
+		BufFromString(key),
+		&pBuf,
 		C.uint64_t(offset),
 	))
-	n = int(nByte)
+	n = int(pBuf.size)
 	return
 }
 
@@ -136,11 +134,17 @@ func NewReader(handle *Handle) (r Reader, err error) {
 }
 
 func BufFromString(s string) C.PossumBuf {
-	return C.PossumBuf{(*C.char)(unsafe.Pointer(unsafe.StringData(s))), C.size_t(len(s))}
+	return C.PossumBuf{
+		(*C.char)(unsafe.Pointer(unsafe.StringData(s))),
+		C.size_t(len(s)),
+	}
 }
 
 func BufFromBytes(b []byte) C.PossumBuf {
-	return C.PossumBuf{(*C.char)(unsafe.Pointer(unsafe.SliceData(b))), C.size_t(len(b))}
+	return C.PossumBuf{
+		(*C.char)(unsafe.Pointer(unsafe.SliceData(b))),
+		C.size_t(len(b)),
+	}
 }
 
 func ReaderAdd(r Reader, key string) (v Value, err error) {
@@ -172,9 +176,8 @@ type Value = *C.PossumValue
 func ValueReadAt(v Value, buf []byte, offset int64) (n int, err error) {
 	pBuf := BufFromBytes(buf)
 	var pin runtime.Pinner
-	pin.Pin(&pBuf)
-	pin.Pin(pBuf.ptr)
 	defer pin.Unpin()
+	pin.Pin(pBuf.ptr)
 	err = mapError(C.possum_value_read_at(v, &pBuf, C.uint64_t(offset)))
 	n = int(pBuf.size)
 	return

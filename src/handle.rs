@@ -120,6 +120,14 @@ impl Handle {
         self.start_transaction(|conn| conn.transaction())
     }
 
+    /// Starts a deferred transaction (the default). This might upgrade to a write transaction if
+    /// appropriate. I'm not sure about the semantics of doing that yet. This might be useful for
+    /// operations that become writes depending on certain conditions, but could violate some
+    /// expectations around locking. TBD.
+    pub(crate) fn start_deferred_transaction(&self) -> rusqlite::Result<OwnedTx> {
+        self.start_transaction(|conn| conn.transaction())
+    }
+
     /// Begins a read transaction.
     pub fn read(&self) -> rusqlite::Result<Reader> {
         let reader = Reader {
@@ -150,6 +158,18 @@ impl Handle {
         writer.stage_write(key, value)?;
         let commit = writer.commit()?;
         Ok((n, commit))
+    }
+
+    pub fn single_delete(&self, key: &[u8]) -> PubResult<Option<Value>> {
+        let tx = self.start_deferred_transaction()?;
+        let deleted = delete_key(&tx, key)?;
+        // Maybe it's okay just to commit anyway, since we have a deferred transaction and sqlite
+        // might know nothing has changed.
+        if let Some(value) = &deleted {
+            tx.move_dependent(|tx| tx.commit())?;
+            self.punch_values(&[value])?;
+        }
+        Ok(deleted)
     }
 
     pub fn clone_from_fd(&mut self, key: Vec<u8>, fd: RawFd) -> Result<u64> {
@@ -187,6 +207,42 @@ impl Handle {
 
     pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
         list_items(&*self.start_deferred_transaction_for_read()?, prefix)
+    }
+
+    /// Starts a read transaction to determine punch boundaries. Since punching is never expanded to
+    /// offsets above the targeted values, ongoing writes should not be affected.
+    pub(crate) fn punch_values<V>(&self, values: &[V]) -> PubResult<()>
+    where
+        V: AsRef<Value>,
+    {
+        let transaction = self.start_deferred_transaction_for_read()?;
+        for v in values {
+            let Value {
+                file_id,
+                file_offset,
+                length,
+                ..
+            } = v.as_ref();
+            let value_length = length;
+            let msg = format!(
+                "deleting value at {:?} {} {}",
+                file_id, file_offset, value_length
+            );
+            debug!("{}", msg);
+            // self.handle.clones.lock().unwrap().remove(&file_id);
+            punch_value(PunchValueOptions {
+                dir: &self.dir,
+                file_id: &file_id,
+                offset: *file_offset,
+                length: *value_length,
+                tx: &transaction,
+                block_size: self.block_size(),
+                greedy_start: self.greedy_holes,
+                check_hole: true,
+            })
+            .context(msg)?;
+        }
+        Ok(())
     }
 }
 

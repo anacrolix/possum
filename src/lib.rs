@@ -225,23 +225,19 @@ fn value_columns_sql() -> &'static str {
     ONCE.get_or_init(|| VALUE_COLUMN_NAMES.join(", ")).as_str()
 }
 
-fn delete_key(conn: &Connection, key: &[u8]) -> rusqlite::Result<Value> {
-    conn.query_row(
+fn delete_key(conn: &Connection, key: &[u8]) -> rusqlite::Result<Option<Value>> {
+    match conn.query_row(
         &format!(
             "delete from keys where key=? returning {}",
             value_columns_sql()
         ),
         [key],
-        |row| {
-            let file_id: FileId = row.get(0)?;
-            Ok(Value {
-                file_id,
-                file_offset: row.get(1)?,
-                length: row.get(2)?,
-                last_used: row.get(3)?,
-            })
-        },
-    )
+        Value::from_row,
+    ) {
+        Err(QueryReturnedNoRows) => Ok(None),
+        Ok(value) => Ok(Some(value)),
+        Err(err) => Err(err),
+    }
 }
 
 impl<'handle> BatchWriter<'handle> {
@@ -285,14 +281,14 @@ impl<'handle> BatchWriter<'handle> {
             before_write();
             let existing = delete_key(&transaction, &pw.key);
             match existing {
-                Ok(value) => {
+                Ok(Some(value)) => {
                     let value_length = value.length;
                     if value_length != 0 {
                         altered_files.insert(value.file_id.clone());
                     }
                     punch_values.push(value);
                 }
-                Err(QueryReturnedNoRows) => (),
+                Ok(None) => (),
                 Err(err) => return Err(err.into()),
             }
             let inserted = transaction.execute(
@@ -316,43 +312,12 @@ impl<'handle> BatchWriter<'handle> {
         self.flush_exclusive_files();
         // This has to happen after exclusive files are flushed or there's a tendency for hole
         // punches to not persist. It doesn't fix the problem but it significantly reduces it.
-        self.punch_values(punch_values)?;
+        self.handle.punch_values(&punch_values)?;
         // Forget any references to clones of files that have changed.
         for file_id in altered_files {
             self.handle.clones.lock().unwrap().remove(&file_id);
         }
         Ok(write_commit_res)
-    }
-
-    fn punch_values(&self, values: Vec<Value>) -> Result<()> {
-        let transaction = self.handle.start_deferred_transaction_for_read()?;
-        for Value {
-            file_id,
-            file_offset,
-            length,
-            ..
-        } in values
-        {
-            let value_length = length;
-            let msg = format!(
-                "deleting value at {:?} {} {}",
-                file_id, file_offset, value_length
-            );
-            debug!("{}", msg);
-            // self.handle.clones.lock().unwrap().remove(&file_id);
-            punch_value(PunchValueOptions {
-                dir: &self.handle.dir,
-                file_id: &file_id,
-                offset: file_offset,
-                length: value_length,
-                tx: &transaction,
-                block_size: self.handle.block_size(),
-                greedy_start: self.handle.greedy_holes,
-                check_hole: true,
-            })
-            .context(msg)?;
-        }
-        Ok(())
     }
 
     /// Flush Writer's exclusive files and return them to the Handle pool.
@@ -446,6 +411,12 @@ pub struct SnapshotValue<V> {
     value: V,
     cloned_file: Arc<Mutex<FileClone>>,
 }
+//
+// impl<V> AsRef<Value> for SnapshotValue<V> {
+//     fn as_ref(&self) -> &Value {
+//         &self.value
+//     }
+// }
 
 impl<V> Deref for SnapshotValue<V> {
     type Target = V;
@@ -802,7 +773,12 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
     // Find out how far back we can punch and start there, correcting for block boundaries as we go.
     if offset % block_size != 0 || greedy_start {
         let new_offset = ceil_multiple(query_last_end_offset(tx, file_id, offset)?, block_size);
-        length += offset - new_offset;
+        // Because these are u64 we can't deal with overflow into negatives.
+        if new_offset > offset {
+            length -= new_offset - offset;
+        } else {
+            length += offset - new_offset;
+        }
         offset = new_offset;
     }
     let mut file = open_file_id(OpenOptions::new().append(true), dir, file_id)?;

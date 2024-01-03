@@ -1,6 +1,7 @@
 package possum
 
 import (
+	"github.com/anacrolix/generics"
 	possumC "github.com/anacrolix/possum/go/cpossum"
 	"io/fs"
 	"time"
@@ -44,6 +45,19 @@ func (me Handle) ListKeys(prefix string) (keys []string, err error) {
 	for _, item := range items {
 		keys = append(keys, item.Key)
 	}
+	return
+}
+
+func (me Handle) SingleDelete(key string) (fi generics.Option[FileInfo], err error) {
+	stat, err := possumC.SingleDelete(me.cHandle, key)
+	if err != nil {
+		return
+	}
+	if !stat.Ok {
+		return
+	}
+	fi.Value = FileInfo{stat.Value, key}
+	fi.Ok = true
 	return
 }
 

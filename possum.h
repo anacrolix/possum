@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <sys/stat.h>
 
-typedef enum PossumError {
+typedef enum {
   NoError,
   NoSuchKey,
   SqliteError,
@@ -26,83 +26,81 @@ typedef const char *KeyPtr;
 
 typedef size_t KeySize;
 
-typedef struct BatchWriter *PossumWriter;
+typedef BatchWriter *PossumWriter;
 
-typedef struct ValueWriter *PossumValueWriter;
+typedef ValueWriter *PossumValueWriter;
 
-typedef struct PossumTimestamp {
+typedef struct {
   int64_t secs;
   uint32_t nanos;
 } PossumTimestamp;
 
-typedef struct PossumStat {
-  struct PossumTimestamp last_used;
+typedef struct {
+  PossumTimestamp last_used;
   uint64_t size;
 } PossumStat;
 
-typedef struct PossumBuf {
+typedef struct {
   const char *ptr;
   size_t size;
 } PossumBuf;
 
-typedef struct PossumItem {
-  struct PossumBuf key;
-  struct PossumStat stat;
+typedef struct {
+  PossumBuf key;
+  PossumStat stat;
 } PossumItem;
 
 typedef uint64_t PossumOffset;
 
-struct Handle *possum_new(const char *path);
+Handle *possum_new(const char *path);
 
-void possum_drop(struct Handle *handle);
+void possum_drop(Handle *handle);
 
-size_t possum_single_write_buf(struct Handle *handle,
+size_t possum_single_write_buf(Handle *handle,
                                KeyPtr key,
                                KeySize key_size,
                                const uint8_t *value,
                                size_t value_size);
 
-PossumWriter possum_new_writer(struct Handle *handle);
+PossumWriter possum_new_writer(Handle *handle);
 
-enum PossumError possum_start_new_value(PossumWriter writer, PossumValueWriter *value);
+PossumError possum_start_new_value(PossumWriter writer, PossumValueWriter *value);
 
 int possum_value_writer_fd(PossumValueWriter value);
 
-bool possum_single_stat(const struct Handle *handle,
-                        KeyPtr key,
-                        size_t key_size,
-                        struct PossumStat *out_stat);
+bool possum_single_stat(const Handle *handle, KeyPtr key, size_t key_size, PossumStat *out_stat);
 
-enum PossumError possum_list_items(const struct Handle *handle,
-                                   struct PossumBuf prefix,
-                                   struct PossumItem **out_list,
-                                   size_t *out_list_len);
+PossumError possum_list_items(const Handle *handle,
+                              PossumBuf prefix,
+                              PossumItem **out_list,
+                              size_t *out_list_len);
 
-enum PossumError possum_single_readat(const struct Handle *handle,
-                                      KeyPtr key,
-                                      KeySize key_size,
-                                      uint8_t *buf,
-                                      size_t *nbyte,
-                                      uint64_t offset);
+PossumError possum_single_readat(const Handle *handle,
+                                 KeyPtr key,
+                                 KeySize key_size,
+                                 uint8_t *buf,
+                                 size_t *nbyte,
+                                 uint64_t offset);
 
-enum PossumError possum_reader_new(const struct Handle *handle, struct PossumReader **reader);
+/**
+ * stat is filled if non-null and a delete occurs. NoSuchKey is returned if the key does not exist.
+ */
+PossumError possum_single_delete(const Handle *handle, PossumBuf key, PossumStat *stat);
 
-enum PossumError possum_reader_add(struct PossumReader *reader,
-                                   struct PossumBuf key,
-                                   const struct PossumValue **value);
+PossumError possum_reader_new(const Handle *handle, PossumReader **reader);
 
-enum PossumError possum_reader_begin(struct PossumReader *reader);
+PossumError possum_reader_add(PossumReader *reader, PossumBuf key, const PossumValue **value);
+
+PossumError possum_reader_begin(PossumReader *reader);
 
 /**
  * Consumes the reader, invalidating all values produced from it.
  */
-enum PossumError possum_reader_end(struct PossumReader *reader);
+PossumError possum_reader_end(PossumReader *reader);
 
-enum PossumError possum_value_read_at(const struct PossumValue *value,
-                                      struct PossumBuf *buf,
-                                      PossumOffset offset);
+PossumError possum_value_read_at(const PossumValue *value, PossumBuf *buf, PossumOffset offset);
 
-enum PossumError possum_reader_list_items(const struct PossumReader *reader,
-                                          struct PossumBuf prefix,
-                                          struct PossumItem **out_items,
-                                          size_t *out_len);
+PossumError possum_reader_list_items(const PossumReader *reader,
+                                     PossumBuf prefix,
+                                     PossumItem **out_items,
+                                     size_t *out_len);

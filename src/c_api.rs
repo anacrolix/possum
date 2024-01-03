@@ -150,6 +150,19 @@ pub struct PossumStat {
     size: u64,
 }
 
+impl<V> From<V> for PossumStat
+where
+    V: AsRef<Value>,
+{
+    fn from(value: V) -> Self {
+        let value = value.as_ref();
+        Self {
+            size: value.length(),
+            last_used: value.last_used().into(),
+        }
+    }
+}
+
 #[repr(C)]
 pub struct PossumTimestamp {
     secs: i64,
@@ -178,10 +191,7 @@ pub extern "C" fn possum_single_stat(
         .unwrap()
     {
         Some(value) => {
-            let stat_in_rust = PossumStat {
-                size: value.length(),
-                last_used: value.last_used().into(),
-            };
+            let stat_in_rust = value.as_ref().into();
             unsafe { *out_stat = stat_in_rust };
             true
         }
@@ -268,6 +278,8 @@ impl From<Error> for PossumError {
         match value {
             Error::NoSuchKey => NoSuchKey,
             Error::Sqlite(_) => SqliteError,
+            Error::Io(_) => IoError,
+            Error::Anyhow(_) => AnyhowError,
         }
     }
 }
@@ -311,6 +323,25 @@ pub extern "C" fn possum_single_readat(
         Ok(ok) => ok,
     };
     unsafe { *nbyte = r_nbyte };
+    NoError
+}
+
+/// stat is filled if non-null and a delete occurs. NoSuchKey is returned if the key does not exist.
+#[no_mangle]
+pub extern "C" fn possum_single_delete(
+    handle: *const Handle,
+    key: PossumBuf,
+    stat: *mut PossumStat,
+) -> PossumError {
+    let handle = unsafe { &*handle };
+    let value = match handle.single_delete(key.as_ref()) {
+        Ok(None) => return NoSuchKey,
+        Err(err) => return err.into(),
+        Ok(Some(value)) => value,
+    };
+    if let Some(stat) = unsafe { stat.as_mut() } {
+        *stat = value.into();
+    }
     NoError
 }
 

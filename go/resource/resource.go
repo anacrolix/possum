@@ -1,7 +1,6 @@
 package possumResource
 
 import (
-	"errors"
 	"github.com/anacrolix/missinggo/v2/resource"
 	possum "github.com/anacrolix/possum/go"
 	"io"
@@ -64,13 +63,15 @@ func (i *instance) WriteAt(bytes []byte, i2 int64) (int, error) {
 	panic("implement me")
 }
 
-func (i *instance) Delete() error {
-	// TODO: Just check the value doesn't exist for now.
-	_, err := i.Stat()
+func (i *instance) Delete() (err error) {
+	fi, err := i.handle.SingleDelete(i.key)
 	if err != nil {
-		return nil
+		return
 	}
-	return errors.New("instance exists and delete not implemented")
+	if !fi.Ok {
+		err = fs.ErrNotExist
+	}
+	return
 }
 
 var _ interface {

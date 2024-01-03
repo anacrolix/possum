@@ -92,12 +92,12 @@ fn test_replace_keys() -> Result<()> {
         Region {
             region_type: Hole,
             start: end - 2 * (block_size as i64),
-            end: end - 1 * (block_size as i64),
+            end: end - (block_size as i64),
         },
         // new b
         Region {
             region_type: Data,
-            start: end - 1 * (block_size as i64),
+            start: end - (block_size as i64),
             end,
         },
     ];

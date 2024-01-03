@@ -48,8 +48,25 @@ func DropHandle(handle *Handle) {
 	C.possum_drop(handle)
 }
 
+func SingleDelete(handle *Handle, key string) (opt generics.Option[Stat], err error) {
+	pe := C.possum_single_delete(handle, BufFromString(key), &opt.Value)
+	switch pe {
+	case C.NoError:
+		opt.Ok = true
+	case C.NoSuchKey:
+	default:
+		err = mapError(pe)
+	}
+	return
+}
+
 func SingleStat(handle *Handle, key string) (opt generics.Option[Stat]) {
-	opt.Ok = bool(C.possum_single_stat(handle, (*C.char)(unsafe.Pointer(unsafe.StringData(key))), C.size_t(len(key)), &opt.Value))
+	opt.Ok = bool(C.possum_single_stat(
+		handle,
+		(*C.char)(unsafe.Pointer(unsafe.StringData(key))),
+		C.size_t(len(key)),
+		&opt.Value,
+	))
 	return
 }
 

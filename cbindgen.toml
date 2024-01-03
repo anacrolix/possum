@@ -1,3 +1,8 @@
+# See https://github.com/mozilla/cbindgen/blob/master/docs.md#cbindgentoml
+
 sys_includes = ["sys/stat.h"]
-style = "both"
+style = "type"
 language = "C"
+
+[export]
+#prefix = "possum_"

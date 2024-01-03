@@ -36,7 +36,7 @@ fn rename_key() -> Result<()> {
     let rename_res = handle
         .rename_item("noexist".as_bytes(), "borat".as_bytes())
         .map(|_| ());
-    assert_eq!(rename_res, Err(NoSuchKey));
+    assert!(matches!(rename_res, Err(NoSuchKey)));
     assert_eq!(
         handle
             .single_write_from("hello".as_bytes().to_vec(), value_bytes)?

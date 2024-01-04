@@ -39,6 +39,7 @@ enum DatabaseCommands {
     WriteFile { file: OsString },
     ListKeys { prefix: String },
     ReadKey { key: String },
+    MissingHoles,
 }
 
 #[derive(clap::Parser)]
@@ -90,6 +91,18 @@ fn main() -> anyhow::Result<()> {
                     // dbg!(n, value.length());
                     if n != value.length() {
                         bail!("read {} bytes, expected {}", n, value.length());
+                    }
+                    Ok(())
+                }
+                MissingHoles => {
+                    let tx = handle.start_deferred_transaction_for_read()?;
+                    for values_file_entry in handle.walk_dir()?.iter().filter(|entry| {
+                        matches!(entry.entry_type, possum::walk::EntryType::ValuesFile)
+                    }) {
+                        let file_id = values_file_entry.file_id().unwrap();
+                        let mut file_values = tx.file_values(file_id)?;
+                        let query = file_values.begin()?;
+                        for _value in query {}
                     }
                     Ok(())
                 }

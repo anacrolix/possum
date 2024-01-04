@@ -9,6 +9,17 @@ pub struct Entry {
     pub entry_type: EntryType,
 }
 
+use EntryType::*;
+
+impl Entry {
+    pub fn file_id(&self) -> Option<&FileIdFancy> {
+        match self.entry_type {
+            SnapshotValue | ValuesFile => self.path.file_name().map(FileIdFancy::new),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Hash, Copy, Clone)]
 pub enum EntryType {
     ManifestFile,

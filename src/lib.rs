@@ -16,7 +16,7 @@ pub mod walk;
 
 use std::cmp::{max, min};
 use std::collections::{hash_map, HashMap, HashSet};
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::{read_dir, remove_dir, remove_dir_all, remove_file, File, OpenOptions};
 use std::io::SeekFrom::{End, Start};
@@ -45,10 +45,9 @@ use nix::fcntl::FlockArg::{LockExclusiveNonblock, LockSharedNonblock};
 use num::Integer;
 use positioned_io::ReadAt;
 use rand::Rng;
-use rusqlite::types::ValueRef::{Null, Real};
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::Error::QueryReturnedNoRows;
-use rusqlite::{params, Connection, ToSql};
+use rusqlite::{params, CachedStatement, Connection, Statement};
 use tempfile::TempDir;
 #[cfg(test)]
 pub use test_log::test;
@@ -281,7 +280,7 @@ impl<'handle> BatchWriter<'handle> {
                 values (?, ?, ?, ?)",
                 rusqlite::params!(
                     pw.key,
-                    pw.value_file_id,
+                    pw.value_file_id.deref(),
                     pw.value_file_offset,
                     pw.value_length
                 ),
@@ -515,6 +514,38 @@ impl Transaction<'_> {
             Err(err) => Err(err),
         }
     }
+
+    pub fn file_values<'a>(
+        &'a self,
+        file_id: &'a FileIdFancy,
+    ) -> rusqlite::Result<FileValues<'a, CachedStatement<'a>>> {
+        let stmt = self.tx.prepare_cached(&format!(
+            "select {} from keys where file_id=? order by file_offset",
+            value_columns_sql()
+        ))?;
+        let iter = FileValues {
+            stmt,
+            file_id,
+            // init: |stmt: &mut Statement| stmt.query_map(&[file_id], Value::from_row).unwrap(),
+        };
+        Ok(iter)
+    }
+}
+
+pub struct FileValues<'a, S> {
+    stmt: S,
+    file_id: &'a FileIdFancy,
+}
+
+impl<'a, S> FileValues<'a, S>
+where
+    S: Deref<Target = Statement<'a>> + DerefMut + 'a,
+{
+    pub fn begin(
+        &mut self,
+    ) -> rusqlite::Result<impl Iterator<Item = rusqlite::Result<Value>> + '_> {
+        self.stmt.query_map([self.file_id], Value::from_row)
+    }
 }
 
 impl<'a> From<rusqlite::Transaction<'a>> for Transaction<'a> {
@@ -724,82 +755,8 @@ fn valid_file_name(file_name: &str) -> bool {
     file_name.starts_with(VALUES_FILE_NAME_PREFIX)
 }
 
-#[derive(Clone, Eq, PartialEq, Hash)]
-pub struct FileId(OsString);
-
-impl From<OsString> for FileId {
-    fn from(value: OsString) -> Self {
-        Self(value)
-    }
-}
-
-// impl Deref for FileId {
-//     type Target = OsString;
-//
-//     fn deref(&self) -> &Self::Target {
-//         &self.0
-//     }
-// }
-
-impl AsRef<Path> for FileId {
-    fn as_ref(&self) -> &Path {
-        Path::new(&self.0)
-    }
-}
-
-impl Debug for FileId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
-    }
-}
-
-impl From<String> for FileId {
-    fn from(value: String) -> Self {
-        Self(value.into())
-    }
-}
-
-impl From<Vec<u8>> for FileId {
-    fn from(value: Vec<u8>) -> Self {
-        OsString::from_vec(value).into()
-    }
-}
-
-impl FileId {
-    fn as_str(&self) -> &str {
-        self.0.to_str().unwrap()
-    }
-}
-
-impl ToSql for FileId {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        Ok(ToSqlOutput::Borrowed(ValueRef::Blob(self.0.as_bytes())))
-    }
-}
-
-impl FromSql for FileId {
-    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-        Ok(match value {
-            Null | Real(..) => Err(FromSqlError::InvalidType),
-            ValueRef::Text(text) => Ok(text.to_owned()),
-            ValueRef::Blob(blob) => Ok(blob.to_owned()),
-            ValueRef::Integer(int) => Ok(int.to_string().into_bytes()),
-        }?
-        .into())
-    }
-}
-
-impl Display for FileId {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(self.as_str(), f)
-    }
-}
-
-impl AsRef<FileId> for FileId {
-    fn as_ref(&self) -> &FileId {
-        self
-    }
-}
+mod file_id;
+use file_id::{FileId, FileIdFancy};
 
 struct PunchValueOptions<'a> {
     dir: &'a Path,
@@ -908,7 +865,7 @@ pub fn query_last_end_offset(
         "select max(file_offset+value_length) as last_offset \
             from keys \
             where file_id=? and file_offset+value_length <= ?",
-        params![file_id, offset],
+        params![file_id.deref(), offset],
         |row| {
             // I don't know why, but this can return null for file_ids that have values but
             // don't fit the other conditions.

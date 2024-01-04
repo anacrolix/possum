@@ -25,11 +25,11 @@ pub fn fd_min_hole_size(fd: RawFd) -> std::io::Result<i64> {
 /// Recommended minimum hole size for sparse files for file descriptor.
 /// fpathconf(_PC_MIN_HOLE_SIZE). On macOS this returns positive if holes are supported, and returns
 /// 1 if holes are supported but the minimum hole size is unspecified.
-pub fn path_min_hole_size(path: &Path) -> std::io::Result<i64> {
+pub fn path_min_hole_size(path: &Path) -> std::io::Result<u64> {
     let path: CPathBuf = path.try_into()?;
     let long = unsafe { libc::pathconf(path.as_ptr(), _PC_MIN_HOLE_SIZE) };
     if long == -1 {
         return Err(std::io::Error::last_os_error());
     }
-    Ok(long)
+    Ok(long as u64)
 }

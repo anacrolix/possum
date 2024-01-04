@@ -27,20 +27,6 @@ impl From<OsString> for FileId {
         Self(value)
     }
 }
-//
-// impl From<OsStr> for FileIdFancy {
-//     fn from(value: OsStr) -> Self {
-//         Self(value)
-//     }
-// }
-
-// impl Deref for FileId {
-//     type Target = OsString;
-//
-//     fn deref(&self) -> &Self::Target {
-//         &self.0
-//     }
-// }
 
 impl AsRef<Path> for FileId {
     fn as_ref(&self) -> &Path {
@@ -78,7 +64,7 @@ impl rusqlite::ToSql for FileIdFancy {
     }
 }
 
-impl rusqlite::types::FromSql for FileId {
+impl FromSql for FileId {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
         use rusqlite::types::ValueRef::*;
         Ok(match value {
@@ -88,6 +74,12 @@ impl rusqlite::types::FromSql for FileId {
             Integer(int) => Ok(int.to_string().into_bytes()),
         }?
         .into())
+    }
+}
+
+impl Display for FileIdFancy {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(self.as_str(), f)
     }
 }
 

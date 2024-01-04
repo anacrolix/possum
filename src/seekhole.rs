@@ -16,10 +16,10 @@ pub fn seek_hole_whence(
     fd: RawFd,
     offset: i64,
     whence: impl Into<SeekWhence>,
-) -> std::io::Result<Option<i64>> {
+) -> std::io::Result<Option<RegionOffset>> {
     // lseek64?
     match lseek(fd, offset, whence) {
-        Ok(offset) => Ok(Some(offset)),
+        Ok(offset) => Ok(Some(offset as RegionOffset)),
         Err(errno) => {
             if errno == ENXIO {
                 Ok(None)
@@ -32,13 +32,13 @@ pub fn seek_hole_whence(
 
 /// Using i64 rather than off_t to enforce 64-bit offsets (the libc wrappers all use type aliases
 /// anyway).
-fn lseek(fd: RawFd, offset: i64, whence: impl Into<SeekWhence>) -> Result<i64, i32> {
+fn lseek(fd: RawFd, offset: i64, whence: impl Into<SeekWhence>) -> Result<RegionOffset, i32> {
     // lseek64?
     let new_offset = unsafe { nix::libc::lseek(fd, offset, whence.into()) };
     if new_offset == -1 {
         return Err(errno());
     }
-    Ok(new_offset)
+    Ok(new_offset as RegionOffset)
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -69,15 +69,17 @@ impl std::ops::Not for RegionType {
 
 pub use RegionType::*;
 
+pub type RegionOffset = u64;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Region {
     pub region_type: RegionType,
-    pub start: i64,
-    pub end: i64,
+    pub start: RegionOffset,
+    pub end: RegionOffset,
 }
 
 impl Region {
-    pub fn length(&self) -> i64 {
+    pub fn length(&self) -> RegionOffset {
         self.end - self.start
     }
 }
@@ -90,11 +92,11 @@ pub fn file_regions(file: &mut File) -> Result<Vec<Region>> {
         let mut offset = 0;
         let mut whence = Data;
         loop {
-            let new_offset = match seek_hole_whence(fd, offset, whence)? {
+            let new_offset = match seek_hole_whence(fd, offset as i64, whence)? {
                 Some(a) => a,
                 None => match whence {
                     Hole => break,
-                    Data => file.seek(End(0))?.try_into()?,
+                    Data => file.seek(End(0))?,
                 },
             };
             offsets.push((new_offset, whence));
@@ -125,12 +127,12 @@ pub fn file_regions(file: &mut File) -> Result<Vec<Region>> {
 
 pub struct Iter {
     last_whence: RegionType,
-    offset: i64,
+    offset: RegionOffset,
     fd: RawFd,
 }
 
 impl Iter {
-    fn new(fd: RawFd) -> Self {
+    pub fn new(fd: RawFd) -> Self {
         Self {
             // We want to start with whatever will most likely result in a positive seek on the
             // first next. Most files start with Data. This might not be the case for long-term
@@ -153,7 +155,7 @@ impl Iterator for Iter {
         // This only runs twice. Once with each whence, starting with the one we didn't try last.
         loop {
             // dbg!(self.offset, whence);
-            match seek_hole_whence(self.fd, self.offset, whence) {
+            match seek_hole_whence(self.fd, self.offset as i64, whence) {
                 Ok(Some(offset)) if offset != self.offset => {
                     let region = Region {
                         region_type: !whence,
@@ -228,7 +230,7 @@ mod tests {
         if min_hole_size <= 1 {
             min_hole_size = 2;
         }
-        let mut file = write_random_tempfile(min_hole_size.try_into()?)?;
+        let mut file = write_random_tempfile(min_hole_size)?;
         let regions = get_regions(file.as_file_mut())?;
         assert_eq!(
             regions,
@@ -238,7 +240,7 @@ mod tests {
                 end: min_hole_size
             }]
         );
-        punchfile(file.as_raw_fd(), 0, min_hole_size)?;
+        punchfile(file.as_raw_fd(), 0, min_hole_size as libc::off_t)?;
         file.seek(Start(0))?;
         let regions: Vec<_> = get_regions(file.as_file_mut())?;
         assert_eq!(

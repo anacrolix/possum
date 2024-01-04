@@ -80,24 +80,24 @@ fn test_replace_keys() -> Result<()> {
     let value_file = values_files[0];
     let mut file = File::open(&value_file.path)?;
     let regions = file_regions(&mut file)?;
-    let end: i64 = file.seek(End(0))?.try_into()?;
+    let end = file.seek(End(0))?;
     let expected = vec![
         // a
         Region {
             region_type: Data,
-            start: end - 3 * (block_size as i64),
-            end: end - 2 * (block_size as i64),
+            start: end - 3 * (block_size as u64),
+            end: end - 2 * (block_size as u64),
         },
         // last b
         Region {
             region_type: Hole,
-            start: end - 2 * (block_size as i64),
-            end: end - (block_size as i64),
+            start: end - 2 * (block_size as u64),
+            end: end - (block_size as u64),
         },
         // new b
         Region {
             region_type: Data,
-            start: end - (block_size as i64),
+            start: end - (block_size as u64),
             end,
         },
     ];
@@ -109,7 +109,7 @@ fn test_replace_keys() -> Result<()> {
             [Region {
                 region_type: Hole,
                 start: 0,
-                end: end - expected.len() as i64 * (block_size as i64),
+                end: end - expected.len() as u64 * (block_size as u64),
             }]
         )
     }

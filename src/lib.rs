@@ -3,6 +3,7 @@ pub mod clonefile;
 mod cpathbuf;
 mod error;
 mod exclusive_file;
+pub mod file_locking;
 mod handle;
 mod item;
 mod owned_cell;
@@ -55,7 +56,7 @@ pub use walk::Entry as WalkEntry;
 use ErrorKind::InvalidInput;
 
 use crate::clonefile::fclonefile;
-use crate::exclusive_file::try_lock_file;
+use crate::file_locking::*;
 use crate::item::Item;
 use crate::punchfile::punchfile;
 use crate::seekhole::seek_hole_whence;
@@ -355,6 +356,18 @@ impl Value {
             last_used: row.get(3)?,
         })
     }
+
+    pub fn file_offset(&self) -> u64 {
+        self.file_offset
+    }
+
+    pub fn length(&self) -> u64 {
+        self.length
+    }
+
+    pub fn last_used(&self) -> Timestamp {
+        self.last_used
+    }
 }
 
 impl AsRef<Value> for Value {
@@ -372,16 +385,6 @@ impl AsMut<Snapshot> for Snapshot {
 impl AsRef<Snapshot> for Snapshot {
     fn as_ref(&self) -> &Self {
         self
-    }
-}
-
-impl Value {
-    pub fn length(&self) -> u64 {
-        self.length
-    }
-
-    pub fn last_used(&self) -> Timestamp {
-        self.last_used
     }
 }
 
@@ -712,7 +715,7 @@ where
     multiple * (value / multiple)
 }
 
-fn ceil_multiple<T>(value: T, multiple: T) -> T
+pub fn ceil_multiple<T>(value: T, multiple: T) -> T
 where
     T: Integer + Copy,
 {
@@ -779,7 +782,7 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
         tx,
         block_size,
         greedy_start,
-        check_hole,
+        check_hole: check_holes,
     } = opts;
     let mut offset = offset as i64;
     let mut length = length as i64;
@@ -812,10 +815,13 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
     punchfile(file.as_raw_fd(), offset, length).with_context(|| format!("length {}", length))?;
     // fcntl(file.as_raw_fd(), nix::fcntl::F_FULLFSYNC)?;
     // file.flush()?;
-    if check_hole {
+    if check_holes {
+        if let Err(err) = check_hole(&mut file, offset as u64, length as u64) {
+            warn!("checking hole: {}", err);
+        }
         match seek_hole_whence(file.as_raw_fd(), offset, seekhole::Data).unwrap() {
             // Data starts after the hole we just punched.
-            Some(seek_offset) if seek_offset >= offset + length => {}
+            Some(seek_offset) if seek_offset >= (offset + length).try_into().unwrap() => {}
             // There's no data after the hole we just punched.
             None => {}
             otherwise => {
@@ -824,6 +830,18 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
         };
     }
     Ok(())
+}
+
+pub fn check_hole(file: &mut File, offset: u64, length: u64) -> Result<()> {
+    match seek_hole_whence(file.as_raw_fd(), offset as i64, seekhole::Data)? {
+        // Data starts after the hole we just punched.
+        Some(seek_offset) if seek_offset >= offset + length => Ok(()),
+        // There's no data after the hole we just punched.
+        None => Ok(()),
+        otherwise => {
+            bail!("punched hole didn't appear: {:?}", otherwise)
+        }
+    }
 }
 
 fn delete_unused_snapshots(dir: &Path) -> Result<()> {

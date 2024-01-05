@@ -135,9 +135,9 @@ fn main() -> anyhow::Result<()> {
                             // Make sure nobody could be writing to the file. It should be possible
                             // to punch holes before the last value despite this (just as greedy
                             // start hole punching occurs during regular key deletes).
-                            possum::file_locking::try_lock_file(
+                            possum::flock::try_lock_file(
                                 &mut file,
-                                possum::file_locking::LockExclusiveNonblock,
+                                possum::flock::LockExclusiveNonblock,
                             )?;
                             for FileRegion {
                                 mut start,

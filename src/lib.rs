@@ -3,7 +3,7 @@ pub mod clonefile;
 mod cpathbuf;
 mod error;
 mod exclusive_file;
-pub mod file_locking;
+pub mod flock;
 mod handle;
 mod item;
 mod owned_cell;
@@ -56,7 +56,7 @@ pub use walk::Entry as WalkEntry;
 use ErrorKind::InvalidInput;
 
 use crate::clonefile::fclonefile;
-use crate::file_locking::*;
+use crate::flock::*;
 use crate::item::Item;
 use crate::punchfile::punchfile;
 use crate::seekhole::seek_hole_whence;
@@ -488,53 +488,6 @@ pub struct OwnedTx<'handle> {
     cell: OwnedTxInner<'handle>,
 }
 
-pub struct Transaction<'h> {
-    tx: rusqlite::Transaction<'h>,
-}
-
-/// This should probably go away when we want to control queries via Transaction, and require a
-/// special method to dive deeper for custom stuff.
-impl<'h> Deref for Transaction<'h> {
-    type Target = rusqlite::Transaction<'h>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.tx
-    }
-}
-
-impl Transaction<'_> {
-    fn delete_key(&self, key: &[u8]) -> rusqlite::Result<Option<Value>> {
-        match self.query_row(
-            &format!(
-                "delete from keys where key=? returning {}",
-                value_columns_sql()
-            ),
-            [key],
-            Value::from_row,
-        ) {
-            Err(QueryReturnedNoRows) => Ok(None),
-            Ok(value) => Ok(Some(value)),
-            Err(err) => Err(err),
-        }
-    }
-
-    pub fn file_values<'a>(
-        &'a self,
-        file_id: &'a FileIdFancy,
-    ) -> rusqlite::Result<FileValues<'a, CachedStatement<'a>>> {
-        let stmt = self.tx.prepare_cached(&format!(
-            "select {} from keys where file_id=? order by file_offset",
-            value_columns_sql()
-        ))?;
-        let iter = FileValues {
-            stmt,
-            file_id,
-            // init: |stmt: &mut Statement| stmt.query_map(&[file_id], Value::from_row).unwrap(),
-        };
-        Ok(iter)
-    }
-}
-
 pub struct FileValues<'a, S> {
     stmt: S,
     file_id: &'a FileIdFancy,
@@ -548,12 +501,6 @@ where
         &mut self,
     ) -> rusqlite::Result<impl Iterator<Item = rusqlite::Result<Value>> + '_> {
         self.stmt.query_map([self.file_id], Value::from_row)
-    }
-}
-
-impl<'a> From<rusqlite::Transaction<'a>> for Transaction<'a> {
-    fn from(tx: rusqlite::Transaction<'a>) -> Self {
-        Self { tx }
     }
 }
 
@@ -582,7 +529,7 @@ impl<'a> Deref for OwnedTx<'a> {
 
 impl<'a> OwnedTx<'a> {
     fn commit(self) -> rusqlite::Result<()> {
-        self.cell.move_dependent(|tx| tx.tx.commit())
+        self.cell.move_dependent(|tx| tx.commit())
     }
 }
 
@@ -759,6 +706,9 @@ fn valid_file_name(file_name: &str) -> bool {
 }
 
 mod file_id;
+mod tx;
+
+pub use crate::tx::Transaction;
 use file_id::{FileId, FileIdFancy};
 
 struct PunchValueOptions<'a> {

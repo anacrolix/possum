@@ -320,7 +320,7 @@ pub extern "C" fn possum_single_delete(
         Ok(Some(value)) => value,
     };
     if let Some(stat) = unsafe { stat.as_mut() } {
-        *stat = value.into();
+        *stat = value;
     }
     NoError
 }

@@ -258,50 +258,18 @@ impl<'handle> BatchWriter<'handle> {
     }
 
     fn commit_inner(mut self, before_write: impl Fn()) -> Result<WriteCommitResult> {
-        let mut punch_values = vec![];
-        let transaction: OwnedTx = self.handle.start_immediate_transaction()?;
-        let mut altered_files = HashSet::new();
+        let mut transaction: OwnedTx = self.handle.start_immediate_transaction()?;
         let mut write_commit_res = WriteCommitResult { count: 0 };
         for pw in self.pending_writes.drain(..) {
             before_write();
-            let existing = transaction.delete_key(&pw.key);
-            match existing {
-                Ok(Some(value)) => {
-                    let value_length = value.length;
-                    if value_length != 0 {
-                        altered_files.insert(value.file_id.clone());
-                    }
-                    punch_values.push(value);
-                }
-                Ok(None) => (),
-                Err(err) => return Err(err.into()),
-            }
-            let inserted = transaction.execute(
-                "insert into keys (key, file_id, file_offset, value_length)\
-                values (?, ?, ?, ?)",
-                rusqlite::params!(
-                    pw.key,
-                    pw.value_file_id.deref(),
-                    pw.value_file_offset,
-                    pw.value_length
-                ),
-            )?;
-            assert_eq!(inserted, 1);
-            if pw.value_length != 0 {
-                altered_files.insert(pw.value_file_id);
-            }
+            transaction.delete_key(&pw.key)?;
+            transaction.insert_key(pw)?;
             write_commit_res.count += 1;
         }
+        // TODO: On error here, rewind the exclusive to undo any writes that just occurred.
         transaction.commit().context("commit transaction")?;
 
         self.flush_exclusive_files();
-        // This has to happen after exclusive files are flushed or there's a tendency for hole
-        // punches to not persist. It doesn't fix the problem but it significantly reduces it.
-        self.handle.punch_values(&punch_values)?;
-        // Forget any references to clones of files that have changed.
-        for file_id in altered_files {
-            self.handle.clones.lock().unwrap().remove(&file_id);
-        }
         Ok(write_commit_res)
     }
 
@@ -482,11 +450,8 @@ where
     }
 }
 
-/// A Sqlite Transaction and the mutex guard on the Connection it came from.
-// Not in the handle module since it can be owned by types other than Handle.
-pub struct OwnedTx<'handle> {
-    cell: OwnedTxInner<'handle>,
-}
+mod ownedtx;
+use ownedtx::OwnedTx;
 
 pub struct FileValues<'a, S> {
     stmt: S,
@@ -504,41 +469,6 @@ where
     }
 }
 
-type OwnedTxInner<'handle> =
-    owned_cell::OwnedCell<MutexGuard<'handle, Connection>, Transaction<'handle>>;
-
-impl<'a> From<OwnedTxInner<'a>> for OwnedTx<'a> {
-    fn from(cell: OwnedTxInner<'a>) -> Self {
-        Self { cell }
-    }
-}
-
-impl AsRef<Connection> for OwnedTx<'_> {
-    fn as_ref(&self) -> &Connection {
-        &self.cell
-    }
-}
-
-impl<'a> Deref for OwnedTx<'a> {
-    type Target = Transaction<'a>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.cell
-    }
-}
-
-impl<'a> OwnedTx<'a> {
-    fn commit(self) -> rusqlite::Result<()> {
-        self.cell.move_dependent(|tx| tx.commit())
-    }
-}
-
-// impl AsRef<rusqlite::Connection> for OwnedTx<'_> {
-//     fn as_ref(&self) -> &Connection {
-//         self.cell
-//     }
-// }
-
 pub struct Reader<'handle> {
     owned_tx: OwnedTx<'handle>,
     handle: &'handle Handle,
@@ -547,21 +477,16 @@ pub struct Reader<'handle> {
 
 impl<'a> Reader<'a> {
     pub fn add(&mut self, key: &[u8]) -> rusqlite::Result<Option<Value>> {
-        let res = self.owned_tx.query_row(
-            "update keys \
-            set last_used=cast(unixepoch('subsec')*1e3 as integer) \
-            where key=? \
-            returning file_id, file_offset, value_length, last_used",
-            [key],
-            |row| {
-                let file_id: FileId = row.get(0)?;
-                Ok((file_id, row.get(1)?, row.get(2)?, row.get(3)?))
-            },
-        );
+        let res = self.owned_tx.touch_for_read(key);
         match res {
-            Ok((file_id, file_offset, value_length, last_used)) => {
-                let file = self.files.entry(file_id.clone());
-                let value_end = file_offset + value_length;
+            Ok(value) => {
+                let Value {
+                    file_offset,
+                    length,
+                    ..
+                } = value;
+                let file = self.files.entry(value.file_id.clone());
+                let value_end = file_offset + length;
                 use hash_map::Entry::*;
                 match file {
                     Occupied(mut entry) => {
@@ -572,12 +497,7 @@ impl<'a> Reader<'a> {
                         entry.insert(value_end);
                     }
                 };
-                Ok(Some(Value {
-                    file_id,
-                    file_offset,
-                    length: value_length,
-                    last_used,
-                }))
+                Ok(Some(value))
             }
             Err(QueryReturnedNoRows) => Ok(None),
             Err(err) => Err(err),
@@ -608,7 +528,7 @@ impl<'a> Reader<'a> {
     }
 
     pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
-        list_items(self.owned_tx.deref(), prefix)
+        self.owned_tx.list_items(prefix)
     }
 
     fn get_file_clone(
@@ -742,7 +662,7 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
     // Find out how far back we can punch and start there, correcting for block boundaries as we go.
     if offset % block_size != 0 || greedy_start {
         let new_offset = ceil_multiple(
-            query_last_end_offset(tx, file_id, offset as u64)?,
+            tx.query_last_end_offset(file_id, offset as u64)?,
             block_size as u64,
         ) as i64;
         // Because these are u64 we can't deal with overflow into negatives.
@@ -823,26 +743,6 @@ fn delete_unused_snapshots(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Returns the end offset of the last active value before offset in the same file.
-pub fn query_last_end_offset(
-    tx: &rusqlite::Transaction,
-    file_id: &FileId,
-    offset: u64,
-) -> rusqlite::Result<u64> {
-    tx.query_row(
-        "select max(file_offset+value_length) as last_offset \
-            from keys \
-            where file_id=? and file_offset+value_length <= ?",
-        params![file_id.deref(), offset],
-        |row| {
-            // I don't know why, but this can return null for file_ids that have values but
-            // don't fit the other conditions.
-            let res: rusqlite::Result<Option<_>> = row.get(0);
-            res.map(|v| v.unwrap_or_default())
-        },
-    )
-}
-
 fn to_usize_io<F>(from: F) -> io::Result<usize>
 where
     usize: TryFrom<F, Error = TryFromIntError>,
@@ -877,50 +777,4 @@ fn inc_big_endian_array(arr: &mut [u8]) -> bool {
         }
     }
     false
-}
-
-fn list_items(tx: &Transaction, prefix: &[u8]) -> PubResult<Vec<Item>> {
-    let range_end = {
-        let mut prefix = prefix.to_owned();
-        if inc_big_endian_array(&mut prefix) {
-            Some(prefix)
-        } else {
-            None
-        }
-    };
-    match range_end {
-        None => list_items_inner(
-            tx,
-            &format!(
-                "select {}, key from keys where key >= ?",
-                value_columns_sql()
-            ),
-            [prefix],
-        ),
-        Some(range_end) => list_items_inner(
-            tx,
-            &format!(
-                "select {}, key from keys where key >= ? and key < ?",
-                value_columns_sql()
-            ),
-            rusqlite::params![prefix, range_end],
-        ),
-    }
-}
-
-fn list_items_inner(
-    tx: &Transaction,
-    sql: &str,
-    params: impl rusqlite::Params,
-) -> PubResult<Vec<Item>> {
-    tx.prepare_cached(sql)
-        .unwrap()
-        .query_map(params, |row| {
-            Ok(Item {
-                value: Value::from_row(row)?,
-                key: row.get(VALUE_COLUMN_NAMES.len())?,
-            })
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()
-        .map_err(Into::into)
 }

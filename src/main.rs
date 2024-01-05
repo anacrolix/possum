@@ -9,10 +9,7 @@ use anyhow::{anyhow, bail, Context};
 use log::info;
 use possum::punchfile::punchfile;
 use possum::seekhole::{file_regions, Region, RegionType};
-use possum::{
-    ceil_multiple, check_hole, query_last_end_offset, Handle, Transaction, Value, WalkEntry,
-    MANIFEST_DB_FILE_NAME,
-};
+use possum::{ceil_multiple, check_hole, Handle, Transaction, Value, WalkEntry};
 
 #[derive(clap::Subcommand)]
 enum Commands {
@@ -193,10 +190,10 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         LastEndOffset { dir, file, offset } => {
-            let mut conn = rusqlite::Connection::open(dir.join(MANIFEST_DB_FILE_NAME))?;
-            let tx = conn.transaction()?;
+            let handle = Handle::new(dir)?;
+            let tx = handle.start_deferred_transaction_for_read()?;
             let file_id = file.into();
-            let last_end = query_last_end_offset(&tx, &file_id, offset)?;
+            let last_end = tx.query_last_end_offset(&file_id, offset)?;
             println!("{}", last_end);
             Ok(())
         }

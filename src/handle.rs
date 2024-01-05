@@ -2,12 +2,18 @@ use log::error;
 
 use super::*;
 
+#[derive(Default)]
+pub struct HandleOpts {
+    pub max_value_length: Option<u64>,
+}
+
 pub struct Handle {
     pub(crate) conn: Mutex<Connection>,
     pub(crate) exclusive_files: Mutex<HashMap<FileId, ExclusiveFile>>,
     pub(crate) dir: PathBuf,
     pub(crate) clones: Mutex<FileCloneCache>,
     pub(crate) greedy_holes: bool,
+    pub(crate) opts: HandleOpts,
 }
 
 impl Handle {
@@ -84,6 +90,7 @@ impl Handle {
                 Err(std::env::VarError::NotPresent) => true,
                 Err(err) => return Err(err.into()),
             },
+            opts: Default::default(),
         };
         Ok(handle)
     }
@@ -105,10 +112,10 @@ impl Handle {
         make_tx: impl FnOnce(&mut Connection) -> rusqlite::Result<rusqlite::Transaction<'_>>,
     ) -> rusqlite::Result<OwnedTx> {
         let guard = self.conn.lock().unwrap();
-        Ok(
-            owned_cell::OwnedCell::try_make(guard, |conn| make_tx(conn).map(Transaction::from))?
-                .into(),
-        )
+        Ok(owned_cell::OwnedCell::try_make(guard, |conn| {
+            make_tx(conn).map(|tx| Transaction::new(tx, self))
+        })?
+        .into())
     }
 
     pub(crate) fn start_immediate_transaction(&self) -> rusqlite::Result<OwnedTx> {
@@ -164,14 +171,13 @@ impl Handle {
         Ok((n, commit))
     }
 
-    pub fn single_delete(&self, key: &[u8]) -> PubResult<Option<Value>> {
-        let tx = self.start_deferred_transaction()?;
+    pub fn single_delete(&self, key: &[u8]) -> PubResult<Option<c_api::PossumStat>> {
+        let mut tx = self.start_deferred_transaction()?;
         let deleted = tx.delete_key(key)?;
         // Maybe it's okay just to commit anyway, since we have a deferred transaction and sqlite
         // might know nothing has changed.
-        if let Some(value) = &deleted {
+        if deleted.is_some() {
             tx.commit()?;
-            self.punch_values(&[value])?;
         }
         Ok(deleted)
     }
@@ -186,20 +192,8 @@ impl Handle {
     }
 
     pub fn rename_item(&mut self, from: &[u8], to: &[u8]) -> PubResult<Timestamp> {
-        let tx = self.start_immediate_transaction()?;
-        let last_used = match tx.query_row(
-            "update keys set key=? where key=? returning last_used",
-            [to, from],
-            |row| {
-                let ts: Timestamp = row.get(0)?;
-                Ok(ts)
-            },
-        ) {
-            Err(QueryReturnedNoRows) => Err(Error::NoSuchKey),
-            Ok(ok) => Ok(ok),
-            Err(err) => Err(err.into()),
-        }?;
-        assert_eq!(tx.changes(), 1);
+        let mut tx = self.start_immediate_transaction()?;
+        let last_used = tx.rename_item(from, to)?;
         tx.commit()?;
         Ok(last_used)
     }
@@ -210,7 +204,8 @@ impl Handle {
     }
 
     pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
-        list_items(&*self.start_deferred_transaction_for_read()?, prefix)
+        self.start_deferred_transaction_for_read()?
+            .list_items(prefix)
     }
 
     /// Starts a read transaction to determine punch boundaries. Since punching is never expanded to

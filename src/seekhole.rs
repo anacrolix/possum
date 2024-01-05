@@ -145,7 +145,7 @@ impl Iter {
 }
 
 impl Iterator for Iter {
-    type Item = Result<Region>;
+    type Item = io::Result<Region>;
 
     // We don't enter a final state, I think fused iterators are for that purpose. Plus it's valid
     // for an iterator to start working again if the file changes.
@@ -166,7 +166,7 @@ impl Iterator for Iter {
                     self.offset = offset;
                     return Some(Ok(region));
                 }
-                Err(err) => return Some(Err(err.into())),
+                Err(err) => return Some(Err(err)),
                 Ok(None | Some(_)) => {}
             }
             whence = !whence;
@@ -178,7 +178,7 @@ impl Iterator for Iter {
         // data, SEEK_HOLE will always get to the end, but if it ends in a hole, SEEK_HOLE will get
         // stuck. Therefore, SEEK_END will progress past a final hole.
         match lseek(self.fd, 0, SEEK_END) {
-            Err(errno) => Some(Err(Error::from_raw_os_error(errno).into())),
+            Err(errno) => Some(Err(Error::from_raw_os_error(errno))),
             Ok(offset) => {
                 if offset == self.offset {
                     None
@@ -200,9 +200,9 @@ impl Iterator for Iter {
     }
 }
 
-fn regions_iter_to_vec(file: &mut File) -> Result<Vec<Region>> {
+fn regions_iter_to_vec(file: &mut File) -> io::Result<Vec<Region>> {
     let fd = file.as_raw_fd();
-    let itered: Vec<_> = Iter::new(fd).collect::<Result<Vec<_>>>()?;
+    let itered: Vec<_> = Iter::new(fd).collect::<io::Result<Vec<_>>>()?;
     Ok(itered)
 }
 
@@ -217,7 +217,7 @@ mod tests {
 
     fn get_regions(file: &mut File) -> Result<Vec<Region>> {
         let fd = file.as_raw_fd();
-        let itered: Vec<_> = Iter::new(fd).collect::<Result<Vec<_>>>()?;
+        let itered: Vec<_> = Iter::new(fd).collect::<io::Result<Vec<_>>>()?;
         let vec = file_regions(file)?;
         assert_eq!(itered, vec);
         Ok(vec)

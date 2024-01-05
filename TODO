@@ -1,4 +1,6 @@
-* Figure out how to have RustRover limit lines to 100 characters. (It thinks I want 120 characters, but rustfmt is working on 100).
-* Add an integrity check for a directory that includes:
+ * Add an integrity check for a directory that includes:
     * Removing unused values files.
     * Vacuuming the manifest file?
+ * Add hinting for value alignment (I'm sure there's some equation that determines if it's likely to be worthwhile to align a value. Possibly 2048, 4096 or 8192 would be appropriate for a 4096 block size?
+ * Is greedy end possible? If a value exists above the region we're punching out, then we can extend up too.
+ * Add a --fragments option to missing holes detection.

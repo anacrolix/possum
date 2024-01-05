@@ -1,5 +1,4 @@
 use std::fs::File;
-
 use std::os::fd::AsRawFd;
 
 use nix::errno::Errno;

@@ -10,7 +10,7 @@ use log::info;
 use possum::punchfile::punchfile;
 use possum::seekhole::{file_regions, Region, RegionType};
 use possum::{
-    ceil_multiple, check_hole, query_last_end_offset, Handle, Transaction, WalkEntry,
+    ceil_multiple, check_hole, query_last_end_offset, Handle, Transaction, Value, WalkEntry,
     MANIFEST_DB_FILE_NAME,
 };
 
@@ -44,7 +44,7 @@ enum DatabaseCommands {
     WriteFile { file: OsString },
     ListKeys { prefix: String },
     ReadKey { key: String },
-    MissingHoles { file_id: Option<PathBuf> },
+    PrintMissingHoles { file_id: Option<PathBuf> },
     PunchMissingHoles { file_id: Option<PathBuf> },
 }
 
@@ -100,7 +100,7 @@ fn main() -> anyhow::Result<()> {
                     }
                     Ok(())
                 }
-                MissingHoles {
+                PrintMissingHoles {
                     file_id: values_file_path,
                 } => {
                     let tx = handle.start_deferred_transaction_for_read()?;
@@ -112,7 +112,7 @@ fn main() -> anyhow::Result<()> {
                             .map(|path| path == &values_file_entry.path)
                             .unwrap_or(true)
                         {
-                            print_missing_holes(&tx, values_file_entry)?;
+                            print_missing_holes(&tx, values_file_entry, handle.block_size())?;
                         }
                     }
                     Ok(())
@@ -139,7 +139,11 @@ fn main() -> anyhow::Result<()> {
                                 &mut file,
                                 possum::file_locking::LockExclusiveNonblock,
                             )?;
-                            for (mut start, mut length) in missing_holes(&tx, values_file_entry)? {
+                            for FileRegion {
+                                mut start,
+                                mut length,
+                            } in missing_holes(&tx, values_file_entry)?
+                            {
                                 let delay = ceil_multiple(start, handle.block_size()) - start;
                                 // dbg!(start, length, delay);
                                 if delay >= length {
@@ -156,12 +160,12 @@ fn main() -> anyhow::Result<()> {
                                     length,
                                     start % handle.block_size(),
                                 );
-                                check_hole(&mut file, start, length)?;
                                 possum::punchfile::punchfile(
                                     file.as_raw_fd(),
                                     start as i64,
                                     length as i64,
                                 )?;
+                                check_hole(&mut file, start, length)?;
                             }
                         }
                     }
@@ -199,32 +203,67 @@ fn main() -> anyhow::Result<()> {
     }
 }
 
+struct FileRegion {
+    pub start: u64,
+    pub length: u64,
+}
+
+impl FileRegion {
+    fn end(&self) -> u64 {
+        self.start + self.length
+    }
+}
+
+impl From<Region> for FileRegion {
+    fn from(value: Region) -> Self {
+        Self {
+            start: value.start,
+            length: value.length(),
+        }
+    }
+}
+
+impl From<Value> for FileRegion {
+    fn from(value: Value) -> Self {
+        Self {
+            start: value.file_offset(),
+            length: value.length(),
+        }
+    }
+}
+
 fn missing_holes(
     tx: &Transaction,
     values_file_entry: &WalkEntry,
-) -> anyhow::Result<Vec<(u64, u64)>> {
+) -> anyhow::Result<Vec<FileRegion>> {
     let file_id = values_file_entry.file_id().unwrap();
     let file = File::open(&values_file_entry.path)?;
-    let mut ret = vec![];
-    let mut iter =
+    let iter =
         possum::seekhole::Iter::new(file.as_raw_fd()).filter_map(|region_res| match region_res {
-            Ok(
-                reg @ Region {
-                    region_type: RegionType::Hole,
-                    ..
-                },
-            ) => Some(Ok(reg)),
+            Ok(walk_reg) if matches!(walk_reg.region_type, RegionType::Hole) => {
+                Some(Ok(walk_reg.into()))
+            }
             Ok(_) => None,
             Err(err) => Some(Err(err)),
         });
-    let mut hole: Option<Region> = None;
+    let mut binding = tx.file_values(file_id)?;
+    let values_iter = binding.begin()?;
+    missing_holes_pure(iter, values_iter)
+}
+
+fn missing_holes_pure(
+    mut iter: impl Iterator<Item = Result<FileRegion, impl std::error::Error + Send + Sync + 'static>>,
+    values: impl Iterator<Item = Result<Value, impl std::error::Error + Send + Sync + 'static>>,
+) -> anyhow::Result<Vec<FileRegion>> {
+    let mut ret = vec![];
+    let mut hole: Option<FileRegion> = None;
     let mut offset = 0;
-    for value in tx.file_values(file_id)?.begin()? {
-        let value = value?;
-        while offset < value.file_offset() {
+    for value in values {
+        let value: FileRegion = value?.into();
+        while offset < value.start {
             while match &hole {
                 None => true,
-                Some(hole) => hole.end <= offset,
+                Some(hole) => hole.end() <= offset,
             } {
                 hole = iter.next().transpose()?;
                 if hole.is_none() {
@@ -233,32 +272,43 @@ fn missing_holes(
             }
             match &hole {
                 Some(some_hole) if some_hole.start <= offset => {
-                    offset = max(some_hole.end, offset);
+                    offset = max(some_hole.end(), offset);
                 }
-                Some(hole) if hole.start < value.file_offset() => {
-                    ret.push((offset, hole.start - offset));
-                    offset = hole.end;
+                Some(hole) if hole.start < value.start => {
+                    ret.push(FileRegion {
+                        start: offset,
+                        length: hole.start - offset,
+                    });
+                    offset = hole.end();
                 }
                 _ => {
-                    ret.push((offset, value.file_offset() - offset));
+                    ret.push(FileRegion {
+                        start: offset,
+                        length: value.start - offset,
+                    });
                     break;
                 }
             };
         }
-        offset = value.file_offset() + value.length();
+        offset = value.start + value.length;
     }
     Ok(ret)
 }
 
-fn print_missing_holes(tx: &Transaction, values_file_entry: &WalkEntry) -> anyhow::Result<()> {
+fn print_missing_holes(
+    tx: &Transaction,
+    values_file_entry: &WalkEntry,
+    block_size: u64,
+) -> anyhow::Result<()> {
     let file_id = values_file_entry.file_id().unwrap();
-    for (start, length) in missing_holes(tx, values_file_entry)? {
+    for FileRegion { start, length } in missing_holes(tx, values_file_entry)? {
         println!(
-            "{}: {}-{} (length {})",
+            "{}: {}-{} (length {}, block_size mod: {})",
             file_id,
             start,
             start + length,
             length,
+            start % block_size,
         );
     }
     Ok(())

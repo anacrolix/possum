@@ -6,10 +6,11 @@ use stable_deref_trait::StableDeref;
 
 use super::*;
 
-/// Store a value (the dependent, D) that needs a stable reference to another value (the owner, O) together. This is
-/// useful to allow the owner to move around with the dependent to ensure it gets dropped when the dependent is no
-/// longer needed. This is only possible if the owner implements StableDeref, a market trait for types that can be moved
-/// while there are references to them. A great example is MutexGuard.
+/// Store a value (the dependent, D) that needs a stable reference to another value (the owner, O)
+/// together. This is useful to allow the owner to move around with the dependent to ensure it gets
+/// dropped when the dependent is no longer needed. This is only possible if the owner implements
+/// StableDeref, a market trait for types that can be moved while there are references to them. A
+/// great example is MutexGuard.
 pub(crate) struct OwnedCell<O, D> {
     // The order here matters. dep must be dropped before owner.
     dep: D,

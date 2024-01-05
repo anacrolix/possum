@@ -31,7 +31,8 @@ impl DerefMut for OwnedTx<'_> {
 
 impl<'a> OwnedTx<'a> {
     pub fn commit(self) -> Result<()> {
-        self.cell.move_dependent(|tx| tx.commit())
+        let post_commit_work = self.cell.move_dependent(|tx| tx.commit())?;
+        post_commit_work.complete()
     }
 }
 

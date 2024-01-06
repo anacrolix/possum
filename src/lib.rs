@@ -19,7 +19,7 @@ use std::cmp::{max, min};
 use std::collections::{hash_map, HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::fmt::{Debug, Display, Formatter};
-use std::fs::{read_dir, remove_dir, remove_dir_all, remove_file, File, OpenOptions};
+use std::fs::{read_dir, remove_dir, remove_file, File, OpenOptions};
 use std::io::SeekFrom::{End, Start};
 use std::io::{ErrorKind, Read, Seek, Write};
 use std::num::TryFromIntError;
@@ -760,26 +760,39 @@ pub fn check_hole(file: &mut File, offset: u64, length: u64) -> Result<()> {
 
 fn delete_unused_snapshots(dir: &Path) -> Result<()> {
     use walk::EntryType::*;
-    for entry in walk_dir(dir)? {
+    for entry in walk_dir(dir).context("walking dir")? {
         match entry.entry_type {
             SnapshotDir => {
+                // If the dir is not empty, it will be attempted after each snapshot value inside
+                // anyway.
                 let res = remove_dir(&entry.path);
                 debug!("removing snapshot dir {:?}: {:?}", &entry.path, res);
             }
             SnapshotValue => {
-                let mut file = std::fs::File::open(&entry.path)?;
-                if try_lock_file(&mut file, LockExclusiveNonblock)? {
-                    let res = remove_file(&entry.path);
-                    debug!("removing snapshot value file {:?}: {:?}", &entry.path, res);
-                    let _ = remove_dir_all(
-                        entry
-                            .path
-                            .parent()
-                            .expect("snapshot values must have a parent dir"),
-                    );
-                } else {
-                    debug!("not deleting {:?}, still in use", &entry.path);
-                }
+                match std::fs::File::open(&entry.path) {
+                    Err(err) if err.kind() == ErrorKind::NotFound => {}
+                    Err(err) => {
+                        return Err(err)
+                            .with_context(|| format!("opening snapshot value {:?}", &entry.path))
+                    }
+                    Ok(mut file) => {
+                        if try_lock_file(&mut file, LockExclusiveNonblock)
+                            .context("locking snapshot value")?
+                        {
+                            let res = remove_file(&entry.path);
+                            debug!("removing snapshot value file {:?}: {:?}", &entry.path, res);
+                            // Try to delete the parent directory, if it's empty it will succeed.
+                            let _ = remove_dir(
+                                entry
+                                    .path
+                                    .parent()
+                                    .expect("snapshot values must have a parent dir"),
+                            );
+                        } else {
+                            debug!("not deleting {:?}, still in use", &entry.path);
+                        }
+                    }
+                };
             }
             _ => {}
         }

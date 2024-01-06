@@ -1,4 +1,5 @@
 use super::*;
+use log::info;
 use std::ops::Deref;
 
 /// This is more work to be done after the Handle conn mutex is released.
@@ -42,7 +43,8 @@ impl<'h, 'c> Transaction<'h, 'c> {
         }
     }
 
-    pub fn commit<T>(self, reward: T) -> Result<PostCommitWork<'h, T>> {
+    pub fn commit<T>(mut self, reward: T) -> Result<PostCommitWork<'h, T>> {
+        self.apply_limits()?;
         self.tx.commit()?;
         Ok(PostCommitWork {
             handle: self.handle,
@@ -136,28 +138,35 @@ impl<'h, 'c> Transaction<'h, 'c> {
             .map_err(Into::into)
     }
 
-    pub fn apply_limits(&self) -> Result<()> {
+    pub fn apply_limits(&mut self) -> Result<()> {
         if let Some(max) = self.handle.opts.max_value_length {
-            while self.sum_value_length()? > max {
-                self.evict_values(max)?;
+            loop {
+                let actual = self.sum_value_length()?;
+                if actual <= max {
+                    break;
+                }
+                self.evict_values(actual - max)?;
             }
         }
         Ok(())
     }
 
-    pub fn evict_values(&self, target_bytes: u64) -> Result<Vec<Value>> {
+    pub fn evict_values(&mut self, target_bytes: u64) -> Result<()> {
         let mut stmt = self.tx.prepare_cached(&format!(
-            "delete from keys order by last_used limit 1 returning {}",
+            "delete from keys where key_id in (\
+                select key_id from keys order by last_used limit 1\
+            )\
+            returning {}",
             value_columns_sql()
         ))?;
         let mut value_bytes_deleted = 0;
-        let mut deleted_values = vec![];
         while value_bytes_deleted < target_bytes {
             let value = stmt.query_row([], Value::from_row)?;
             value_bytes_deleted += value.length();
-            deleted_values.push(value);
+            info!("evicting {:?}", &value);
+            self.deleted_values.push(value);
         }
-        Ok(deleted_values)
+        Ok(())
     }
 
     /// Returns the end offset of the last active value before offset in the same file.

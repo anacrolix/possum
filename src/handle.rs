@@ -4,9 +4,17 @@ use std::sync::LockResult;
 
 use super::*;
 
-#[derive(Default)]
 pub struct HandleOpts {
     pub max_value_length: Option<u64>,
+}
+
+impl Default for HandleOpts {
+    fn default() -> Self {
+        Self {
+            // TODO: Expose this to the C API instead!
+            max_value_length: Some(200 << 20),
+        }
+    }
 }
 
 pub(crate) type HandleExclusiveFiles = Arc<Mutex<HashMap<FileId, ExclusiveFile>>>;

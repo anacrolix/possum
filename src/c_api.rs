@@ -1,5 +1,6 @@
 #![allow(clippy::not_unsafe_ptr_arg_deref)]
 use std::ffi::{c_char, CStr, OsStr};
+use std::intrinsics::transmute;
 use std::mem::size_of;
 use std::pin::Pin;
 use std::ptr::{copy_nonoverlapping, null_mut};
@@ -10,7 +11,7 @@ use log::{error, warn};
 
 use super::*;
 
-pub type PossumWriter = *mut BatchWriter<'static>;
+pub type PossumWriter = *mut BatchWriter;
 pub type PossumOffset = u64;
 
 #[repr(C)]
@@ -42,8 +43,9 @@ pub enum PossumValue {
 pub struct PossumReader {
     // Removed when converted to a snapshot. Specific to the C API so as to not need to expose
     // Snapshot, and to convert Values automatically when a snapshot starts.
-    rust_reader: Option<Reader<'static>>,
+    rust_reader: Option<Reader<'static, 'static>>,
     values: Vec<Pin<Box<PossumValue>>>,
+    conn_guard: MutexGuard<'static, Connection>,
 }
 
 #[no_mangle]
@@ -81,7 +83,7 @@ pub extern "C" fn possum_single_write_buf(
     let key_vec = key.as_ref().to_vec();
     let value_slice = value.as_ref();
     const ERR_SENTINEL: usize = usize::MAX;
-    let handle = unsafe { &*handle };
+    let handle = unsafe { &mut *handle };
     match handle.single_write_from(key_vec, value_slice) {
         Err(_) => ERR_SENTINEL,
         Ok((n, _)) => {
@@ -162,11 +164,11 @@ impl From<Timestamp> for PossumTimestamp {
 
 #[no_mangle]
 pub extern "C" fn possum_single_stat(
-    handle: *const Handle,
+    handle: *mut Handle,
     key: PossumBuf,
     out_stat: *mut PossumStat,
 ) -> bool {
-    match unsafe { handle.as_ref() }
+    match unsafe { handle.as_mut() }
         .unwrap()
         .read_single(key.as_ref())
         .unwrap()
@@ -285,13 +287,13 @@ impl From<anyhow::Error> for PossumError {
 
 #[no_mangle]
 pub extern "C" fn possum_single_read_at(
-    handle: *const Handle,
+    handle: *mut Handle,
     key: PossumBuf,
     buf: *mut PossumBuf,
     offset: u64,
 ) -> PossumError {
     let rust_key = key.as_ref();
-    let value = match unsafe { handle.as_ref() }.unwrap().read_single(rust_key) {
+    let value = match unsafe { handle.as_mut() }.unwrap().read_single(rust_key) {
         Ok(Some(value)) => value,
         Ok(None) => return PossumError::NoSuchKey,
         Err(err) => return err.into(),
@@ -314,32 +316,43 @@ pub extern "C" fn possum_single_delete(
     stat: *mut PossumStat,
 ) -> PossumError {
     let handle = unsafe { &*handle };
-    let value = match handle.single_delete(key.as_ref()) {
-        Ok(None) => return NoSuchKey,
+    let work = match handle.single_delete(key.as_ref()) {
         Err(err) => return err.into(),
-        Ok(Some(value)) => value,
+        Ok(ok) => ok,
     };
-    if let Some(stat) = unsafe { stat.as_mut() } {
-        *stat = value;
+    match work.complete(&mut handle.conn().unwrap()) {
+        Err(err) => err.into(),
+        Ok(None) => NoSuchKey,
+        Ok(Some(stat_value)) => {
+            if let Some(stat) = unsafe { stat.as_mut() } {
+                *stat = stat_value;
+            }
+            NoError
+        }
     }
-    NoError
 }
 
 #[no_mangle]
 pub extern "C" fn possum_reader_new(
-    handle: *const Handle,
+    handle: *mut Handle,
     reader: *mut *mut PossumReader,
 ) -> PossumError {
-    let handle = unsafe { handle.as_ref() }.unwrap();
+    let handle = unsafe { &mut *handle };
     let reader = unsafe { reader.as_mut() }.unwrap();
-    let rust_reader = match handle.read() {
+    let conn_guard = handle.conn().unwrap();
+    let mut possum_reader = Box::new(PossumReader {
+        rust_reader: None,
+        values: Default::default(),
+        conn_guard,
+    });
+    let conn: &mut Connection = &mut possum_reader.conn_guard;
+    let static_conn: &'static mut Connection = unsafe { transmute(conn) };
+    let rust_reader = match handle.read(static_conn) {
         Ok(ok) => ok,
         Err(err) => return err.into(),
     };
-    *reader = Box::into_raw(Box::new(PossumReader {
-        rust_reader: Some(rust_reader),
-        values: Default::default(),
-    }));
+    possum_reader.rust_reader = Some(rust_reader);
+    *reader = Box::into_raw(possum_reader);
     NoError
 }
 
@@ -365,9 +378,13 @@ pub extern "C" fn possum_reader_add(
 #[no_mangle]
 pub extern "C" fn possum_reader_begin(reader: *mut PossumReader) -> PossumError {
     let reader = unsafe { &mut *reader };
-    let snapshot = match reader.rust_reader.take().unwrap().begin() {
+    let post_commit = match reader.rust_reader.take().unwrap().begin() {
         Ok(snapshot) => snapshot,
         Err(err) => return err.into(),
+    };
+    let snapshot = match post_commit.complete(&mut reader.conn_guard) {
+        Err(err) => return err.into(),
+        Ok(ok) => ok,
     };
     for value in &mut reader.values {
         // Modify the enum in place using values it contains.

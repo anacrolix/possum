@@ -3,36 +3,37 @@ use std::ops::Deref;
 
 /// This is more work to be done after the Handle conn mutex is released.
 #[must_use]
-pub struct PostCommitWork<'h> {
+pub struct PostCommitWork<'h, T> {
     handle: &'h Handle,
     deleted_values: Vec<Value>,
     altered_files: HashSet<FileId>,
+    reward: T,
 }
 
-impl<'h> PostCommitWork<'h> {
-    pub fn complete(self) -> Result<()> {
+impl<'h, T> PostCommitWork<'h, T> {
+    pub fn complete(self, conn: &mut Connection) -> Result<T> {
         // This has to happen after exclusive files are flushed or there's a tendency for hole
         // punches to not persist. It doesn't fix the problem but it significantly reduces it.
-        self.handle.punch_values(&self.deleted_values)?;
+        self.handle.punch_values(&self.deleted_values, conn)?;
         // Forget any references to clones of files that have changed.
         for file_id in self.altered_files {
             self.handle.clones.lock().unwrap().remove(&file_id);
         }
-        Ok(())
+        Ok(self.reward)
     }
 }
 
 // I can't work out how to have a reference to the Connection, and a transaction on it here at the
 // same time.
-pub struct Transaction<'h> {
-    tx: rusqlite::Transaction<'h>,
+pub struct Transaction<'h, 'c> {
+    tx: rusqlite::Transaction<'c>,
     handle: &'h Handle,
     deleted_values: Vec<Value>,
     altered_files: HashSet<FileId>,
 }
 
-impl<'h> Transaction<'h> {
-    pub fn new(tx: rusqlite::Transaction<'h>, handle: &'h Handle) -> Self {
+impl<'h, 'c> Transaction<'h, 'c> {
+    pub fn new(tx: rusqlite::Transaction<'c>, handle: &'h Handle) -> Self {
         Self {
             tx,
             handle,
@@ -41,12 +42,13 @@ impl<'h> Transaction<'h> {
         }
     }
 
-    pub fn commit(self) -> Result<PostCommitWork<'h>> {
+    pub fn commit<T>(self, reward: T) -> Result<PostCommitWork<'h, T>> {
         self.tx.commit()?;
         Ok(PostCommitWork {
             handle: self.handle,
             deleted_values: self.deleted_values,
             altered_files: self.altered_files,
+            reward,
         })
     }
 

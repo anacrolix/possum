@@ -60,24 +60,21 @@ PossumError possum_start_new_value(PossumWriter writer, PossumValueWriter *value
 
 int possum_value_writer_fd(PossumValueWriter value);
 
-bool possum_single_stat(const Handle *handle, PossumBuf key, PossumStat *out_stat);
+bool possum_single_stat(Handle *handle, PossumBuf key, PossumStat *out_stat);
 
 PossumError possum_list_items(const Handle *handle,
                               PossumBuf prefix,
                               PossumItem **out_list,
                               size_t *out_list_len);
 
-PossumError possum_single_read_at(const Handle *handle,
-                                  PossumBuf key,
-                                  PossumBuf *buf,
-                                  uint64_t offset);
+PossumError possum_single_read_at(Handle *handle, PossumBuf key, PossumBuf *buf, uint64_t offset);
 
 /**
  * stat is filled if non-null and a delete occurs. NoSuchKey is returned if the key does not exist.
  */
 PossumError possum_single_delete(const Handle *handle, PossumBuf key, PossumStat *stat);
 
-PossumError possum_reader_new(const Handle *handle, PossumReader **reader);
+PossumError possum_reader_new(Handle *handle, PossumReader **reader);
 
 PossumError possum_reader_add(PossumReader *reader, PossumBuf key, const PossumValue **value);
 

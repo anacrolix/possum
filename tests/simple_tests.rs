@@ -91,19 +91,24 @@ fn handle_relative_walk_entries_hashset(handle: &Handle) -> HashSet<WalkEntry> {
 #[test]
 fn set_get() -> Result<()> {
     let tempdir = tempdir()?;
-    let handle = Handle::new(tempdir.path().to_owned())?;
+    let mut handle = Handle::new(tempdir.path().to_owned())?;
     let value_bytes = "world".as_bytes();
     let mut writer = handle.new_writer()?;
     let mut value = writer.new_value().begin()?;
     value.write_all(value_bytes)?;
     writer.stage_write("hello".as_bytes().to_owned(), value)?;
-    let mut reader = handle.read()?;
+    let mut conn_guard = handle.conn().unwrap();
+    let mut reader = handle.read(&mut conn_guard)?;
     assert!(reader.add("hello".as_bytes()).is_ok_and(|ok| ok.is_none()));
     drop(reader);
-    writer.commit()?;
-    let mut reader = handle.read()?;
+    drop(conn_guard);
+    // Writer should be made to take &mut Handle or something here so that drops like above are
+    // enforced by Rust.
+    writer.commit(&mut handle)?;
+    let mut conn_guard = handle.conn().unwrap();
+    let mut reader = handle.read(&mut conn_guard)?;
     let value = reader.add("hello".as_bytes())?.expect("key should exist");
-    let snapshot = reader.begin()?;
+    let snapshot = reader.begin()?.complete(&mut conn_guard)?;
     snapshot
         .value(&value)
         .view(|read_value_bytes| assert_eq!(read_value_bytes, value_bytes))?;
@@ -113,7 +118,7 @@ fn set_get() -> Result<()> {
 #[test]
 fn set_get_reader() -> Result<()> {
     let tempdir = tempdir()?;
-    let handle = Handle::new(tempdir.path().to_owned())?;
+    let mut handle = Handle::new(tempdir.path().to_owned())?;
     let mut value_bytes = vec![0; 1 << 16];
     thread_rng().fill_bytes(&mut value_bytes);
     let mut value_bytes_reader: &[u8] = &value_bytes;
@@ -123,13 +128,16 @@ fn set_get_reader() -> Result<()> {
     dbg!(value_bytes.len());
     value.write_all(&value_bytes)?;
     writer.stage_write("hello".as_bytes().to_owned(), value)?;
-    let mut reader = handle.read()?;
+    let mut conn_guard = handle.conn().unwrap();
+    let mut reader = handle.read(&mut conn_guard)?;
     assert!(reader.add("hello".as_bytes()).is_ok_and(|ok| ok.is_none()));
     drop(reader);
-    writer.commit()?;
-    let mut reader = handle.read()?;
+    drop(conn_guard);
+    writer.commit(&mut handle)?;
+    let mut conn_guard = handle.conn().unwrap();
+    let mut reader = handle.read(&mut conn_guard)?;
     let value = reader.add("hello".as_bytes())?.expect("key should exist");
-    let snapshot = reader.begin()?;
+    let snapshot = reader.begin()?.complete(&mut conn_guard)?;
     let mut reader_bytes = vec![];
     snapshot
         .value(&value)
@@ -158,6 +166,7 @@ fn clone_in_file() -> Result<()> {
 }
 
 use std::prelude::rust_2021::test as std_test;
+use std::sync::{Arc, Mutex};
 
 struct TorrentStorageOpts {
     piece_size: usize,
@@ -200,7 +209,7 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
     let _ = raise_fd_limit();
     // Running in the same directory messes with the disk analysis at the end of the test.
     let tempdir = test_tempdir(opts.static_tempdir_name)?;
-    let handle = Handle::new(tempdir.path)?;
+    let handle = Arc::new(Mutex::new(Handle::new(tempdir.path)?));
     let mut piece_data = vec![0; piece_size];
     // Hi alec
     rand::rngs::SmallRng::seed_from_u64(420).fill_bytes(&mut piece_data);
@@ -217,12 +226,12 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
         for (index, offset) in block_offset_iter.clone().enumerate() {
             let piece_data = &piece_data;
             let start_delay = Duration::from_micros(1000 * (index / 2) as u64);
-            let handle = &handle;
+            let handle = Arc::clone(&handle);
             join_handles.push(scope.spawn(move || -> Result<()> {
                 let key = offset_key(offset);
                 sleep(start_delay);
                 debug!("starting block write");
-                handle.single_write_from(
+                handle.lock().unwrap().single_write_from(
                     key.into_bytes(),
                     &piece_data[offset..offset + block_size],
                 )?;
@@ -235,7 +244,9 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
         anyhow::Ok(())
     })?;
     debug!("starting piece");
-    let mut reader = handle.read()?;
+    let mut handle = handle.try_lock().unwrap();
+    let mut conn_guard = handle.conn().unwrap();
+    let mut reader = handle.read(&mut conn_guard)?;
     let values = block_offset_iter
         .clone()
         .map(|offset| {
@@ -246,7 +257,7 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
             )
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let snapshot = reader.begin()?;
+    let snapshot = reader.begin()?.complete(&mut conn_guard)?;
     let mut stored_hash = Hash::default();
     let mut writer = handle.new_writer()?;
     let mut completed = writer.new_value().begin()?;
@@ -257,11 +268,12 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
             completed.write_all(bytes)
         })??;
     }
+    drop(conn_guard);
     dbg!(&completed);
     assert_eq!(stored_hash.finish(), piece_data_hash);
     let completed_key = format!("completed/{:x}", piece_data_hash).into_bytes();
     writer.stage_write(completed_key.clone(), completed)?;
-    writer.commit()?;
+    writer.commit(&mut handle)?;
     let completed_value = handle
         .read_single(&completed_key)?
         .expect("completed item should exist");
@@ -309,7 +321,7 @@ fn offsets_starting_with<'a>(
 #[test]
 fn big_set_get() -> Result<()> {
     let tempdir = test_tempdir("big_set_get")?;
-    let handle = Handle::new(tempdir.path)?;
+    let mut handle = Handle::new(tempdir.path)?;
     let piece_size = 2 << 20;
     let mut piece_data = vec![0; piece_size];
     thread_rng().fill_bytes(&mut piece_data);
@@ -363,7 +375,7 @@ fn cleanup_snapshots() -> Result<()> {
             .filter(|entry| entry.entry_type == SnapshotDir)
             .count()
     };
-    let handle = Handle::new(tempdir.path.clone())?;
+    let mut handle = Handle::new(tempdir.path.clone())?;
     handle.single_write_from("hello".as_bytes().to_vec(), "world".as_bytes())?;
     let value = handle.read_single("hello".as_bytes())?.unwrap();
     assert_eq!(count_snapshot_dirs(), 1);
@@ -376,7 +388,7 @@ fn cleanup_snapshots() -> Result<()> {
     assert_eq!(count_snapshot_dirs(), 1);
     drop(value);
     assert_eq!(count_snapshot_dirs(), 0);
-    let handle = Handle::new(tempdir.path.clone())?;
+    let mut handle = Handle::new(tempdir.path.clone())?;
     assert_eq!(count_snapshot_dirs(), 0);
     let value = handle.read_single("hello".as_bytes())?.unwrap();
     assert_eq!(count_snapshot_dirs(), 1);
@@ -393,7 +405,7 @@ fn cleanup_snapshots() -> Result<()> {
 
 #[test]
 fn reads_update_last_used() -> Result<()> {
-    let handle = Handle::new(tempdir()?.into_path())?;
+    let mut handle = Handle::new(tempdir()?.into_path())?;
     let key = Vec::from("hello");
     let value = "mundo".as_bytes();
     let (n, _) = handle.single_write_from(key.clone(), value)?;
@@ -441,7 +453,7 @@ where
     I: Display + Debug,
     R: Iterator<Item = I>,
 {
-    let handle = Handle::new(dir)?;
+    let mut handle = Handle::new(dir)?;
     for i in values {
         println!("writing {}", i);
         handle.single_write_from(key.to_owned(), i.to_string().as_bytes())?;
@@ -455,7 +467,7 @@ where
     I: FromStr + Debug + PartialOrd + Display,
     <I as FromStr>::Err: Error + Send + Sync + 'static,
 {
-    let handle = Handle::new(dir)?;
+    let mut handle = Handle::new(dir)?;
     let Included(end_i) = range.end_bound() else {
         panic!("expected inclusive range: {:?}", range);
     };

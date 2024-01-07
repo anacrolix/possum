@@ -1,5 +1,4 @@
-//! This is a module to protect the internals of the helper type, OwnedCell.
-#![allow(unused)]
+//! This is a module to protect the internals of the helper type.
 
 use std::ops::Deref;
 

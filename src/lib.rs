@@ -103,14 +103,14 @@ fn init_manifest_schema(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
     conn.execute_batch(MANIFEST_SCHEMA_SQL)
 }
 
-pub struct BeginWriteValue<'writer> {
-    batch: &'writer mut BatchWriter,
+pub struct BeginWriteValue<'writer, 'handle> {
+    batch: &'writer mut BatchWriter<'handle>,
 }
 
-impl BeginWriteValue<'_> {
+impl BeginWriteValue<'_, '_> {
     pub fn clone_fd(self, fd: RawFd, _flags: u32) -> Result<ValueWriter> {
         let dst_path = loop {
-            let dst_path = random_file_name_in_dir(&self.batch.handle_dir);
+            let dst_path = random_file_name_in_dir(&self.batch.handle.dir);
             match fclonefile(fd, &dst_path, 0) {
                 Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
                 Err(err) => return Err(err.into()),
@@ -177,11 +177,10 @@ impl Write for ValueWriter {
     }
 }
 
-pub struct BatchWriter {
+pub struct BatchWriter<'a> {
+    handle: &'a Handle,
     exclusive_files: Vec<ExclusiveFile>,
     pending_writes: Vec<PendingWrite>,
-    handle_exclusive_files: HandleExclusiveFiles,
-    handle_dir: PathBuf,
 }
 
 pub type TimestampInner = NaiveDateTime;
@@ -226,50 +225,13 @@ fn value_columns_sql() -> &'static str {
     ONCE.get_or_init(|| VALUE_COLUMN_NAMES.join(", ")).as_str()
 }
 
-impl BatchWriter {
+impl<'handle> BatchWriter<'handle> {
     fn get_exclusive_file(&mut self) -> Result<ExclusiveFile> {
         if let Some(ef) = self.exclusive_files.pop() {
             debug!("reusing exclusive file from writer");
             return Ok(ef);
         }
-        self.get_handle_exclusive_file()
-    }
-
-    fn open_existing_exclusive_file(&self) -> Result<Option<ExclusiveFile>> {
-        for res in read_dir(&self.handle_dir)? {
-            let entry = res?;
-            if !entry.file_type()?.is_file() {
-                continue;
-            }
-            if !valid_file_name(entry.file_name().to_str().unwrap()) {
-                continue;
-            }
-            if let Ok(ef) = ExclusiveFile::open(entry.path()) {
-                return Ok(Some(ef));
-            }
-        }
-        Ok(None)
-    }
-
-    pub(crate) fn get_handle_exclusive_file(&self) -> Result<ExclusiveFile> {
-        let mut files = self.handle_exclusive_files.lock().unwrap();
-        // How do we avoid cloning the key and skipping the unnecessary remove check? Do we need a
-        // pop method on HashMap?
-        if let Some(id) = files.keys().next().cloned() {
-            let file = files.remove(&id).unwrap();
-            debug_assert_eq!(id, file.id);
-            debug!("using exclusive file {} from handle", &file.id);
-            return Ok(file);
-        }
-        if let Some(file) = self.open_existing_exclusive_file()? {
-            debug!("opened existing values file {}", file.id);
-            return Ok(file);
-        }
-        let ret = ExclusiveFile::new(&self.handle_dir);
-        if let Ok(file) = &ret {
-            debug!("created new exclusive file {}", file.id);
-        }
-        ret
+        self.handle.get_exclusive_file()
     }
 
     pub fn stage_write(&mut self, key: Vec<u8>, mut value: ValueWriter) -> anyhow::Result<()> {
@@ -287,24 +249,16 @@ impl BatchWriter {
         Ok(())
     }
 
-    pub fn new_value(&mut self) -> BeginWriteValue {
+    pub fn new_value<'writer>(&'writer mut self) -> BeginWriteValue<'writer, 'handle> {
         BeginWriteValue { batch: self }
     }
 
-    pub fn commit(self, handle: &mut Handle) -> Result<WriteCommitResult> {
-        self.commit_inner(|| {}, handle)
+    pub fn commit(self) -> Result<WriteCommitResult> {
+        self.commit_inner(|| {})
     }
 
-    fn commit_inner(
-        mut self,
-        before_write: impl Fn(),
-        // mut because we need to enforce that there's only one write connection available to a
-        // Handle.
-        handle: &mut Handle,
-    ) -> Result<WriteCommitResult> {
-        let mut conn_guard = handle.conn().unwrap();
-        let conn: &mut Connection = conn_guard.deref_mut();
-        let mut transaction = handle.start_immediate_transaction(conn)?;
+    fn commit_inner(mut self, before_write: impl Fn()) -> Result<WriteCommitResult> {
+        let mut transaction: OwnedTx = self.handle.start_immediate_transaction()?;
         let mut write_commit_res = WriteCommitResult { count: 0 };
         for pw in self.pending_writes.drain(..) {
             before_write();
@@ -313,16 +267,17 @@ impl BatchWriter {
             write_commit_res.count += 1;
         }
         // TODO: On error here, rewind the exclusive to undo any writes that just occurred.
-        let post_commit = transaction
+        let work = transaction
             .commit(write_commit_res)
             .context("commit transaction")?;
+
         self.flush_exclusive_files();
-        post_commit.complete(conn)
+        work.complete()
     }
 
     /// Flush Writer's exclusive files and return them to the Handle pool.
     fn flush_exclusive_files(&mut self) {
-        let mut handle_exclusive_files = self.handle_exclusive_files.lock().unwrap();
+        let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
         // dbg!(
         //     "adding {} exclusive files to handle",
         //     self.exclusive_files.len()
@@ -339,12 +294,17 @@ impl BatchWriter {
     }
 }
 
-impl Drop for BatchWriter {
+impl Drop for BatchWriter<'_> {
     fn drop(&mut self) {
-        let mut handle_exclusive_files = self.handle_exclusive_files.lock().unwrap();
+        // dbg!(
+        //     "adding exclusive files to handle",
+        //     self.exclusive_files.len()
+        // );
+        let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
         for ef in self.exclusive_files.drain(..) {
             assert!(handle_exclusive_files.insert(ef.id.clone(), ef).is_none());
         }
+        // dbg!("handle exclusive files", handle_exclusive_files.len());
     }
 }
 
@@ -493,6 +453,7 @@ where
 }
 
 mod ownedtx;
+use ownedtx::OwnedTx;
 
 pub struct FileValues<'a, S> {
     stmt: S,
@@ -510,13 +471,13 @@ where
     }
 }
 
-pub struct Reader<'h, 't> {
-    owned_tx: Transaction<'h, 't>,
-    handle: &'h Handle,
+pub struct Reader<'handle> {
+    owned_tx: OwnedTx<'handle>,
+    handle: &'handle Handle,
     files: HashMap<FileId, u64>,
 }
 
-impl<'h, 't> Reader<'h, 't> {
+impl<'a> Reader<'a> {
     pub fn add(&mut self, key: &[u8]) -> rusqlite::Result<Option<Value>> {
         let res = self.owned_tx.touch_for_read(key);
         match res {
@@ -546,7 +507,7 @@ impl<'h, 't> Reader<'h, 't> {
     }
 
     /// Takes a snapshot and commits the read transaction.
-    pub fn begin(self) -> Result<PostCommitWork<'h, Snapshot>> {
+    pub fn begin(self) -> Result<Snapshot> {
         let mut tempdir = None;
         let mut file_clones: FileCloneCache = Default::default();
         let mut handle_clone_guard = self.handle.clones.lock().unwrap();
@@ -566,7 +527,8 @@ impl<'h, 't> Reader<'h, 't> {
         }
         self.owned_tx
             .commit(Snapshot { file_clones })
-            .context("committing transaction")
+            .context("committing transaction")?
+            .complete()
     }
 
     pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
@@ -672,16 +634,15 @@ mod tx;
 
 use file_id::{FileId, FileIdFancy};
 
-use crate::handle::HandleExclusiveFiles;
 use crate::tx::PostCommitWork;
 pub use crate::tx::Transaction;
 
-struct PunchValueOptions<'a, 't> {
+struct PunchValueOptions<'a> {
     dir: &'a Path,
     file_id: &'a FileId,
     offset: u64,
     length: u64,
-    tx: &'a Transaction<'a, 't>,
+    tx: &'a Transaction<'a>,
     block_size: u64,
     greedy_start: bool,
     check_hole: bool,

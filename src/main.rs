@@ -1,7 +1,6 @@
 use std::cmp::max;
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
-use std::ops::DerefMut;
 use std::os::fd::AsRawFd;
 use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
@@ -68,7 +67,7 @@ fn main() -> anyhow::Result<()> {
         }
         Database { dir, command } => {
             info!("sqlite version: {}", rusqlite::version());
-            let mut handle = Handle::new(dir)?;
+            let handle = Handle::new(dir)?;
             use DatabaseCommands::*;
             match command {
                 WriteFile { file } => {
@@ -101,8 +100,7 @@ fn main() -> anyhow::Result<()> {
                 PrintMissingHoles {
                     file_id: values_file_path,
                 } => {
-                    let mut guard = handle.conn().unwrap();
-                    let tx = handle.start_deferred_transaction_for_read(guard.deref_mut())?;
+                    let tx = handle.start_deferred_transaction_for_read()?;
                     for values_file_entry in handle.walk_dir()?.iter().filter(|entry| {
                         matches!(entry.entry_type, possum::walk::EntryType::ValuesFile)
                     }) {
@@ -119,8 +117,7 @@ fn main() -> anyhow::Result<()> {
                 PunchMissingHoles {
                     file_id: values_file_path,
                 } => {
-                    let mut guard = handle.conn().unwrap();
-                    let tx = handle.start_deferred_transaction_for_read(&mut guard)?;
+                    let tx = handle.start_deferred_transaction_for_read()?;
                     for values_file_entry in handle.walk_dir()?.iter().filter(|entry| {
                         matches!(entry.entry_type, possum::walk::EntryType::ValuesFile)
                     }) {
@@ -194,8 +191,7 @@ fn main() -> anyhow::Result<()> {
         }
         LastEndOffset { dir, file, offset } => {
             let handle = Handle::new(dir)?;
-            let mut guard = handle.conn().unwrap();
-            let tx = handle.start_deferred_transaction_for_read(&mut guard)?;
+            let tx = handle.start_deferred_transaction_for_read()?;
             let file_id = file.into();
             let last_end = tx.query_last_end_offset(&file_id, offset)?;
             println!("{}", last_end);

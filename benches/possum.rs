@@ -9,17 +9,16 @@ mod clonefile;
 
 pub fn benchmark_read_fallible(c: &mut Criterion) -> anyhow::Result<()> {
     let tempdir = test_tempdir("benchmark_get_exists")?;
-    let mut handle = Handle::new(tempdir.path)?;
+    let handle = Handle::new(tempdir.path)?;
     let value_bytes = "world".as_bytes();
     handle.single_write_from("hello".as_bytes().to_owned(), value_bytes)?;
     let mut buf = vec![0; value_bytes.len() + 1];
     c.bench_function("read", |b| {
         b.iter(|| {
             (|| -> anyhow::Result<()> {
-                let mut conn_guard = handle.conn().unwrap();
-                let mut reader = handle.read(&mut conn_guard)?;
+                let mut reader = handle.read()?;
                 let value = reader.add("hello".as_bytes())?.expect("key should exist");
-                let snapshot = reader.begin()?.complete(&mut conn_guard)?;
+                let snapshot = reader.begin()?;
                 let read_len = snapshot.value(&value).read(&mut buf)?;
                 assert_eq!(read_len, value_bytes.len());
                 Ok(())
@@ -32,7 +31,7 @@ pub fn benchmark_read_fallible(c: &mut Criterion) -> anyhow::Result<()> {
 
 pub fn benchmark_view_fallible(c: &mut Criterion) -> anyhow::Result<()> {
     let tempdir = test_tempdir("benchmark_get_exists")?;
-    let mut handle = Handle::new(tempdir.path)?;
+    let handle = Handle::new(tempdir.path)?;
     let value_bytes = "world".as_bytes();
     let key = "hello".as_bytes().to_vec();
     handle.single_write_from(key.clone(), value_bytes)?;
@@ -53,7 +52,7 @@ pub fn benchmark_view_fallible(c: &mut Criterion) -> anyhow::Result<()> {
 
 pub fn benchmark_list_keys_fallible(c: &mut Criterion) -> Result<()> {
     let tempdir = test_tempdir("benchmark_list_keys")?;
-    let mut handle = Handle::new(tempdir.path)?;
+    let handle = Handle::new(tempdir.path)?;
     let prefix_range = 0..=100;
     let keys = |prefix| {
         (0..100)
@@ -70,7 +69,7 @@ pub fn benchmark_list_keys_fallible(c: &mut Criterion) -> Result<()> {
             // handle.single_write_from(key, "".as_bytes())?;
         }
     }
-    writer.commit(&mut handle)?;
+    writer.commit()?;
     let exists_key = 1;
     let exists_keys: Vec<String> = keys(exists_key)
         .into_iter()
@@ -101,7 +100,7 @@ pub fn benchmark_list_keys_fallible(c: &mut Criterion) -> Result<()> {
 pub fn multiple_benchmarks_fallible(c: &mut Criterion) -> Result<()> {
     {
         let tempdir = test_tempdir("benchmark_read_multiple_keys")?;
-        let mut handle = Handle::new(tempdir.path)?;
+        let handle = Handle::new(tempdir.path)?;
         let batch_size = 10;
         let keys = {
             (0..batch_size)
@@ -114,17 +113,16 @@ pub fn multiple_benchmarks_fallible(c: &mut Criterion) -> Result<()> {
             value.copy_from(&key[..])?;
             writer.stage_write(key.to_vec(), value)?;
         }
-        writer.commit(&mut handle)?;
+        writer.commit()?;
         let mut group = c.benchmark_group("batch_read");
         group.bench_function("existing", |b| {
             b.iter(|| -> () {
                 (|| -> Result<()> {
-                    let mut conn_guard = handle.conn().unwrap();
-                    let mut reader = handle.read(&mut conn_guard)?;
+                    let mut reader = handle.read()?;
                     for key in &keys {
                         assert!(reader.add(key.as_slice())?.is_some());
                     }
-                    reader.begin()?.complete(&mut conn_guard)?;
+                    reader.begin()?;
                     Ok(())
                 })()
                 .unwrap()
@@ -133,12 +131,11 @@ pub fn multiple_benchmarks_fallible(c: &mut Criterion) -> Result<()> {
         group.bench_function("missing", |b| {
             b.iter(|| -> () {
                 (|| -> Result<()> {
-                    let mut conn_guard = handle.conn().unwrap();
-                    let mut reader = handle.read(&mut conn_guard)?;
+                    let mut reader = handle.read()?;
                     for key in (batch_size..batch_size * 2).map(i32::to_ne_bytes) {
                         assert!(reader.add(key.as_slice())?.is_none());
                     }
-                    reader.begin()?.complete(&mut conn_guard)?;
+                    reader.begin()?;
                     Ok(())
                 })()
                 .unwrap()
@@ -147,16 +144,11 @@ pub fn multiple_benchmarks_fallible(c: &mut Criterion) -> Result<()> {
     }
     {
         let test_tempdir = test_tempdir("benchmark_transactions")?;
-        let mut handle = Handle::new(test_tempdir.path)?;
+        let handle = Handle::new(test_tempdir.path)?;
         let mut group = c.benchmark_group("transactions");
-        group.bench_function("read", |b| {
-            b.iter(|| {
-                let mut conn_guard = handle.conn().unwrap();
-                drop(handle.read(&mut conn_guard).unwrap())
-            })
-        });
+        group.bench_function("read", |b| b.iter(|| handle.read().unwrap()));
         group.bench_function("writer", |b| {
-            b.iter(|| handle.new_writer().unwrap().commit(&mut handle).unwrap())
+            b.iter(|| handle.new_writer().unwrap().commit().unwrap())
         });
     }
     Ok(())

@@ -52,7 +52,7 @@ fn test_inc_array() {
 #[test]
 fn test_replace_keys() -> Result<()> {
     let tempdir = test_tempdir("test_replace_keys")?;
-    let mut handle = Handle::new(tempdir.path.clone())?;
+    let handle = Handle::new(tempdir.path.clone())?;
     let a = "a".as_bytes().to_vec();
     let b = "b".as_bytes().to_vec();
     let block_size: usize = handle.block_size().try_into()?;

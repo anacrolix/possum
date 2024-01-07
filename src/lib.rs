@@ -670,10 +670,11 @@ fn valid_file_name(file_name: &str) -> bool {
 mod file_id;
 mod tx;
 
+use file_id::{FileId, FileIdFancy};
+
 use crate::handle::HandleExclusiveFiles;
 use crate::tx::PostCommitWork;
 pub use crate::tx::Transaction;
-use file_id::{FileId, FileIdFancy};
 
 struct PunchValueOptions<'a, 't> {
     dir: &'a Path,

@@ -1,6 +1,6 @@
-use log::error;
-
 use std::sync::LockResult;
+
+use log::error;
 
 use super::*;
 
@@ -225,5 +225,6 @@ impl Handle {
     }
 }
 
-use crate::tx::PostCommitWork;
 use item::Item;
+
+use crate::tx::PostCommitWork;

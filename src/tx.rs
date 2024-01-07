@@ -1,6 +1,8 @@
-use super::*;
-use log::info;
 use std::ops::Deref;
+
+use log::info;
+
+use super::*;
 
 /// This is more work to be done after the Handle conn mutex is released.
 #[must_use]

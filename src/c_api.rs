@@ -43,8 +43,6 @@ struct PossumReader {
 
 type PossumValueWriter = *mut ValueWriter;
 
-pub use libc::timespec;
-
 use crate::c_api::PossumError::{AnyhowError, IoError, SqliteError};
 
 impl<V> From<V> for PossumStat

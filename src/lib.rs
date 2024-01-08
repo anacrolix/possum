@@ -1,4 +1,4 @@
-pub mod c_api;
+mod c_api;
 pub mod clonefile;
 mod cpathbuf;
 mod error;

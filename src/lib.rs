@@ -532,7 +532,7 @@ impl<'a> Reader<'a> {
     }
 
     pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
-        self.owned_tx.list_items(prefix)
+        self.owned_tx.read().list_items(prefix)
     }
 
     fn get_file_clone(
@@ -630,19 +630,19 @@ fn valid_file_name(file_name: &str) -> bool {
 }
 
 mod file_id;
-mod tx;
+pub mod tx;
 
 use file_id::{FileId, FileIdFancy};
 
-use crate::tx::PostCommitWork;
 pub use crate::tx::Transaction;
+use crate::tx::{PostCommitWork, ReadTransactionOwned};
 
 struct PunchValueOptions<'a> {
     dir: &'a Path,
     file_id: &'a FileId,
     offset: u64,
     length: u64,
-    tx: &'a Transaction<'a>,
+    tx: &'a ReadTransactionOwned<'a>,
     block_size: u64,
     greedy_start: bool,
     check_hole: bool,

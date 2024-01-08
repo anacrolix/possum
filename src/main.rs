@@ -9,7 +9,8 @@ use anyhow::{anyhow, bail, Context};
 use log::info;
 use possum::punchfile::punchfile;
 use possum::seekhole::{file_regions, Region, RegionType};
-use possum::{ceil_multiple, check_hole, Handle, Transaction, Value, WalkEntry};
+use possum::tx::ReadTransactionRef;
+use possum::{ceil_multiple, check_hole, Handle, Value, WalkEntry};
 
 #[derive(clap::Subcommand)]
 enum Commands {
@@ -109,7 +110,11 @@ fn main() -> anyhow::Result<()> {
                             .map(|path| path == &values_file_entry.path)
                             .unwrap_or(true)
                         {
-                            print_missing_holes(&tx, values_file_entry, handle.block_size())?;
+                            print_missing_holes(
+                                tx.as_ref(),
+                                values_file_entry,
+                                handle.block_size(),
+                            )?;
                         }
                     }
                     Ok(())
@@ -139,7 +144,7 @@ fn main() -> anyhow::Result<()> {
                             for FileRegion {
                                 mut start,
                                 mut length,
-                            } in missing_holes(&tx, values_file_entry)?
+                            } in missing_holes(tx.as_ref(), values_file_entry)?
                             {
                                 let delay = ceil_multiple(start, handle.block_size()) - start;
                                 // dbg!(start, length, delay);
@@ -230,7 +235,7 @@ impl From<Value> for FileRegion {
 }
 
 fn missing_holes(
-    tx: &Transaction,
+    tx: &ReadTransactionRef,
     values_file_entry: &WalkEntry,
 ) -> anyhow::Result<Vec<FileRegion>> {
     let file_id = values_file_entry.file_id().unwrap();
@@ -293,7 +298,7 @@ fn missing_holes_pure(
 }
 
 fn print_missing_holes(
-    tx: &Transaction,
+    tx: &ReadTransactionRef,
     values_file_entry: &WalkEntry,
     block_size: u64,
 ) -> anyhow::Result<()> {

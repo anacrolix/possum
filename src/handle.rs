@@ -1,4 +1,5 @@
 use log::error;
+use rusqlite::TransactionBehavior;
 
 use super::*;
 
@@ -115,28 +116,40 @@ impl Handle {
         })
     }
 
-    fn start_transaction(
-        &self,
-        make_tx: impl FnOnce(&mut Connection) -> rusqlite::Result<rusqlite::Transaction<'_>>,
-    ) -> rusqlite::Result<OwnedTx> {
+    fn start_transaction<'h, T, O>(
+        &'h self,
+        make_tx: impl FnOnce(&'h mut Connection, &'h Handle) -> rusqlite::Result<T>,
+    ) -> rusqlite::Result<O>
+    where
+        O: From<OwnedTxInner<'h, T>>,
+    {
         let guard = self.conn.lock().unwrap();
-        Ok(owned_cell::OwnedCell::try_make(guard, |conn| {
-            make_tx(conn).map(|tx| Transaction::new(tx, self))
-        })?
-        .into())
+        Ok(owned_cell::OwnedCell::try_make(guard, |conn| make_tx(conn, self))?.into())
     }
 
     pub(crate) fn start_immediate_transaction(&self) -> rusqlite::Result<OwnedTx> {
-        self.start_transaction(|conn| {
-            conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map(Into::into)
+        self.start_writable_transaction_with_behaviour(TransactionBehavior::Immediate)
+    }
+
+    pub(crate) fn start_writable_transaction_with_behaviour(
+        &self,
+        behaviour: TransactionBehavior,
+    ) -> rusqlite::Result<OwnedTx> {
+        self.start_transaction(|conn, handle| {
+            let rtx = conn.transaction_with_behavior(behaviour)?;
+            Ok(Transaction::new(rtx, handle))
         })
     }
 
     /// Starts a deferred transaction (the default). There is no guaranteed read-only transaction
     /// mode. There might be pragmas that can limit to read only statements.
-    pub fn start_deferred_transaction_for_read(&self) -> rusqlite::Result<OwnedTx> {
-        self.start_transaction(|conn| conn.transaction())
+    pub fn start_deferred_transaction_for_read(&self) -> rusqlite::Result<OwnedReadTx> {
+        self.start_transaction(|conn, _handle| {
+            let rtx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
+            Ok(ReadTransaction {
+                tx: ReadOnlyRusqliteTransaction { conn: rtx },
+            })
+        })
     }
 
     /// Starts a deferred transaction (the default). This might upgrade to a write transaction if
@@ -144,13 +157,13 @@ impl Handle {
     /// operations that become writes depending on certain conditions, but could violate some
     /// expectations around locking. TBD.
     pub(crate) fn start_deferred_transaction(&self) -> rusqlite::Result<OwnedTx> {
-        self.start_transaction(|conn| conn.transaction())
+        self.start_writable_transaction_with_behaviour(TransactionBehavior::Deferred)
     }
 
     /// Begins a read transaction.
     pub fn read(&self) -> rusqlite::Result<Reader> {
         let reader = Reader {
-            owned_tx: self.start_deferred_transaction_for_read()?,
+            owned_tx: self.start_deferred_transaction()?,
             handle: self,
             files: Default::default(),
         };
@@ -253,3 +266,6 @@ impl Handle {
 }
 
 use item::Item;
+
+use crate::ownedtx::{OwnedReadTx, OwnedTxInner};
+use crate::tx::{ReadOnlyRusqliteTransaction, ReadTransaction};

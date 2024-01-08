@@ -1,3 +1,5 @@
+use std::borrow::Borrow;
+use std::mem;
 use std::ops::Deref;
 
 use log::info;
@@ -11,6 +13,128 @@ pub struct PostCommitWork<'h, T> {
     deleted_values: Vec<Value>,
     altered_files: HashSet<FileId>,
     reward: T,
+}
+
+/// Checks outgoing stmts for readonly status
+#[repr(transparent)]
+pub(crate) struct ReadOnlyRusqliteTransaction<T> {
+    pub(crate) conn: T,
+}
+
+impl<'t, T> ReadOnlyRusqliteTransaction<T>
+where
+    T: Borrow<rusqlite::Transaction<'t>>,
+{
+    pub fn prepare_cached<'a>(&'a self, sql: &str) -> rusqlite::Result<CachedStatement<'a>>
+    where
+        't: 'a,
+    {
+        let stmt = self.conn.borrow().prepare_cached(sql)?;
+        assert!(stmt.readonly());
+        Ok(stmt)
+    }
+}
+
+impl<'a> AsRef<ReadTransactionRef<'a>> for ReadTransactionOwned<'a> {
+    fn as_ref(&self) -> &ReadTransactionRef<'a> {
+        let tx_ref = &self.tx.conn;
+        unsafe {
+            mem::transmute(&ReadTransactionRef {
+                tx: ReadOnlyRusqliteTransaction { conn: tx_ref },
+            })
+        }
+    }
+}
+
+pub type ReadTransactionRef<'a> = ReadTransaction<&'a rusqlite::Transaction<'a>>;
+
+pub type ReadTransactionOwned<'a> = ReadTransaction<rusqlite::Transaction<'a>>;
+
+/// Only provides methods that are known to be read only, and has a ReadOnly connection internally.
+#[repr(transparent)]
+pub struct ReadTransaction<T> {
+    pub(crate) tx: ReadOnlyRusqliteTransaction<T>,
+}
+
+impl<'a, T> ReadTransaction<T>
+where
+    T: Borrow<rusqlite::Transaction<'a>>,
+{
+    pub fn file_values(
+        &'a self,
+        file_id: &'a FileIdFancy,
+    ) -> rusqlite::Result<FileValues<'a, CachedStatement<'a>>> {
+        let stmt = self.tx.prepare_cached(&format!(
+            "select {} from keys where file_id=? order by file_offset",
+            value_columns_sql()
+        ))?;
+        let iter = FileValues { stmt, file_id };
+        Ok(iter)
+    }
+
+    pub fn sum_value_length(&self) -> rusqlite::Result<u64> {
+        self.tx
+            .prepare_cached("select sum(value_length) from keys")?
+            .query_row([], |row| row.get(0))
+            .map_err(Into::into)
+    }
+
+    /// Returns the end offset of the last active value before offset in the same file.
+    pub fn query_last_end_offset(&self, file_id: &FileId, offset: u64) -> rusqlite::Result<u64> {
+        self.tx
+            .prepare_cached(
+                "select max(file_offset+value_length) as last_offset \
+                from keys \
+                where file_id=? and file_offset+value_length <= ?",
+            )?
+            .query_row(params![file_id.deref(), offset], |row| {
+                // I don't know why, but this can return null for file_ids that have values but
+                // don't fit the other conditions.
+                let res: rusqlite::Result<Option<_>> = row.get(0);
+                res.map(|v| v.unwrap_or_default())
+            })
+    }
+
+    pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
+        let range_end = {
+            let mut prefix = prefix.to_owned();
+            if inc_big_endian_array(&mut prefix) {
+                Some(prefix)
+            } else {
+                None
+            }
+        };
+        match range_end {
+            None => self.list_items_inner(
+                &format!(
+                    "select {}, key from keys where key >= ?",
+                    value_columns_sql()
+                ),
+                [prefix],
+            ),
+            Some(range_end) => self.list_items_inner(
+                &format!(
+                    "select {}, key from keys where key >= ? and key < ?",
+                    value_columns_sql()
+                ),
+                rusqlite::params![prefix, range_end],
+            ),
+        }
+    }
+
+    fn list_items_inner(&self, sql: &str, params: impl rusqlite::Params) -> PubResult<Vec<Item>> {
+        self.tx
+            .prepare_cached(sql)
+            .unwrap()
+            .query_map(params, |row| {
+                Ok(Item {
+                    value: Value::from_row(row)?,
+                    key: row.get(VALUE_COLUMN_NAMES.len())?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(Into::into)
+    }
 }
 
 impl<'h, T> PostCommitWork<'h, T> {
@@ -36,6 +160,12 @@ pub struct Transaction<'h> {
 }
 
 impl<'h> Transaction<'h> {
+    pub fn read(&self) -> ReadTransaction<&rusqlite::Transaction> {
+        ReadTransaction {
+            tx: ReadOnlyRusqliteTransaction { conn: &self.tx },
+        }
+    }
+
     pub fn new(tx: rusqlite::Transaction<'h>, handle: &'h Handle) -> Self {
         Self {
             tx,
@@ -122,28 +252,10 @@ impl<'h> Transaction<'h> {
         }
     }
 
-    pub fn file_values<'a>(
-        &'a self,
-        file_id: &'a FileIdFancy,
-    ) -> rusqlite::Result<FileValues<'a, CachedStatement<'a>>> {
-        let stmt = self.tx.prepare_cached(&format!(
-            "select {} from keys where file_id=? order by file_offset",
-            value_columns_sql()
-        ))?;
-        let iter = FileValues { stmt, file_id };
-        Ok(iter)
-    }
-
-    pub fn sum_value_length(&self) -> rusqlite::Result<u64> {
-        self.tx
-            .query_row_and_then("select sum(value_length) from keys", [], |row| row.get(0))
-            .map_err(Into::into)
-    }
-
     pub fn apply_limits(&mut self) -> Result<()> {
         if let Some(max) = self.handle.opts.max_value_length {
             loop {
-                let actual = self.sum_value_length()?;
+                let actual = self.read().sum_value_length()?;
                 if actual <= max {
                     break;
                 }
@@ -169,62 +281,5 @@ impl<'h> Transaction<'h> {
             self.deleted_values.push(value);
         }
         Ok(())
-    }
-
-    /// Returns the end offset of the last active value before offset in the same file.
-    pub fn query_last_end_offset(&self, file_id: &FileId, offset: u64) -> rusqlite::Result<u64> {
-        self.tx.query_row(
-            "select max(file_offset+value_length) as last_offset \
-            from keys \
-            where file_id=? and file_offset+value_length <= ?",
-            params![file_id.deref(), offset],
-            |row| {
-                // I don't know why, but this can return null for file_ids that have values but
-                // don't fit the other conditions.
-                let res: rusqlite::Result<Option<_>> = row.get(0);
-                res.map(|v| v.unwrap_or_default())
-            },
-        )
-    }
-
-    pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
-        let range_end = {
-            let mut prefix = prefix.to_owned();
-            if inc_big_endian_array(&mut prefix) {
-                Some(prefix)
-            } else {
-                None
-            }
-        };
-        match range_end {
-            None => self.list_items_inner(
-                &format!(
-                    "select {}, key from keys where key >= ?",
-                    value_columns_sql()
-                ),
-                [prefix],
-            ),
-            Some(range_end) => self.list_items_inner(
-                &format!(
-                    "select {}, key from keys where key >= ? and key < ?",
-                    value_columns_sql()
-                ),
-                rusqlite::params![prefix, range_end],
-            ),
-        }
-    }
-
-    fn list_items_inner(&self, sql: &str, params: impl rusqlite::Params) -> PubResult<Vec<Item>> {
-        self.tx
-            .prepare_cached(sql)
-            .unwrap()
-            .query_map(params, |row| {
-                Ok(Item {
-                    value: Value::from_row(row)?,
-                    key: row.get(VALUE_COLUMN_NAMES.len())?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(Into::into)
     }
 }

@@ -73,7 +73,11 @@ where
     pub fn sum_value_length(&self) -> rusqlite::Result<u64> {
         self.tx
             .prepare_cached("select sum(value_length) from keys")?
-            .query_row([], |row| row.get(0))
+            .query_row([], |row| {
+                // If there are no keys, this will return null.
+                let sum_opt: Option<_> = row.get(0)?;
+                Ok(sum_opt.unwrap_or(0))
+            })
             .map_err(Into::into)
     }
 

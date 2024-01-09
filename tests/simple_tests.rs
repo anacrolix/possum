@@ -14,6 +14,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::thread::sleep;
 use std::time::Duration;
+use std::time::Instant;
 
 use anyhow::{anyhow, Context, Result};
 use fdlimit::raise_fd_limit;
@@ -168,11 +169,15 @@ struct TorrentStorageOpts {
 #[std_test]
 fn torrent_storage_small() -> Result<()> {
     let block_size = 4096;
-    torrent_storage_inner(TorrentStorageOpts {
-        block_size,
-        piece_size: 4 * block_size,
-        static_tempdir_name: "torrent_storage_small",
-    })
+    let stop = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < stop {
+        torrent_storage_inner(TorrentStorageOpts {
+            block_size,
+            piece_size: 4 * block_size,
+            static_tempdir_name: "torrent_storage_small",
+        })?;
+    }
+    Ok(())
 }
 
 #[std_test]

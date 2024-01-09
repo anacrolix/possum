@@ -1,5 +1,5 @@
 [package]
-name = "possum"
+name = "possum-db"
 version = "0.1.0"
 edition = "2021"
 description = "concurrent disk-backed cache supporting efficient direct file I/O, transactions, and snapshots using file cloning and sparse files"
@@ -7,6 +7,7 @@ license = "MPL-2.0"
 autobenches = false
 
 [lib]
+name = "possum"
 crate-type = ["staticlib", "cdylib", "lib"]
 # Prevent unrecognized option errors for cargo bench.
 bench = false

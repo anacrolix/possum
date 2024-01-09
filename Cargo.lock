@@ -751,7 +751,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "possum"
+name = "possum-db"
 version = "0.1.0"
 dependencies = [
  "anyhow",

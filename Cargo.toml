@@ -1,6 +1,6 @@
 [package]
 name = "possum-db"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "concurrent disk-backed cache supporting efficient direct file I/O, transactions, and snapshots using file cloning and sparse files"
 license = "MPL-2.0"

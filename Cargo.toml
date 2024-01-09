@@ -8,7 +8,7 @@ autobenches = false
 readme = "README.adoc"
 repository = "https://github.com/anacrolix/possum"
 authors = ["Matt Joiner <anacrolix@gmail.com>"]
-categories = ["database", "database-implementations", "filesystem", "embedded", "data-structures"]
+categories = ["caching", "database-implementations", "filesystem", "embedded", "data-structures"]
 keywords = ["database", "embedded", "persistence", "sqlite"]
 
 [lib]

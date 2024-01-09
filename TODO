@@ -1,6 +1,7 @@
  * Add an integrity check for a directory that includes:
-    * Removing unused values files.
-    * Vacuuming the manifest file?
+    * Removing unused values files. (This occurs at Handle init for now).
+    * Vacuuming the manifest file? (I think this should be a method on Handle so the caller can choose when they can afford the hit).
  * Add hinting for value alignment (I'm sure there's some equation that determines if it's likely to be worthwhile to align a value. Possibly 2048, 4096 or 8192 would be appropriate for a 4096 block size?
- * Is greedy end possible? If a value exists above the region we're punching out, then we can extend up too.
+ * Is greedy end possible? If a value exists above the region we're punching out, then we can extend up too. -> This is not possible without synchronizing with file cloning. Currently that requires holding a write lock on the manifest.
  * Add a --fragments option to missing holes detection.
+ * Support file cloning without holding the manifest write lock.

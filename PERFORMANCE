@@ -1,0 +1,7 @@
+On my M1 Macbook, on APFS:
+
+ * Reads/views are 10-12µs when clone files can be reused.
+ * List operations: 22µs.
+ * File cloning is 60µs, tending toward 75µs for larger files.
+ * Empty reads (and the sqlite read transaction): 360ns.
+ * Empty writes (but a forced immediate write transaction): 3µs.

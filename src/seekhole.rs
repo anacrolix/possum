@@ -16,7 +16,7 @@ pub fn seek_hole_whence(
     fd: RawFd,
     offset: i64,
     whence: impl Into<SeekWhence>,
-) -> std::io::Result<Option<RegionOffset>> {
+) -> io::Result<Option<RegionOffset>> {
     // lseek64?
     match lseek(fd, offset, whence) {
         Ok(offset) => Ok(Some(offset as RegionOffset)),

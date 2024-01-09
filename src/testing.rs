@@ -38,10 +38,6 @@ impl<T: Hasher> Write for HashWriter<T> {
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
-
-    // fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-    //     self.write(buf).map(|_| ())
-    // }
 }
 
 pub fn hash_reader(mut r: impl Read) -> Result<u64> {

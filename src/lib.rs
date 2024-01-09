@@ -368,12 +368,6 @@ pub struct SnapshotValue<V> {
     value: V,
     cloned_file: Arc<Mutex<FileClone>>,
 }
-//
-// impl<V> AsRef<Value> for SnapshotValue<V> {
-//     fn as_ref(&self) -> &Value {
-//         &self.value
-//     }
-// }
 
 impl<V> Deref for SnapshotValue<V> {
     type Target = V;

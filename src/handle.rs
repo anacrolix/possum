@@ -3,17 +3,10 @@ use rusqlite::TransactionBehavior;
 
 use super::*;
 
-pub struct HandleOpts {
-    pub max_value_length: Option<u64>,
-}
-
-impl Default for HandleOpts {
-    fn default() -> Self {
-        Self {
-            // TODO: Expose this to the C API instead!
-            max_value_length: Some(200 << 20),
-        }
-    }
+#[derive(Default)]
+#[repr(C)]
+pub struct Limits {
+    pub max_value_length_sum: Option<u64>,
 }
 
 pub struct Handle {
@@ -22,10 +15,15 @@ pub struct Handle {
     pub(crate) dir: PathBuf,
     pub(crate) clones: Mutex<FileCloneCache>,
     pub(crate) greedy_holes: bool,
-    pub(crate) opts: HandleOpts,
+    pub(crate) instance_limits: Limits,
 }
 
 impl Handle {
+    pub fn set_instance_limits(&mut self, limits: Limits) -> Result<()> {
+        self.instance_limits = limits;
+        self.start_deferred_transaction()?.apply_limits()
+    }
+
     pub fn dir(&self) -> &PathBuf {
         &self.dir
     }
@@ -99,7 +97,7 @@ impl Handle {
                 Err(std::env::VarError::NotPresent) => true,
                 Err(err) => return Err(err.into()),
             },
-            opts: Default::default(),
+            instance_limits: Default::default(),
         };
         Ok(handle)
     }

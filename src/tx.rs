@@ -253,7 +253,7 @@ impl<'h> Transaction<'h> {
     }
 
     pub fn apply_limits(&mut self) -> Result<()> {
-        if let Some(max) = self.handle.opts.max_value_length {
+        if let Some(max) = self.handle.instance_limits.max_value_length_sum {
             loop {
                 let actual = self.read().sum_value_length()?;
                 if actual <= max {

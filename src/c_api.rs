@@ -136,3 +136,24 @@ impl From<anyhow::Error> for PossumError {
         AnyhowError
     }
 }
+
+fn with_residual<E>(f: impl FnOnce() -> Result<(), E>) -> PossumError
+where
+    E: Into<Error>,
+{
+    match f() {
+        Ok(()) => NoError,
+        Err(err) => err.into().into(),
+    }
+}
+
+impl Into<handle::Limits> for PossumLimits {
+    fn into(self) -> handle::Limits {
+        handle::Limits {
+            max_value_length_sum: match self.max_value_length_sum {
+                u64::MAX => None,
+                otherwise => Some(otherwise),
+            },
+        }
+    }
+}

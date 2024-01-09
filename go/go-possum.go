@@ -70,6 +70,12 @@ func (me Handle) NewReader() (r Reader, err error) {
 	return
 }
 
+type Limits = possumC.Limits
+
+func (me Handle) SetInstanceLimits(limits Limits) error {
+	return possumC.SetInstanceLimits(me.cHandle, limits)
+}
+
 type Reader struct {
 	pc possumC.Reader
 }

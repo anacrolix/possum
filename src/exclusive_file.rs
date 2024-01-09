@@ -13,20 +13,6 @@ pub(crate) struct ExclusiveFile {
     last_committed_offset: u64,
 }
 
-// impl Deref for ExclusiveFile {
-//     type Target = File;
-//
-//     fn deref(&self) -> &Self::Target {
-//         &self.inner
-//     }
-// }
-
-// impl DerefMut for ExclusiveFile {
-//     fn deref_mut(&mut self) -> &mut Self::Target {
-//         &mut self.inner
-//     }
-// }
-
 impl ExclusiveFile {
     pub(crate) fn open(path: PathBuf) -> Result<Self> {
         let file = OpenOptions::new().write(true).open(&path)?;

@@ -187,3 +187,13 @@ type Item struct {
 	Key string
 	Stat
 }
+
+type Limits struct {
+	MaxValueLengthSum generics.Option[uint64]
+}
+
+func SetInstanceLimits(h *Handle, limits Limits) error {
+	var cLimits C.PossumLimits
+	cLimits.max_value_length_sum = C.uint64_t(limits.MaxValueLengthSum.UnwrapOr(math.MaxUint64))
+	return mapError(C.possum_set_instance_limits(h, &cLimits))
+}

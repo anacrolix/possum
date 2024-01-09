@@ -40,3 +40,8 @@ pub enum PossumError {
     IoError,
     AnyhowError,
 }
+
+#[repr(C)]
+pub(crate) struct PossumLimits {
+    pub max_value_length_sum: u64,
+}

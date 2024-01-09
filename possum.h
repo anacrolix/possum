@@ -23,6 +23,10 @@ typedef struct PossumValue PossumValue;
 typedef struct ValueWriter ValueWriter;
 
 typedef struct {
+  uint64_t max_value_length_sum;
+} PossumLimits;
+
+typedef struct {
   const char *ptr;
   size_t size;
 } PossumBuf;
@@ -51,6 +55,8 @@ typedef uint64_t PossumOffset;
 Handle *possum_new(const char *path);
 
 void possum_drop(Handle *handle);
+
+PossumError possum_set_instance_limits(Handle *handle, const PossumLimits *limits);
 
 size_t possum_single_write_buf(Handle *handle, PossumBuf key, PossumBuf value);
 

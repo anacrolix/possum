@@ -42,6 +42,16 @@ pub extern "C" fn possum_drop(handle: *mut Handle) {
 }
 
 #[no_mangle]
+pub extern "C" fn possum_set_instance_limits(
+    handle: *mut Handle,
+    limits: *const PossumLimits,
+) -> PossumError {
+    let handle = unsafe { &mut *handle };
+    let limits = unsafe { limits.read() };
+    with_residual(|| handle.set_instance_limits(limits.into()))
+}
+
+#[no_mangle]
 pub extern "C" fn possum_single_write_buf(
     handle: *mut Handle,
     key: PossumBuf,
@@ -72,12 +82,12 @@ pub extern "C" fn possum_start_new_value(
     writer: PossumWriter,
     value: *mut PossumValueWriter,
 ) -> PossumError {
-    let v = match unsafe { writer.as_mut() }.unwrap().new_value().begin() {
-        Err(err) => return err.into(),
-        Ok(ok) => Box::into_raw(Box::new(ok)),
-    };
-    unsafe { *value = v };
-    NoError
+    let writer = unsafe { &mut *writer };
+    with_residual(|| {
+        let v = Box::into_raw(Box::new(writer.new_value().begin()?));
+        unsafe { *value = v };
+        anyhow::Ok(())
+    })
 }
 
 #[no_mangle]

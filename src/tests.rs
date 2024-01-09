@@ -1,7 +1,13 @@
+use std::sync::*;
+use std::thread::*;
+use std::time::*;
+
+use anyhow::Result;
+
 use self::test;
 use super::*;
-use crate::seekhole::{file_regions, Data, Hole, Region};
-use crate::testing::test_tempdir;
+use crate::seekhole::*;
+use crate::testing::*;
 
 #[test]
 fn test_to_usize_io() -> Result<()> {
@@ -62,14 +68,11 @@ fn test_replace_keys() -> Result<()> {
     handle.single_write_from(a.clone(), a_value.as_slice())?;
     handle.single_write_from(b.clone(), b_read)?;
     handle.single_write_from(b.clone(), b_read)?;
-    let mut read_a = vec![];
-    handle
-        .read_single(&a)?
-        .unwrap()
-        .new_reader()
-        .read_to_end(&mut read_a)?;
     // Check that the value for a hasn't been punched/zeroed.
-    assert_eq!(read_a, a_value);
+    assert_repeated_bytes_values_eq(
+        handle.read_single(&a).unwrap().unwrap().new_reader(),
+        a_value.as_slice(),
+    );
     let entries = handle.walk_dir()?;
     let values_files: Vec<_> = entries
         .iter()
@@ -131,6 +134,37 @@ fn test_replace_keys() -> Result<()> {
     Ok(())
 }
 
-fn readable_repeated_bytes(byte: u8, limit: usize) -> Vec<u8> {
-    std::iter::repeat(byte).take(limit).collect()
+/// Prove that file cloning doesn't occur too late if the value is replaced.
+#[test]
+fn punch_value_before_snapshot_cloned() -> anyhow::Result<()> {
+    let tempdir = test_tempdir("punch_value_before_snapshot_cloned")?;
+    let handle = Handle::new(tempdir.path.clone())?;
+    let key = "a".as_bytes().to_vec();
+    let first_value = readable_repeated_bytes(1, handle.block_size() as usize);
+    let second_value = readable_repeated_bytes(2, handle.block_size() as usize);
+    let reader_handle = Handle::new(tempdir.path.clone())?;
+    let stop = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < stop {
+        handle.single_write_from(key.clone(), first_value.as_slice())?;
+        let write_barrier = Barrier::new(2);
+        scope(|scope| {
+            let reader_scope = scope.spawn(|| -> anyhow::Result<()> {
+                let mut reader = reader_handle.read()?;
+                let value = reader.add(&key).unwrap().unwrap();
+                write_barrier.wait();
+                let snapshot = reader.begin().unwrap();
+                let value = snapshot.value(value);
+                // This should read 1. It will get 0 if the value was punched, and 2 if the clone
+                // occurred after the write.
+                assert_repeated_bytes_values_eq(value.new_reader(), first_value.as_slice());
+                Ok(())
+            });
+            write_barrier.wait();
+            handle
+                .single_write_from(key.clone(), second_value.as_slice())
+                .unwrap();
+            reader_scope.join().unwrap()
+        })?;
+    }
+    Ok(())
 }

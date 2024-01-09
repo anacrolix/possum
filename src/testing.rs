@@ -74,3 +74,29 @@ pub fn test_tempdir(name: &'static str) -> Result<TestTempDir> {
         path,
     })
 }
+
+pub fn readable_repeated_bytes(byte: u8, limit: usize) -> Vec<u8> {
+    std::iter::repeat(byte).take(limit).collect()
+}
+
+pub fn condense_repeated_bytes(r: impl Read) -> (Option<u8>, u64) {
+    let mut count = 0;
+    let mut byte = None;
+    for b in r.bytes() {
+        let b = b.unwrap();
+        match byte {
+            None => byte = Some(b),
+            Some(byte) => {
+                assert_eq!(b, byte);
+            }
+        }
+        count += 1;
+    }
+    (byte, count)
+}
+
+pub fn assert_repeated_bytes_values_eq(a: impl Read, b: impl Read) {
+    let a = condense_repeated_bytes(a);
+    let b = condense_repeated_bytes(b);
+    assert_eq!(a, b);
+}

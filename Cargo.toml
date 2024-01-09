@@ -5,6 +5,11 @@ edition = "2021"
 description = "concurrent disk-backed cache supporting efficient direct file I/O, transactions, and snapshots using file cloning and sparse files"
 license = "MPL-2.0"
 autobenches = false
+readme = "README.adoc"
+repository = "https://github.com/anacrolix/possum"
+authors = ["Matt Joiner <anacrolix@gmail.com>"]
+categories = ["database", "database-implementations", "filesystem", "embedded", "data-structures"]
+keywords = ["database", "embedded", "persistence", "sqlite"]
 
 [lib]
 name = "possum"

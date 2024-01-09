@@ -4,9 +4,12 @@ version = "0.1.0"
 edition = "2021"
 description = "concurrent disk-backed cache supporting efficient direct file I/O, transactions, and snapshots using file cloning and sparse files"
 license = "MPL-2.0"
+autobenches = false
 
 [lib]
 crate-type = ["staticlib", "cdylib", "lib"]
+# Prevent unrecognized option errors for cargo bench.
+bench = false
 
 [dependencies]
 anyhow = { version = "1.0.75", features = ["backtrace"] }
@@ -39,3 +42,8 @@ fdlimit = "0.3.0"
 [[bench]]
 name = "possum"
 harness = false
+
+[[bin]]
+name = "possum"
+bench = false
+path = "src/main.rs"

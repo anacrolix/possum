@@ -14,7 +14,6 @@ pub struct Handle {
     pub(crate) exclusive_files: Mutex<HashMap<FileId, ExclusiveFile>>,
     pub(crate) dir: PathBuf,
     pub(crate) clones: Mutex<FileCloneCache>,
-    pub(crate) greedy_holes: bool,
     pub(crate) instance_limits: Limits,
 }
 
@@ -92,11 +91,6 @@ impl Handle {
             exclusive_files: Default::default(),
             dir,
             clones: Default::default(),
-            greedy_holes: match std::env::var("POSSUM_GREEDY_HOLES") {
-                Ok(value) => value.parse()?,
-                Err(std::env::VarError::NotPresent) => true,
-                Err(err) => return Err(err.into()),
-            },
             instance_limits: Default::default(),
         };
         Ok(handle)
@@ -254,11 +248,7 @@ impl Handle {
                 length: *value_length,
                 tx: &transaction,
                 block_size: self.block_size(),
-                greedy_start: self.greedy_holes,
-                check_hole: true,
-                allow_remove: true,
-                allow_truncate: true,
-                greedy_end: true,
+                constraints: Default::default(),
             })
             .context(msg)?;
         }

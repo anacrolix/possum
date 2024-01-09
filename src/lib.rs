@@ -646,6 +646,26 @@ use file_id::{FileId, FileIdFancy};
 pub use crate::tx::Transaction;
 use crate::tx::{PostCommitWork, ReadTransactionOwned};
 
+struct PunchValueConstraints {
+    greedy_start: bool,
+    check_hole: bool,
+    greedy_end: bool,
+    allow_truncate: bool,
+    allow_remove: bool,
+}
+
+impl Default for PunchValueConstraints {
+    fn default() -> Self {
+        Self {
+            greedy_start: true,
+            check_hole: true,
+            greedy_end: true,
+            allow_truncate: true,
+            allow_remove: true,
+        }
+    }
+}
+
 struct PunchValueOptions<'a> {
     dir: &'a Path,
     file_id: &'a FileId,
@@ -653,11 +673,7 @@ struct PunchValueOptions<'a> {
     length: u64,
     tx: &'a ReadTransactionOwned<'a>,
     block_size: u64,
-    greedy_start: bool,
-    check_hole: bool,
-    greedy_end: bool,
-    allow_truncate: bool,
-    allow_remove: bool,
+    constraints: PunchValueConstraints,
 }
 
 // Can't do this as &mut self for dumb Rust reasons.
@@ -669,11 +685,14 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
         length,
         tx,
         block_size,
-        greedy_start,
-        check_hole: check_holes,
-        allow_truncate,
-        allow_remove,
-        greedy_end,
+        constraints:
+            PunchValueConstraints {
+                greedy_start,
+                check_hole: check_holes,
+                allow_truncate,
+                allow_remove,
+                greedy_end,
+            },
     } = opts;
     let cloning_lock_aware = false;
     // Make signed for easier arithmetic.

@@ -50,45 +50,48 @@ pub fn benchmark_view_fallible(c: &mut Criterion) -> anyhow::Result<()> {
 }
 
 pub fn benchmark_list_keys_fallible(c: &mut Criterion) -> Result<()> {
-    let tempdir = test_tempdir("benchmark_list_keys")?;
-    let handle = Handle::new(tempdir.path)?;
-    let prefix_range = 0..=100;
-    let keys = |prefix| {
-        (0..100)
-            .map(|suffix| {
-                format!("{}/{}", prefix, prefix_range.end() * prefix + suffix).into_bytes()
-            })
-            .collect::<Vec<_>>()
-    };
-    let mut writer = handle.new_writer()?;
-    for prefix in prefix_range.clone() {
-        for key in keys(prefix) {
-            let value = writer.new_value().begin()?;
-            writer.stage_write(key, value)?;
-            // handle.single_write_from(key, "".as_bytes())?;
-        }
-    }
-    writer.commit()?;
-    let exists_key = 1;
-    let exists_keys: Vec<String> = keys(exists_key)
-        .into_iter()
-        .map(|key| unsafe { String::from_utf8_unchecked(key) })
-        .collect();
-    let prefix = format!("{}/", exists_key).into_bytes();
-    c.bench_function("list", |b| {
-        b.iter(|| {
-            let items = handle.list_items(&prefix).unwrap();
-            for item in &items {
-                assert_eq!(item.value.length(), 0);
+    c.bench_function("list", |b| -> () {
+        || -> Result<()> {
+            let tempdir = test_tempdir("benchmark_list_keys")?;
+            let handle = Handle::new(tempdir.path)?;
+            let prefix_range = 0..=100;
+            let keys = |prefix| {
+                (0..100)
+                    .map(|suffix| {
+                        format!("{}/{}", prefix, prefix_range.end() * prefix + suffix).into_bytes()
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let mut writer = handle.new_writer()?;
+            for prefix in prefix_range.clone() {
+                for key in keys(prefix) {
+                    let value = writer.new_value().begin()?;
+                    writer.stage_write(key, value)?;
+                }
             }
-            assert_eq!(
-                items
-                    .iter()
-                    .map(|item| std::str::from_utf8(&item.key).unwrap())
-                    .collect::<Vec<_>>(),
-                exists_keys
-            );
-        })
+            writer.commit()?;
+            let exists_key = 1;
+            let exists_keys: Vec<String> = keys(exists_key)
+                .into_iter()
+                .map(|key| unsafe { String::from_utf8_unchecked(key) })
+                .collect();
+            let prefix = format!("{}/", exists_key).into_bytes();
+            b.iter(|| {
+                let items = handle.list_items(&prefix).unwrap();
+                for item in &items {
+                    assert_eq!(item.value.length(), 0);
+                }
+                assert_eq!(
+                    items
+                        .iter()
+                        .map(|item| std::str::from_utf8(&item.key).unwrap())
+                        .collect::<Vec<_>>(),
+                    exists_keys
+                );
+            });
+            Ok(())
+        }()
+        .unwrap()
     });
     Ok(())
 }

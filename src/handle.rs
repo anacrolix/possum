@@ -256,6 +256,9 @@ impl Handle {
                 block_size: self.block_size(),
                 greedy_start: self.greedy_holes,
                 check_hole: true,
+                allow_remove: true,
+                allow_truncate: true,
+                greedy_end: true,
             })
             .context(msg)?;
         }

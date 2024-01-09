@@ -93,6 +93,21 @@ where
             })
     }
 
+    /// Returns the next value offset with at least min_offset.
+    pub fn next_value_offset(
+        &self,
+        file_id: &FileId,
+        min_offset: u64,
+    ) -> rusqlite::Result<Option<u64>> {
+        self.tx
+            .prepare_cached(
+                "select min(file_offset) \
+                from keys \
+                where file_id=? and file_offset >= ?",
+            )?
+            .query_row(params![file_id.deref(), min_offset], |row| row.get(0))
+    }
+
     pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
         let range_end = {
             let mut prefix = prefix.to_owned();

@@ -125,7 +125,7 @@ impl BeginWriteValue<'_, '_> {
         })
     }
 
-    pub fn begin(self) -> Result<ValueWriter> {
+    pub fn begin(self) -> PubResult<ValueWriter> {
         let mut exclusive_file = self.batch.get_exclusive_file()?;
         Ok(ValueWriter {
             value_file_offset: exclusive_file.next_write_offset()?,
@@ -465,10 +465,12 @@ where
     }
 }
 
+type ReaderFiles = HashMap<FileId, u64>;
+
 pub struct Reader<'handle> {
     owned_tx: OwnedTx<'handle>,
     handle: &'handle Handle,
-    files: HashMap<FileId, u64>,
+    files: ReaderFiles,
 }
 
 impl<'a> Reader<'a> {
@@ -502,27 +504,27 @@ impl<'a> Reader<'a> {
 
     /// Takes a snapshot and commits the read transaction.
     pub fn begin(self) -> Result<Snapshot> {
+        let file_clones = Self::clone_files(self.handle, self.files)?;
+        self.owned_tx
+            .commit(())
+            .context("committing transaction")?
+            .complete()?;
+        Ok(Snapshot { file_clones })
+    }
+
+    fn clone_files(handle: &Handle, files: ReaderFiles) -> Result<FileCloneCache> {
         let mut tempdir = None;
         let mut file_clones: FileCloneCache = Default::default();
-        let mut handle_clone_guard = self.handle.clones.lock().unwrap();
+        let mut handle_clone_guard = handle.clones.lock().unwrap();
         let handle_clones = handle_clone_guard.deref_mut();
-        for (file_id, min_len) in self.files {
+        for (file_id, min_len) in files {
             file_clones.insert(
                 file_id.clone(),
-                Self::get_file_clone(
-                    file_id,
-                    &mut tempdir,
-                    handle_clones,
-                    &self.handle.dir,
-                    min_len,
-                )
-                .context("getting file clone")?,
+                Self::get_file_clone(file_id, &mut tempdir, handle_clones, &handle.dir, min_len)
+                    .context("getting file clone")?,
             );
         }
-        self.owned_tx
-            .commit(Snapshot { file_clones })
-            .context("committing transaction")?
-            .complete()
+        Ok(file_clones)
     }
 
     pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
@@ -552,14 +554,26 @@ impl<'a> Reader<'a> {
                 tempdir.as_ref().unwrap()
             }
         };
+        let src_path = file_path(src_dir, &file_id);
+        // TODO: In order for value files to support truncation, a shared or exclusive lock would
+        // need to be taken before cloning. I don't think this is possible, we would have to wait
+        // for anyone holding an exclusive lock to release it. Handles already cache these, plus
+        // Writers could hold them for a long time while writing. Then we need a separate cloning
+        // lock. Also distinct Handles, even across processes can own each exclusive file.
+        if false {
+            let mut src_file = OpenOptions::new().read(true).open(&src_path)?;
+            assert!(try_lock_file(&mut src_file, flock::LockSharedNonblock)?);
+        }
         let tempdir_path = tempdir.path();
-        clonefile(
-            &file_path(src_dir, &file_id),
-            &file_path(tempdir_path, &file_id),
-        )?;
-        let mut file = open_file_id(OpenOptions::new().read(true), tempdir_path, &file_id)?;
+        clonefile(&src_path, &file_path(tempdir_path, &file_id))?;
+        let mut file = open_file_id(OpenOptions::new().read(true), tempdir_path, &file_id)
+            .context("opening value file")?;
+        // This prevents the snapshot file from being cleaned up. There's probably a race between
+        // here and when it was cloned above. I wonder if the snapshot dir can be locked, or if we
+        // can retry the cloning until we are able to lock it.
+        let locked = try_lock_file(&mut file, LockSharedNonblock)?;
+        assert!(locked);
         let len = file.seek(End(0))?;
-        try_lock_file(&mut file, LockSharedNonblock)?;
         let file_clone = Arc::new(Mutex::new(FileClone {
             file,
             tempdir: tempdir.clone(),
@@ -577,6 +591,7 @@ fn floored_multiple<T>(value: T, multiple: T) -> T
 where
     T: Integer + Copy,
 {
+    // What about value - value % multiple?
     multiple * (value / multiple)
 }
 
@@ -640,6 +655,9 @@ struct PunchValueOptions<'a> {
     block_size: u64,
     greedy_start: bool,
     check_hole: bool,
+    greedy_end: bool,
+    allow_truncate: bool,
+    allow_remove: bool,
 }
 
 // Can't do this as &mut self for dumb Rust reasons.
@@ -653,35 +671,75 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
         block_size,
         greedy_start,
         check_hole: check_holes,
+        allow_truncate,
+        allow_remove,
+        greedy_end,
     } = opts;
+    let cloning_lock_aware = false;
+    // Make signed for easier arithmetic.
     let mut offset = offset as i64;
     let mut length = length as i64;
-    let orig_offset = offset;
-    let orig_length = length;
     let block_size = block_size as i64;
+    let file_path = file_path(dir, file_id);
+    // Punching values probably requires write permission.
+    let mut file = match OpenOptions::new().write(true).open(&file_path) {
+        // The file could have already been deleted by a previous punch.
+        Err(err) if err.kind() == ErrorKind::NotFound && allow_remove => return Ok(()),
+        Err(err) => return Err(err).context("opening value file"),
+        Ok(ok) => ok,
+    };
     // Find out how far back we can punch and start there, correcting for block boundaries as we go.
     if offset % block_size != 0 || greedy_start {
-        let new_offset = ceil_multiple(
-            tx.query_last_end_offset(file_id, offset as u64)?,
-            block_size as u64,
-        ) as i64;
+        let last_end_offset = tx.query_last_end_offset(file_id, offset as u64)?;
+        // Round up the end of the last value.
+        let new_offset = ceil_multiple(last_end_offset, block_size as u64) as i64;
         // Because these are u64 we can't deal with overflow into negatives.
         length += offset - new_offset;
         offset = new_offset;
     }
-    let mut file = open_file_id(OpenOptions::new().append(true), dir, file_id)?;
-    // append doesn't mean our file position is at the end to begin with.
-    let file_end = file.seek(End(0))? as i64;
-    let end_offset = offset + length;
-    // Does this handle ongoing writes to the same file?
-    if end_offset < file_end {
-        // What if this is below the offset or negative?
-        length -= end_offset % block_size;
+    assert_eq!(offset % block_size, 0);
+    if greedy_end {
+        let next_offset = tx.next_value_offset(file_id, (offset + length).try_into().unwrap())?;
+        let end_offset = match next_offset {
+            None => {
+                // Lock the file to see if we can expand to the end of the file.
+                let locked_file = try_lock_file(&mut file, flock::LockExclusiveNonblock)
+                    .context("locking value file")?;
+                // Get the file length after we have tried locking the file.
+                let file_end = file.seek(End(0))? as i64;
+                if locked_file {
+                    // I think it's okay to remove and truncate files if cloning doesn't use locks,
+                    // because there are no values in this file to clone.
+                    if offset == 0 && allow_remove {
+                        remove_file(file_path).context("removing value file")?;
+                        return Ok(());
+                    } else if allow_truncate {
+                        file.set_len(offset as u64)?;
+                        return Ok(());
+                    }
+                    file_end
+                } else if cloning_lock_aware {
+                    // Round the punch region down the the beginning of the last block. We aren't sure
+                    // if someone is writing to the file.
+                    floored_multiple(file_end, block_size)
+                } else {
+                    floored_multiple(offset + length, block_size)
+                }
+            }
+            Some(next_offset) => floored_multiple(next_offset as i64, block_size),
+        };
+        let new_length = end_offset - offset;
+        length = new_length;
+    } else {
+        let end_offset = floored_multiple(offset + length, block_size);
+        length = end_offset - offset;
     }
-    // We should never write past a known value, someone might be writing there.
-    assert!(offset <= orig_offset + orig_length);
-    assert!(offset + length <= orig_offset + orig_length);
     debug!(target: "punching", "punching {} {} for {}", file_id, offset, length);
+    if length == 0 {
+        return Ok(());
+    }
+    assert!(length > 0);
+    assert_eq!(offset % block_size, 0);
     punchfile(file.as_raw_fd(), offset, length).with_context(|| format!("length {}", length))?;
     // fcntl(file.as_raw_fd(), nix::fcntl::F_FULLFSYNC)?;
     // file.flush()?;

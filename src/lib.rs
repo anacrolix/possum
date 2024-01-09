@@ -689,15 +689,6 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
         if let Err(err) = check_hole(&mut file, offset as u64, length as u64) {
             warn!("checking hole: {}", err);
         }
-        match seek_hole_whence(file.as_raw_fd(), offset, seekhole::Data).unwrap() {
-            // Data starts after the hole we just punched.
-            Some(seek_offset) if seek_offset >= (offset + length).try_into().unwrap() => {}
-            // There's no data after the hole we just punched.
-            None => {}
-            otherwise => {
-                warn!("punched hole didn't appear: {:?}", otherwise)
-            }
-        };
     }
     Ok(())
 }

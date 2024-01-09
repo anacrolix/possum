@@ -139,11 +139,15 @@ impl From<anyhow::Error> for PossumError {
 
 fn with_residual<E>(f: impl FnOnce() -> Result<(), E>) -> PossumError
 where
-    E: Into<Error>,
+    E: Into<crate::Error>,
 {
     match f() {
         Ok(()) => NoError,
-        Err(err) => err.into().into(),
+        Err(err) => {
+            let err = err.into();
+            warn!("converting rust error into enum: {:#?}", err);
+            err.into()
+        }
     }
 }
 

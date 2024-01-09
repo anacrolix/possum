@@ -2,10 +2,9 @@
 
 use anyhow::Result;
 use criterion::{criterion_group, criterion_main, Criterion};
+use possum::flock::try_lock_file;
 use possum::testing::test_tempdir;
-use possum::Handle;
-
-mod clonefile;
+use possum::{flock, Handle};
 
 pub fn benchmark_read_fallible(c: &mut Criterion) -> anyhow::Result<()> {
     let tempdir = test_tempdir("benchmark_get_exists")?;
@@ -151,6 +150,22 @@ pub fn multiple_benchmarks_fallible(c: &mut Criterion) -> Result<()> {
             b.iter(|| handle.new_writer().unwrap().commit().unwrap())
         });
     }
+    {
+        let mut file = tempfile::tempfile().unwrap();
+        c.benchmark_group("flock")
+            .bench_function("exclusive nonblock", |b| {
+                b.iter(|| -> () {
+                    assert!(try_lock_file(&mut file, flock::LockExclusiveNonblock).unwrap());
+                    // assert!(try_lock_file(&mut file, flock::UnlockNonblock).unwrap());
+                })
+            })
+            .bench_function("shared nonblock", |b| {
+                b.iter(|| -> () {
+                    assert!(try_lock_file(&mut file, flock::LockSharedNonblock).unwrap());
+                    // assert!(try_lock_file(&mut file, flock::UnlockNonblock).unwrap());
+                })
+            });
+    }
     Ok(())
 }
 
@@ -177,6 +192,7 @@ fn multiple_benchmarks(c: &mut Criterion) {
     unwrap_fallible(multiple_benchmarks_fallible)(c)
 }
 
+mod clonefile;
 criterion_group!(
     benches,
     benchmark_read,

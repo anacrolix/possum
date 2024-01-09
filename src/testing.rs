@@ -63,7 +63,9 @@ pub struct TestTempDir {
 
 pub fn test_tempdir(name: &'static str) -> Result<TestTempDir> {
     let (tempdir, path) = if true {
-        (None, PathBuf::from("tmp").join(name))
+        let path = PathBuf::from("tmp").join(name);
+        std::fs::create_dir_all(&path)?;
+        (None, path)
     } else {
         let tempdir = tempdir()?;
         let path = tempdir.path().to_owned();

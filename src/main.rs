@@ -235,7 +235,7 @@ impl From<Value> for FileRegion {
 }
 
 fn missing_holes(
-    tx: &ReadTransactionRef,
+    tx: ReadTransactionRef,
     values_file_entry: &WalkEntry,
 ) -> anyhow::Result<Vec<FileRegion>> {
     let file_id = values_file_entry.file_id().unwrap();
@@ -298,7 +298,7 @@ fn missing_holes_pure(
 }
 
 fn print_missing_holes(
-    tx: &ReadTransactionRef,
+    tx: ReadTransactionRef,
     values_file_entry: &WalkEntry,
     block_size: u64,
 ) -> anyhow::Result<()> {

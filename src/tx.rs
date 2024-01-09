@@ -1,5 +1,4 @@
 use std::borrow::Borrow;
-use std::mem;
 use std::ops::Deref;
 
 use log::info;
@@ -35,13 +34,12 @@ where
     }
 }
 
-impl<'a> AsRef<ReadTransactionRef<'a>> for ReadTransactionOwned<'a> {
-    fn as_ref(&self) -> &ReadTransactionRef<'a> {
-        let tx_ref = &self.tx.conn;
-        unsafe {
-            mem::transmute(&ReadTransactionRef {
-                tx: ReadOnlyRusqliteTransaction { conn: tx_ref },
-            })
+impl ReadTransactionOwned<'_> {
+    pub fn as_ref(&self) -> ReadTransactionRef {
+        ReadTransactionRef {
+            tx: ReadOnlyRusqliteTransaction {
+                conn: &self.tx.conn,
+            },
         }
     }
 }

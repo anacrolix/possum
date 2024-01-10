@@ -5,7 +5,6 @@ use anyhow::anyhow;
 use fdlimit::raise_fd_limit;
 use log::debug;
 use rand::{RngCore, SeedableRng};
-use rayon::prelude::*;
 
 use super::*;
 use crate::testing::{hash_reader, test_tempdir, Hash};
@@ -45,19 +44,20 @@ pub fn torrent_storage_inner(opts: TorrentStorageOpts) -> anyhow::Result<()> {
     let _ = raise_fd_limit();
     // Running in the same directory messes with the disk analysis at the end of the test.
     let tempdir = test_tempdir(opts.static_tempdir_name)?;
-    let handle = Handle::new(tempdir.path.clone())?;
+    let new_handle = || Handle::new(tempdir.path.clone());
+    let handle = new_handle()?;
     let thread_pool = rayon::ThreadPoolBuilder::new().build()?;
-    for _ in 0..num_pieces {
+    for piece_index in 0..num_pieces {
         let mut piece_data = vec![0; piece_size];
         // Hi alec
-        rand::rngs::SmallRng::seed_from_u64(420).fill_bytes(&mut piece_data);
+        rand::rngs::SmallRng::seed_from_u64(piece_index as u64).fill_bytes(&mut piece_data);
         let piece_data_hash = {
             let mut hash = Hash::default();
             hash.write(&piece_data);
             hash.finish()
         };
         let block_offset_iter = (0..piece_size).step_by(block_size);
-        let offset_key = |offset| format!("piece/{}", offset);
+        let unverified_key = |offset| format!("unverified/{piece_data_hash:x}/{offset}");
         thread_pool.scope(|scope| {
             for offset in block_offset_iter.clone() {
                 let piece_data = &piece_data;
@@ -65,7 +65,7 @@ pub fn torrent_storage_inner(opts: TorrentStorageOpts) -> anyhow::Result<()> {
                 let handle = &handle;
                 scope.spawn(move |_scope| {
                     (|| -> anyhow::Result<()> {
-                        let key = offset_key(offset);
+                        let key = unverified_key(offset);
                         handle.single_write_from(
                             key.into_bytes(),
                             &piece_data[offset..offset + block_size],
@@ -84,7 +84,7 @@ pub fn torrent_storage_inner(opts: TorrentStorageOpts) -> anyhow::Result<()> {
             .map(|offset| {
                 anyhow::Ok(
                     reader
-                        .add(offset_key(offset).as_ref())?
+                        .add(unverified_key(offset).as_ref())?
                         .ok_or(anyhow!("missing value"))?,
                 )
             })

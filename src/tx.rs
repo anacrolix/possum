@@ -235,16 +235,18 @@ impl<'h> Transaction<'h> {
     }
 
     pub(crate) fn insert_key(&mut self, pw: PendingWrite) -> rusqlite::Result<()> {
-        let inserted = self.tx.execute(
-            "insert into keys (key, file_id, file_offset, value_length)\
+        let inserted = self
+            .tx
+            .prepare_cached(
+                "insert into keys (key, file_id, file_offset, value_length)\
                 values (?, ?, ?, ?)",
-            rusqlite::params!(
+            )?
+            .execute(rusqlite::params!(
                 pw.key,
                 pw.value_file_id.deref(),
                 pw.value_file_offset,
                 pw.value_length
-            ),
-        )?;
+            ))?;
         assert_eq!(inserted, 1);
         if pw.value_length != 0 {
             self.altered_files.insert(pw.value_file_id);
@@ -253,14 +255,14 @@ impl<'h> Transaction<'h> {
     }
 
     pub fn delete_key(&mut self, key: &[u8]) -> rusqlite::Result<Option<c_api::PossumStat>> {
-        match self.tx.query_row(
-            &format!(
+        match self
+            .tx
+            .prepare_cached(&format!(
                 "delete from keys where key=? returning {}",
                 value_columns_sql()
-            ),
-            [key],
-            Value::from_row,
-        ) {
+            ))?
+            .query_row([key], Value::from_row)
+        {
             Err(QueryReturnedNoRows) => Ok(None),
             Ok(value) => {
                 let stat = value.as_ref().into();

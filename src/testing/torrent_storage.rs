@@ -5,6 +5,7 @@ use anyhow::anyhow;
 use fdlimit::raise_fd_limit;
 use log::debug;
 use rand::{RngCore, SeedableRng};
+use rayon::prelude::*;
 
 use super::*;
 use crate::testing::{hash_reader, test_tempdir, Hash};
@@ -45,6 +46,7 @@ pub fn torrent_storage_inner(opts: TorrentStorageOpts) -> anyhow::Result<()> {
     // Running in the same directory messes with the disk analysis at the end of the test.
     let tempdir = test_tempdir(opts.static_tempdir_name)?;
     let handle = Handle::new(tempdir.path.clone())?;
+    let thread_pool = rayon::ThreadPoolBuilder::new().build()?;
     for _ in 0..num_pieces {
         let mut piece_data = vec![0; piece_size];
         // Hi alec
@@ -56,22 +58,22 @@ pub fn torrent_storage_inner(opts: TorrentStorageOpts) -> anyhow::Result<()> {
         };
         let block_offset_iter = (0..piece_size).step_by(block_size);
         let offset_key = |offset| format!("piece/{}", offset);
-        std::thread::scope(|scope| {
-            let mut join_handles = vec![];
+        thread_pool.scope(|scope| {
             for offset in block_offset_iter.clone() {
                 let piece_data = &piece_data;
-                let handle = Handle::new(tempdir.path.clone())?;
-                join_handles.push(scope.spawn(move || -> anyhow::Result<()> {
-                    let key = offset_key(offset);
-                    handle.single_write_from(
-                        key.into_bytes(),
-                        &piece_data[offset..offset + block_size],
-                    )?;
-                    Ok(())
-                }));
-            }
-            for jh in join_handles {
-                jh.join().unwrap()?;
+                // let handle = Handle::new(tempdir.path.clone())?;
+                let handle = &handle;
+                scope.spawn(move |_scope| {
+                    (|| -> anyhow::Result<()> {
+                        let key = offset_key(offset);
+                        handle.single_write_from(
+                            key.into_bytes(),
+                            &piece_data[offset..offset + block_size],
+                        )?;
+                        Ok(())
+                    })()
+                    .unwrap()
+                });
             }
             anyhow::Ok(())
         })?;

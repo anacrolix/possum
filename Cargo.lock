@@ -770,6 +770,7 @@ dependencies = [
  "num",
  "positioned-io",
  "rand",
+ "rayon",
  "rusqlite",
  "stable_deref_trait",
  "take_mut",

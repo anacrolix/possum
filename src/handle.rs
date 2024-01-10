@@ -1,4 +1,3 @@
-use log::error;
 use rusqlite::TransactionBehavior;
 
 use super::*;
@@ -16,6 +15,9 @@ pub struct Handle {
     pub(crate) clones: Mutex<FileCloneCache>,
     pub(crate) instance_limits: Limits,
 }
+
+/// 4 bytes stored in the database header https://sqlite.org/fileformat2.html#database_header.
+type ManifestUserVersion = u32;
 
 impl Handle {
     pub fn set_instance_limits(&mut self, limits: Limits) -> Result<()> {
@@ -64,6 +66,9 @@ impl Handle {
         Ok(None)
     }
 
+    // Expected manifest sqlite user version field value.
+    const USER_VERSION: u32 = 1;
+
     pub fn new(dir: PathBuf) -> Result<Self> {
         fs::create_dir_all(&dir)?;
         let sqlite_version = rusqlite::version_number();
@@ -76,13 +81,8 @@ impl Handle {
             );
         }
         let conn = Connection::open(dir.join(MANIFEST_DB_FILE_NAME))?;
-        conn.pragma_update(None, "journal_mode", "wal")?;
+        Self::init_sqlite_conn(&conn)?;
         conn.pragma_update(None, "synchronous", "off")?;
-        if false {
-            conn.pragma_update(None, "locking_mode", "exclusive")
-                .context("set conn locking mode exclusive")?;
-        }
-        init_manifest_schema(&conn).context("initing manifest schema")?;
         if let Err(err) = delete_unused_snapshots(&dir) {
             error!("error deleting unused snapshots: {}", err);
         }
@@ -94,6 +94,21 @@ impl Handle {
             instance_limits: Default::default(),
         };
         Ok(handle)
+    }
+
+    fn init_sqlite_conn(conn: &Connection) -> rusqlite::Result<()> {
+        let user_version: ManifestUserVersion =
+            conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        conn.pragma_update(None, "synchronous", "off")?;
+        if user_version < Self::USER_VERSION {
+            conn.pragma_update(None, "journal_mode", "wal")?;
+            init_manifest_schema(conn)?;
+            conn.pragma_update(None, "user_version", Self::USER_VERSION)?;
+        }
+        if false {
+            conn.pragma_update(None, "locking_mode", "exclusive")?;
+        }
+        Ok(())
     }
 
     pub fn block_size(&self) -> u64 {

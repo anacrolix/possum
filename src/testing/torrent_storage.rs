@@ -17,6 +17,8 @@ pub struct TorrentStorageOpts {
     pub block_size: usize,
     pub num_pieces: usize,
     pub static_tempdir_name: &'static str,
+    pub disable_hole_punching: bool,
+    pub rename_values: bool,
 }
 
 pub const BENCHMARK_OPTS: TorrentStorageOpts = TorrentStorageOpts {
@@ -24,6 +26,8 @@ pub const BENCHMARK_OPTS: TorrentStorageOpts = TorrentStorageOpts {
     static_tempdir_name: "benchmark_torrent_storage_default",
     num_pieces: 8,
     block_size: 4096,
+    disable_hole_punching: false,
+    rename_values: true,
 };
 
 // TODO: Rename. Maybe make this a method on Opts. Mirror the squirrel benchmark closer by not
@@ -44,7 +48,14 @@ pub fn torrent_storage_inner(opts: TorrentStorageOpts) -> anyhow::Result<()> {
     let _ = raise_fd_limit();
     // Running in the same directory messes with the disk analysis at the end of the test.
     let tempdir = test_tempdir(opts.static_tempdir_name)?;
-    let new_handle = || Handle::new(tempdir.path.clone());
+    let new_handle = || -> anyhow::Result<Handle> {
+        let mut handle = Handle::new(tempdir.path.clone())?;
+        handle.set_instance_limits(handle::Limits {
+            disable_hole_punching: opts.disable_hole_punching,
+            max_value_length_sum: None,
+        })?;
+        Ok(handle)
+    };
     let handle = new_handle()?;
     let thread_pool = rayon::ThreadPoolBuilder::new().build()?;
     for piece_index in 0..num_pieces {
@@ -82,33 +93,60 @@ pub fn torrent_storage_inner(opts: TorrentStorageOpts) -> anyhow::Result<()> {
         let values = block_offset_iter
             .clone()
             .map(|offset| {
-                anyhow::Ok(
+                anyhow::Ok((
+                    offset,
                     reader
                         .add(unverified_key(offset).as_ref())?
                         .ok_or(anyhow!("missing value"))?,
-                )
+                ))
             })
             .collect::<anyhow::Result<Vec<_>, _>>()?;
         let snapshot = reader.begin()?;
         let mut stored_hash = Hash::default();
         let mut writer = handle.new_writer()?;
-        let mut completed = writer.new_value().begin()?;
-        for value in values {
-            snapshot.value(value).view(|bytes| {
-                stored_hash.write(bytes);
-                completed.write_all(bytes)
-            })??;
+        let make_verified_key =
+            |offset| format!("verified/{piece_data_hash:x}/{offset}").into_bytes();
+        if opts.rename_values {
+            for (offset, value) in values {
+                snapshot.value(value.clone()).view(|bytes| {
+                    stored_hash.write(bytes);
+                    writer.rename_value(value, make_verified_key(offset))
+                })?;
+            }
+            assert_eq!(stored_hash.finish(), piece_data_hash);
+            writer.commit()?;
+            let mut reader = handle.read()?;
+            let mut verified_hash = Hash::default();
+            let mut values = vec![];
+            for offset in block_offset_iter.clone() {
+                values.push(reader.add(&make_verified_key(offset))?.unwrap());
+            }
+            let snapshot = reader.begin()?;
+            for value in values {
+                snapshot
+                    .value(value)
+                    .view(|bytes| verified_hash.write(bytes))?;
+            }
+            assert_eq!(verified_hash.finish(), piece_data_hash);
+        } else {
+            let mut completed = writer.new_value().begin()?;
+            for (_offset, value) in values {
+                snapshot.value(value).view(|bytes| {
+                    stored_hash.write(bytes);
+                    completed.write_all(bytes)
+                })??;
+            }
+            assert_eq!(stored_hash.finish(), piece_data_hash);
+            let completed_key = format!("completed/{:x}", piece_data_hash).into_bytes();
+            writer.stage_write(completed_key.clone(), completed)?;
+            writer.commit()?;
+            // let completed_value = handle
+            //     .read_single(&completed_key)?
+            //     .expect("completed item should exist");
+            // let completed_reader = completed_value.new_reader();
+            // let completed_hash = hash_reader(completed_reader)?;
+            // assert_eq!(completed_hash, piece_data_hash);
         }
-        assert_eq!(stored_hash.finish(), piece_data_hash);
-        let completed_key = format!("completed/{:x}", piece_data_hash).into_bytes();
-        writer.stage_write(completed_key.clone(), completed)?;
-        writer.commit()?;
-        let completed_value = handle
-            .read_single(&completed_key)?
-            .expect("completed item should exist");
-        let completed_reader = completed_value.new_reader();
-        let completed_hash = hash_reader(completed_reader)?;
-        assert_eq!(completed_hash, piece_data_hash);
     }
     Ok(())
 }

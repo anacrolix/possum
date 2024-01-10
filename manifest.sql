@@ -11,7 +11,9 @@ create table if not exists keys (
     -- This is the most (concrete?) representation for the finest time granularity sqlite's internal time functions support.
     last_used integer not null default (cast(unixepoch('subsec')*1e3 as integer)),
     -- Put this last because it's most likely looked up in the index and not needed when looking at the row.
-    key blob unique not null
+    key blob unique not null,
+    -- This is necessary for value renames
+    unique (file_id, file_offset)
 ) strict;
 
 create index if not exists last_used_index on keys (
@@ -19,7 +21,7 @@ create index if not exists last_used_index on keys (
     key_id
 );
 
--- This is for next_value_offset
+-- This is for next_value_offset. Does this duplicate the unique (file_id, file_offset) index on keys?
 CREATE INDEX if not exists file_id_then_offset on keys (file_id, file_offset);
 -- This is for last_end_offset
 CREATE INDEX if not exists file_id_then_end_offset on keys (file_id, file_offset+value_length);

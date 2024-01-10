@@ -123,6 +123,7 @@ impl Handle {
             handle: self,
             exclusive_files: Default::default(),
             pending_writes: Default::default(),
+            value_renames: Default::default(),
         })
     }
 

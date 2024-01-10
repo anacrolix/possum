@@ -177,10 +177,16 @@ impl Write for ValueWriter {
     }
 }
 
+struct ValueRename {
+    value: Value,
+    new_key: Vec<u8>,
+}
+
 pub struct BatchWriter<'a> {
     handle: &'a Handle,
     exclusive_files: Vec<ExclusiveFile>,
     pending_writes: Vec<PendingWrite>,
+    value_renames: Vec<ValueRename>,
 }
 
 pub type TimestampInner = NaiveDateTime;
@@ -253,6 +259,13 @@ impl<'handle> BatchWriter<'handle> {
         BeginWriteValue { batch: self }
     }
 
+    pub fn rename_value(&mut self, value: Value, key: Vec<u8>) {
+        self.value_renames.push(ValueRename {
+            value,
+            new_key: key,
+        });
+    }
+
     pub fn commit(self) -> Result<WriteCommitResult> {
         self.commit_inner(|| {})
     }
@@ -265,6 +278,9 @@ impl<'handle> BatchWriter<'handle> {
             transaction.delete_key(&pw.key)?;
             transaction.insert_key(pw)?;
             write_commit_res.count += 1;
+        }
+        for vr in self.value_renames.drain(..) {
+            transaction.rename_value(&vr.value, vr.new_key)?;
         }
         // TODO: On error here, rewind the exclusive to undo any writes that just occurred.
         let work = transaction
@@ -308,11 +324,13 @@ impl Drop for BatchWriter<'_> {
     }
 }
 
-#[derive(Debug, Clone)]
+type ValueLength = u64;
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct Value {
     file_id: FileId,
     file_offset: u64,
-    length: u64,
+    length: ValueLength,
     last_used: Timestamp,
 }
 

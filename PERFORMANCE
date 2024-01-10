@@ -5,3 +5,7 @@ On my M1 Macbook, on APFS:
  * File cloning is 60µs, tending toward 75µs for larger files.
  * Empty reads (and the sqlite read transaction): 360ns.
  * Empty writes (but a forced immediate write transaction): 3µs.
+
+ Need to offload hole punching. The fcntl and opening files takes a good chunk of time. Perhaps values can be skipped if previous punches include them. Values can also be streamed over a channel and batched up.
+
+ Batch writer commits are also slow.

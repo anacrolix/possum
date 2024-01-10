@@ -217,6 +217,51 @@ impl<'h> Transaction<'h> {
             .query_row([key], Value::from_row)
     }
 
+    // TODO: Add a test for renaming onto itself.
+    pub fn rename_value(&mut self, value: &Value, new_key: Vec<u8>) -> PubResult<bool> {
+        match self
+            .tx
+            .prepare_cached(&format!(
+                "delete from keys where key=? returning {}",
+                value_columns_sql()
+            ))?
+            .query_row(params![&new_key], Value::from_row)
+        {
+            Err(QueryReturnedNoRows) => {}
+            Err(err) => return Err(err.into()),
+            Ok(existing_value) => {
+                let a = &existing_value;
+                let b = value;
+                if a.file_offset == b.file_offset && a.file_id == b.file_id {
+                    assert_eq!(a.length, b.length);
+                    // Renamed but the name is the same.
+                    return Ok(true);
+                }
+                // Schedule the value that previously had the key to be hole punched.
+                self.deleted_values.push(existing_value);
+            }
+        };
+
+        let res: rusqlite::Result<ValueLength> = self
+            .tx
+            .prepare_cached(
+                "update keys set key=? where file_id=? and file_offset=?\
+                returning value_length",
+            )?
+            .query_row(
+                params![new_key, &*value.file_id, value.file_offset],
+                |row| row.get(0),
+            );
+        match res {
+            Err(QueryReturnedNoRows) => Ok(false),
+            Err(err) => Err(err).context("updating value key").map_err(Into::into),
+            Ok(value_length) => {
+                assert_eq!(value_length, value.length);
+                Ok(true)
+            }
+        }
+    }
+
     pub fn rename_item(&mut self, from: &[u8], to: &[u8]) -> PubResult<Timestamp> {
         let last_used = match self.tx.query_row(
             "update keys set key=? where key=? returning last_used",

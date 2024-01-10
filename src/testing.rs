@@ -1,3 +1,5 @@
+pub mod torrent_storage;
+
 use std::hash::Hasher;
 use std::io::Write;
 use std::io::{copy, SeekFrom};
@@ -43,8 +45,7 @@ impl<T: Hasher> Write for HashWriter<T> {
 pub fn hash_reader(mut r: impl Read) -> Result<u64> {
     let h = Hash::default();
     let mut hw = HashWriter(h);
-    let n = copy(&mut r, &mut hw)?;
-    dbg!(n);
+    copy(&mut r, &mut hw)?;
     Ok(hw.0.finish())
 }
 

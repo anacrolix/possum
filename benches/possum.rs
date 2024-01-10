@@ -196,12 +196,14 @@ fn multiple_benchmarks(c: &mut Criterion) {
 }
 
 mod clonefile;
+mod torrent_storage;
 criterion_group!(
     benches,
     benchmark_read,
     benchmark_view,
     benchmark_list_keys,
     multiple_benchmarks,
-    clonefile::clonefile_benchmark
+    clonefile::clonefile_benchmark,
+    torrent_storage::benchmark,
 );
 criterion_main!(benches);

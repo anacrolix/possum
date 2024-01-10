@@ -5,3 +5,7 @@ On Windows, file cloning appears to be possible with https://learn.microsoft.com
 For filesystems where cloning is not supported, it should be possible to "fall back" to synchronously reading while a transaction is open, or providing an API to copy out or lock values more efficiently than is usually available.
 
 Here's a list of support https://www.ctrl.blog/entry/file-cloning.html.
+
+Solaris will need this https://docs.oracle.com/cd/E88353_01/html/E37843/reflink-3c.html.
+
+cargo test on Linux can be done by creating an XFS filesystem in a file and mounting that. Symlink the tmp dir in the repo root, and set the TMPDIR environment variable to point into the XFS filesystem mount directory.

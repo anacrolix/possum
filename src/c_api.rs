@@ -152,10 +152,10 @@ where
     }
 }
 
-impl Into<handle::Limits> for PossumLimits {
-    fn into(self) -> handle::Limits {
+impl From<PossumLimits> for handle::Limits {
+    fn from(from: PossumLimits) -> Self {
         handle::Limits {
-            max_value_length_sum: match self.max_value_length_sum {
+            max_value_length_sum: match from.max_value_length_sum {
                 u64::MAX => None,
                 otherwise => Some(otherwise),
             },

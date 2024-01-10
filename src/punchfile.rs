@@ -8,6 +8,7 @@ use std::os::fd::AsRawFd;
 use libc::off_t;
 
 pub fn punchfile(file: impl AsRawFd, offset: off_t, length: off_t) -> io::Result<()> {
+    // TODO: On solaris we want fcntl(F_FREESP);
     #[cfg(not(target_os = "linux"))]
     {
         let punchhole = libc::fpunchhole_t {

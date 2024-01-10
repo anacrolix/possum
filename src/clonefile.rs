@@ -27,6 +27,8 @@ fn last_errno() -> crate::Error {
     }
 }
 
+// TODO: On Solaris we want to use reflink(3)
+
 pub fn clonefile(src_path: &Path, dst_path: &Path) -> PubResult<()> {
     #[cfg(not(target_os = "linux"))]
     {

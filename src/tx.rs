@@ -158,7 +158,9 @@ impl<'h, T> PostCommitWork<'h, T> {
     pub fn complete(self) -> Result<T> {
         // This has to happen after exclusive files are flushed or there's a tendency for hole
         // punches to not persist. It doesn't fix the problem but it significantly reduces it.
-        self.handle.punch_values(&self.deleted_values)?;
+        if !self.handle.instance_limits.disable_hole_punching {
+            self.handle.punch_values(&self.deleted_values)?;
+        }
         // Forget any references to clones of files that have changed.
         for file_id in self.altered_files {
             self.handle.clones.lock().unwrap().remove(&file_id);

@@ -6,6 +6,8 @@ use super::*;
 #[repr(C)]
 pub struct Limits {
     pub max_value_length_sum: Option<u64>,
+    // Invert this logic when there are defaults and mutators.
+    pub disable_hole_punching: bool,
 }
 
 pub struct Handle {

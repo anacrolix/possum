@@ -197,9 +197,13 @@ fn multiple_benchmarks(c: &mut Criterion) {
 
 mod clonefile;
 mod torrent_storage;
+use std::time::Duration;
 criterion_group!(
-    benches,
-    benchmark_read,
+    name = benches;
+    config = Criterion::default()
+        .warm_up_time(Duration::from_millis(500))
+        .measurement_time(Duration::from_secs(1));
+    targets = benchmark_read,
     benchmark_view,
     benchmark_list_keys,
     multiple_benchmarks,

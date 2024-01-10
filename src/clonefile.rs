@@ -2,10 +2,6 @@
 //! etc.
 
 #![allow(unused_imports)]
-use crate::cpathbuf::CPathBuf;
-use crate::PubResult;
-use libc::ENOTSUP;
-use nix::errno::errno;
 use std::ffi::CString;
 #[cfg(target_os = "linux")]
 use std::fs::File;
@@ -14,6 +10,12 @@ use std::io::{Error, ErrorKind};
 use std::os::fd::AsRawFd;
 use std::os::unix::prelude::OsStrExt;
 use std::path::Path;
+
+use libc::ENOTSUP;
+use nix::errno::errno;
+
+use crate::cpathbuf::CPathBuf;
+use crate::PubResult;
 
 // Here and not in crate::Error because ENOTSUP has special meaning for clonefile.
 fn last_errno() -> crate::Error {

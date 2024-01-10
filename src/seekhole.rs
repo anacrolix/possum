@@ -1,3 +1,6 @@
+//! Syscall wrappers for hole punching, system configuration, hole-seeking ( ͡° ͜ʖ ͡°), file cloning
+//! etc.
+
 use std::ffi::c_int;
 use std::io::Error;
 use std::os::fd::RawFd;

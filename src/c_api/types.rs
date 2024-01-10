@@ -39,7 +39,10 @@ pub enum PossumError {
     SqliteError,
     IoError,
     AnyhowError,
+    UnsupportedFilesystem,
 }
+// TODO: Merge the C and Rust error types.
+// pub use crate::Error as PossumError;
 
 #[repr(C)]
 pub(crate) struct PossumLimits {

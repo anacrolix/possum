@@ -13,4 +13,19 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("anyhow: {0:?}")]
     Anyhow(#[from] anyhow::Error),
+    #[error("unsupported filesystem")]
+    UnsupportedFilesystem,
+}
+
+use Error::*;
+
+impl Error {
+    // This isn't great, since such an error could already be wrapped up in anyhow, or come from
+    // Sqlite for example.
+    pub(crate) fn is_file_already_exists(&self) -> bool {
+        match self {
+            Io(err) => err.kind() == ErrorKind::AlreadyExists,
+            _ => false,
+        }
+    }
 }

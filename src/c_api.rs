@@ -115,6 +115,7 @@ impl From<Error> for PossumError {
             Error::Sqlite(_) => SqliteError,
             Error::Io(_) => IoError,
             Error::Anyhow(_) => AnyhowError,
+            Error::UnsupportedFilesystem => UnsupportedFilesystem,
         }
     }
 }

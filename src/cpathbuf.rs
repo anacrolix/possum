@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::convert::TryFrom;
 use std::ffi::{c_char, CString, NulError};
 use std::os::unix::ffi::OsStrExt;
@@ -18,7 +20,7 @@ impl TryFrom<&Path> for CPathBuf {
 }
 
 impl CPathBuf {
-    pub fn as_ptr(&self) -> *const c_char {
+    pub(crate) fn as_ptr(&self) -> *const c_char {
         self.0.as_ptr()
     }
 }

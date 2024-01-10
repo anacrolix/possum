@@ -7,7 +7,7 @@ pub mod flock;
 mod handle;
 mod item;
 mod owned_cell;
-pub mod pathconf;
+mod pathconf;
 pub mod punchfile;
 pub mod seekhole;
 pub mod testing;
@@ -55,7 +55,7 @@ pub use test_log::test;
 pub use walk::Entry as WalkEntry;
 use ErrorKind::InvalidInput;
 
-use crate::clonefile::fclonefile;
+use crate::clonefile::fclonefile_noflags;
 use crate::flock::*;
 use crate::item::Item;
 use crate::punchfile::punchfile;
@@ -111,8 +111,8 @@ impl BeginWriteValue<'_, '_> {
     pub fn clone_fd(self, fd: RawFd, _flags: u32) -> Result<ValueWriter> {
         let dst_path = loop {
             let dst_path = random_file_name_in_dir(&self.batch.handle.dir);
-            match fclonefile(fd, &dst_path, 0) {
-                Err(err) if err.kind() == ErrorKind::AlreadyExists => continue,
+            match fclonefile_noflags(fd, &dst_path) {
+                Err(err) if err.is_file_already_exists() => continue,
                 Err(err) => return Err(err.into()),
                 Ok(()) => break dst_path,
             }
@@ -504,7 +504,7 @@ impl<'a> Reader<'a> {
 
     /// Takes a snapshot and commits the read transaction.
     pub fn begin(self) -> Result<Snapshot> {
-        let file_clones = Self::clone_files(self.handle, self.files)?;
+        let file_clones = Self::clone_files(self.handle, self.files).context("cloning files")?;
         self.owned_tx
             .commit(())
             .context("committing transaction")?
@@ -565,7 +565,8 @@ impl<'a> Reader<'a> {
             assert!(try_lock_file(&mut src_file, flock::LockSharedNonblock)?);
         }
         let tempdir_path = tempdir.path();
-        clonefile(&src_path, &file_path(tempdir_path, &file_id))?;
+        let dst_path = file_path(tempdir_path, &file_id);
+        clonefile(&src_path, &dst_path).context("cloning file")?;
         let mut file = open_file_id(OpenOptions::new().read(true), tempdir_path, &file_id)
             .context("opening value file")?;
         // This prevents the snapshot file from being cleaned up. There's probably a race between

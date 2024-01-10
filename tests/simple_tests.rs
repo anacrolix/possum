@@ -403,7 +403,8 @@ fn cleanup_snapshots() -> Result<()> {
 
 #[test]
 fn reads_update_last_used() -> Result<()> {
-    let handle = Handle::new(tempdir()?.into_path())?;
+    let tempdir = tempdir()?;
+    let handle = Handle::new(tempdir.as_ref().to_owned())?;
     let key = Vec::from("hello");
     let value = "mundo".as_bytes();
     let (n, _) = handle.single_write_from(key.clone(), value)?;

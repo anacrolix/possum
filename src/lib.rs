@@ -40,7 +40,7 @@ use cpathbuf::CPathBuf;
 pub use error::Error;
 use exclusive_file::ExclusiveFile;
 pub use handle::Handle;
-use log::{debug, warn};
+use log::*;
 use memmap2::Mmap;
 use nix::fcntl::FlockArg::{LockExclusiveNonblock, LockSharedNonblock};
 use num::Integer;

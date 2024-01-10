@@ -83,9 +83,6 @@ impl Handle {
         let conn = Connection::open(dir.join(MANIFEST_DB_FILE_NAME))?;
         Self::init_sqlite_conn(&conn)?;
         conn.pragma_update(None, "synchronous", "off")?;
-        if let Err(err) = delete_unused_snapshots(&dir) {
-            error!("error deleting unused snapshots: {}", err);
-        }
         let handle = Self {
             conn: Mutex::new(conn),
             exclusive_files: Default::default(),
@@ -109,6 +106,10 @@ impl Handle {
             conn.pragma_update(None, "locking_mode", "exclusive")?;
         }
         Ok(())
+    }
+
+    pub fn cleanup_snapshots(&self) -> PubResult<()> {
+        delete_unused_snapshots(&self.dir).map_err(Into::into)
     }
 
     pub fn block_size(&self) -> u64 {

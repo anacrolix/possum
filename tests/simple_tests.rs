@@ -374,6 +374,7 @@ fn cleanup_snapshots() -> Result<()> {
             .count()
     };
     let handle = Handle::new(tempdir.path.clone())?;
+    handle.cleanup_snapshots()?;
     handle.single_write_from("hello".as_bytes().to_vec(), "world".as_bytes())?;
     let value = handle.read_single("hello".as_bytes())?.unwrap();
     assert_eq!(count_snapshot_dirs(), 1);
@@ -396,7 +397,8 @@ fn cleanup_snapshots() -> Result<()> {
     drop(handle);
     assert_eq!(count_snapshot_dirs(), 1);
     // This will clean up the unused snapshot dir that was leaked earlier.
-    let _handle = Handle::new(tempdir.path.clone());
+    let handle = Handle::new(tempdir.path.clone())?;
+    handle.cleanup_snapshots()?;
     assert_eq!(count_snapshot_dirs(), 0);
     Ok(())
 }

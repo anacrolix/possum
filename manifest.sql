@@ -18,3 +18,8 @@ create index if not exists last_used_index on keys (
     last_used,
     key_id
 );
+
+-- This is for next_value_offset
+CREATE INDEX if not exists file_id_then_offset on keys (file_id, file_offset);
+-- This is for last_end_offset
+CREATE INDEX if not exists file_id_then_end_offset on keys (file_id, file_offset+value_length);

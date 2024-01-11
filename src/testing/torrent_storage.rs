@@ -1,14 +1,13 @@
 use std::hash::Hasher;
 use std::io::Write;
+use std::iter;
 
 use anyhow::anyhow;
 use fdlimit::raise_fd_limit;
 use log::debug;
-use rand::{RngCore, SeedableRng};
 
 use super::*;
-use crate::testing::{hash_reader, test_tempdir, Hash};
-
+use crate::testing::{test_tempdir, Hash};
 use crate::Handle;
 
 #[derive(Clone, Copy)]
@@ -19,15 +18,17 @@ pub struct TorrentStorageOpts {
     pub static_tempdir_name: &'static str,
     pub disable_hole_punching: bool,
     pub rename_values: bool,
+    pub num_threads: Option<usize>,
 }
 
 pub const BENCHMARK_OPTS: TorrentStorageOpts = TorrentStorageOpts {
     piece_size: 2 << 20,
     static_tempdir_name: "benchmark_torrent_storage_default",
     num_pieces: 8,
-    block_size: 4096,
+    block_size: 1 << 14,
     disable_hole_punching: false,
     rename_values: true,
+    num_threads: None,
 };
 
 // TODO: Rename. Maybe make this a method on Opts. Mirror the squirrel benchmark closer by not
@@ -57,37 +58,42 @@ pub fn torrent_storage_inner(opts: TorrentStorageOpts) -> anyhow::Result<()> {
         Ok(handle)
     };
     let handle = new_handle()?;
-    let thread_pool = rayon::ThreadPoolBuilder::new().build()?;
+    let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(1).build()?;
     for piece_index in 0..num_pieces {
-        let mut piece_data = vec![0; piece_size];
+        let byte = rand::thread_rng().gen_range(1..u8::MAX);
+        let mut piece_data = io::repeat(byte).take(piece_size as u64);
         // Hi alec
-        rand::rngs::SmallRng::seed_from_u64(piece_index as u64).fill_bytes(&mut piece_data);
         let piece_data_hash = {
             let mut hash = Hash::default();
-            hash.write(&piece_data);
+            assert_eq!(
+                io::copy(&mut piece_data, &mut HashWriter(&mut hash))?,
+                piece_size as u64,
+            );
             hash.finish()
         };
         let block_offset_iter = (0..piece_size).step_by(block_size);
         let unverified_key = |offset| format!("unverified/{piece_data_hash:x}/{offset}");
-        thread_pool.scope(|scope| {
+        let write_unverified_block = |handle: &Handle, offset| -> anyhow::Result<()> {
+            let key = unverified_key(offset);
+            let (written, _) = handle
+                .single_write_from(key.into_bytes(), io::repeat(byte).take(block_size as u64))?;
+            assert_eq!(written, block_size as u64);
+            Ok(())
+        };
+        if let Some(num_threads) = opts.num_threads {
+            thread_pool.scope(|scope| {
+                for offset in block_offset_iter.clone() {
+                    // let handle = Handle::new(tempdir.path.clone())?;
+                    let handle = &handle;
+                    scope.spawn(move |_scope| write_unverified_block(handle, offset).unwrap());
+                }
+                anyhow::Ok(())
+            })?;
+        } else {
             for offset in block_offset_iter.clone() {
-                let piece_data = &piece_data;
-                // let handle = Handle::new(tempdir.path.clone())?;
-                let handle = &handle;
-                scope.spawn(move |_scope| {
-                    (|| -> anyhow::Result<()> {
-                        let key = unverified_key(offset);
-                        handle.single_write_from(
-                            key.into_bytes(),
-                            &piece_data[offset..offset + block_size],
-                        )?;
-                        Ok(())
-                    })()
-                    .unwrap()
-                });
+                write_unverified_block(&handle, offset)?;
             }
-            anyhow::Ok(())
-        })?;
+        }
         debug!("starting piece");
         let mut reader = handle.read()?;
         let values = block_offset_iter
@@ -110,6 +116,7 @@ pub fn torrent_storage_inner(opts: TorrentStorageOpts) -> anyhow::Result<()> {
             for (offset, value) in values {
                 snapshot.value(value.clone()).view(|bytes| {
                     stored_hash.write(bytes);
+                    compare_reads(bytes, io::repeat(byte).take(block_size as u64)).unwrap();
                     writer.rename_value(value, make_verified_key(offset))
                 })?;
             }
@@ -123,9 +130,10 @@ pub fn torrent_storage_inner(opts: TorrentStorageOpts) -> anyhow::Result<()> {
             }
             let snapshot = reader.begin()?;
             for value in values {
-                snapshot
-                    .value(value)
-                    .view(|bytes| verified_hash.write(bytes))?;
+                snapshot.value(value).view(|bytes| {
+                    assert_eq!(bytes.len(), block_size);
+                    verified_hash.write(bytes)
+                })?;
             }
             assert_eq!(verified_hash.finish(), piece_data_hash);
         } else {

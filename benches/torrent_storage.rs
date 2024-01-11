@@ -1,5 +1,4 @@
 use criterion::Criterion;
-
 use possum::testing::torrent_storage::*;
 
 pub(crate) fn benchmark(c: &mut Criterion) {
@@ -10,6 +9,7 @@ pub(crate) fn benchmark(c: &mut Criterion) {
         block_size: 4096,
         disable_hole_punching: false,
         rename_values: true,
+        ..BENCHMARK_OPTS
     };
     c.benchmark_group("torrent_storage")
         .throughput(criterion::Throughput::Bytes(

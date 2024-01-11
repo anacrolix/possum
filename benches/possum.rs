@@ -1,7 +1,10 @@
 #![allow(clippy::unused_unit)]
 
+use std::io;
+use std::io::Read;
+
 use anyhow::Result;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use possum::flock::try_lock_file;
 use possum::testing::test_tempdir;
 use possum::{flock, Handle};
@@ -51,7 +54,7 @@ pub fn benchmark_view_fallible(c: &mut Criterion) -> anyhow::Result<()> {
 
 pub fn benchmark_list_keys_fallible(c: &mut Criterion) -> Result<()> {
     c.bench_function("list", |b| -> () {
-        || -> Result<()> {
+        (|| -> Result<()> {
             let tempdir = test_tempdir("benchmark_list_keys")?;
             let handle = Handle::new(tempdir.path)?;
             let prefix_range = 0..=100;
@@ -90,7 +93,7 @@ pub fn benchmark_list_keys_fallible(c: &mut Criterion) -> Result<()> {
                 );
             });
             Ok(())
-        }()
+        })()
         .unwrap()
     });
     Ok(())
@@ -169,6 +172,32 @@ pub fn multiple_benchmarks_fallible(c: &mut Criterion) -> Result<()> {
                 })
             });
     }
+    {
+        let size = 64 << 20;
+        c.benchmark_group("write_value")
+            .throughput(Throughput::Bytes(size))
+            .bench_function("write_very_large_value", |b| {
+                (|| -> anyhow::Result<()> {
+                    let tempdir = tempdir()?;
+                    let handle = Handle::new(tempdir.path().to_path_buf())?;
+                    b.iter(|| -> () {
+                        (|| -> anyhow::Result<()> {
+                            let mut writer = handle.new_writer()?;
+                            let value = writer.new_value();
+                            let mut value = value.begin()?;
+                            let written = io::copy(&mut io::repeat(1).take(size), &mut value)?;
+                            assert_eq!(written, size);
+                            writer.stage_write("hello".as_bytes().to_vec(), value)?;
+                            writer.commit()?;
+                            Ok(())
+                        })()
+                        .unwrap()
+                    });
+                    Ok(())
+                })()
+                .unwrap()
+            });
+    }
     Ok(())
 }
 
@@ -198,6 +227,8 @@ fn multiple_benchmarks(c: &mut Criterion) {
 mod clonefile;
 mod torrent_storage;
 use std::time::Duration;
+
+use tempfile::tempdir;
 criterion_group!(
     name = benches;
     config = Criterion::default()

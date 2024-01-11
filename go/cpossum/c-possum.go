@@ -197,3 +197,28 @@ func SetInstanceLimits(h *Handle, limits Limits) error {
 	cLimits.max_value_length_sum = C.uint64_t(limits.MaxValueLengthSum.UnwrapOr(math.MaxUint64))
 	return mapError(C.possum_set_instance_limits(h, &cLimits))
 }
+
+type Writer = *C.PossumWriter
+
+func NewWriter(h *Handle) Writer {
+	return C.possum_new_writer(h)
+}
+
+type ValueWriter = *C.PossumValueWriter
+
+func StartNewValue(w Writer) (vw ValueWriter, err error) {
+	err = mapError(C.possum_start_new_value(w, &vw))
+	return
+}
+
+func ValueWriterFd(vw ValueWriter) int {
+	return int(C.possum_value_writer_fd(vw))
+}
+
+func StageWrite(w Writer, key []byte, vw ValueWriter) error {
+	return mapError(C.possum_writer_stage(w, BufFromBytes(key), vw))
+}
+
+func CommitWriter(w Writer) error {
+	return mapError(C.possum_writer_commit(w))
+}

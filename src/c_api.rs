@@ -41,7 +41,7 @@ struct PossumReader {
     values: Vec<Pin<Box<PossumValue>>>,
 }
 
-type PossumValueWriter = *mut ValueWriter;
+type PossumValueWriter = ValueWriter;
 
 use crate::c_api::PossumError::{AnyhowError, IoError, SqliteError};
 
@@ -138,14 +138,10 @@ impl From<anyhow::Error> for PossumError {
     }
 }
 
-fn with_residual<E>(f: impl FnOnce() -> Result<(), E>) -> PossumError
-where
-    E: Into<crate::Error>,
-{
+fn with_residual(f: impl FnOnce() -> PubResult<()>) -> PossumError {
     match f() {
         Ok(()) => NoError,
         Err(err) => {
-            let err = err.into();
             warn!("converting rust error into enum: {:#?}", err);
             err.into()
         }

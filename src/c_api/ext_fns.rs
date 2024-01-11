@@ -1,3 +1,4 @@
+use itertools::Itertools;
 use std::ffi::{c_char, CStr, OsStr};
 use std::os::fd::RawFd;
 use std::path::PathBuf;
@@ -48,7 +49,11 @@ pub extern "C" fn possum_set_instance_limits(
 ) -> PossumError {
     let handle = unsafe { &mut *handle };
     let limits = unsafe { limits.read() };
-    with_residual(|| handle.set_instance_limits(limits.into()))
+    with_residual(|| {
+        handle
+            .set_instance_limits(limits.into())
+            .map_err(Into::into)
+    })
 }
 
 #[no_mangle]
@@ -72,31 +77,27 @@ pub extern "C" fn possum_single_write_buf(
 }
 
 #[no_mangle]
-pub extern "C" fn possum_new_writer(handle: *mut Handle) -> PossumWriter {
+pub extern "C" fn possum_new_writer(handle: *mut Handle) -> *mut PossumWriter {
     let handle = unsafe { &*handle };
     Box::into_raw(Box::new(handle.new_writer().unwrap()))
 }
 
 #[no_mangle]
 pub extern "C" fn possum_start_new_value(
-    writer: PossumWriter,
-    value: *mut PossumValueWriter,
+    writer: *mut PossumWriter,
+    value: *mut *mut PossumValueWriter,
 ) -> PossumError {
     let writer = unsafe { &mut *writer };
     with_residual(|| {
         let v = Box::into_raw(Box::new(writer.new_value().begin()?));
         unsafe { *value = v };
-        anyhow::Ok(())
+        Ok(())
     })
 }
 
 #[no_mangle]
-pub extern "C" fn possum_value_writer_fd(value: PossumValueWriter) -> RawFd {
-    unsafe { value.as_mut() }
-        .unwrap()
-        .get_file()
-        .unwrap()
-        .as_raw_fd()
+pub extern "C" fn possum_value_writer_fd(value: *mut PossumValueWriter) -> RawFd {
+    unsafe { &mut *value }.get_file().unwrap().as_raw_fd()
 }
 
 #[no_mangle]
@@ -271,16 +272,41 @@ pub extern "C" fn possum_reader_list_items(
     out_len: *mut size_t,
 ) -> PossumError {
     let reader = unsafe { &*reader };
-    items_list_to_c(
-        prefix.size,
-        reader
-            .rust_reader
-            .as_ref()
-            .unwrap()
-            .list_items(prefix.as_ref())
-            .unwrap(),
-        out_items,
-        out_len,
-    );
-    NoError
+    with_residual(|| {
+        items_list_to_c(
+            prefix.size,
+            reader
+                .rust_reader
+                .as_ref()
+                .unwrap()
+                .list_items(prefix.as_ref())?,
+            out_items,
+            out_len,
+        );
+        Ok(())
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn possum_writer_commit(writer: *mut PossumWriter) -> PossumError {
+    let writer = unsafe { Box::from_raw(writer) };
+    with_residual(|| {
+        writer.commit()?;
+        Ok(())
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn possum_writer_stage(
+    writer: *mut PossumWriter,
+    key: PossumBuf,
+    value: *mut PossumValueWriter,
+) -> PossumError {
+    let writer = unsafe { &mut *writer };
+    let value = unsafe { Box::from_raw(value) };
+    with_residual(|| {
+        writer
+            .stage_write(key.as_ref().to_vec(), *value)
+            .map_err(Into::into)
+    })
 }

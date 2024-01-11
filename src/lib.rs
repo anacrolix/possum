@@ -241,17 +241,29 @@ impl<'handle> BatchWriter<'handle> {
     }
 
     pub fn stage_write(&mut self, key: Vec<u8>, mut value: ValueWriter) -> anyhow::Result<()> {
+        let value_length = match value.value_length() {
+            Ok(ok) => ok,
+            Err(err) => {
+                if let Err(err) = value
+                    .exclusive_file
+                    .revert_to_offset(value.value_file_offset)
+                {
+                    error!("error reverting value write: {:#?}", err);
+                }
+                // The ExclusiveFile is probably broken in some way if we couldn't seek on it. Don't
+                // return it to the BatchWriter.
+                return Err(err.into());
+            }
+        };
+        let mut exclusive_file = value.exclusive_file;
+        let value_file_id = exclusive_file.id.clone();
+        self.exclusive_files.push(exclusive_file);
         self.pending_writes.push(PendingWrite {
             key,
             value_file_offset: value.value_file_offset,
-            value_length: value.value_length()?,
-            value_file_id: value.exclusive_file.id.clone(),
+            value_length,
+            value_file_id,
         });
-        debug!(
-            "pushing exclusive file {} into writer",
-            value.exclusive_file.id
-        );
-        self.exclusive_files.push(value.exclusive_file);
         Ok(())
     }
 

@@ -4,7 +4,7 @@ use libc::size_t;
 
 use crate::BatchWriter;
 
-pub type PossumWriter = *mut BatchWriter<'static>;
+pub type PossumWriter = BatchWriter<'static>;
 pub(crate) type PossumOffset = u64;
 
 #[repr(C)]

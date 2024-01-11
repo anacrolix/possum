@@ -1,3 +1,5 @@
+// This implements the missinggo resource.Provider interface over a Possum handle.
+
 package possumResource
 
 import (
@@ -37,12 +39,30 @@ func (i *instance) Get() (rc io.ReadCloser, err error) {
 }
 
 func (i *instance) Put(reader io.Reader) (err error) {
-	// TODO: Stream the value into a new value writer (after all that's what Possum excels at).
-	b, err := io.ReadAll(reader)
+	w := i.handle.NewWriter()
+	defer func() {
+		// TODO: There's no Writer.Drop.
+		commitErr := w.Commit()
+		if err == nil {
+			err = commitErr
+		}
+	}()
+	vw, err := w.StartNewValue()
 	if err != nil {
 		return
 	}
-	return i.handle.PutBuf(i.key, b)
+	f, err := vw.NewFile(i.key)
+	if err != nil {
+		return
+	}
+	_, err = io.Copy(f, reader)
+	f.Close()
+	if err == nil {
+		err = w.Stage([]byte(i.key), vw)
+	}
+	// TODO: Committing here since we only staged one thing and if it failed, we should be
+	// committing nothing. There's no way to drop a Writer at the time of writing.
+	return
 }
 
 func (i *instance) Stat() (fi os.FileInfo, err error) {

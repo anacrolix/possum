@@ -1,6 +1,6 @@
 use std::fs::{File, OpenOptions};
-use std::io::Seek;
 use std::io::SeekFrom::End;
+use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use super::*;
@@ -17,6 +17,13 @@ impl ExclusiveFile {
     pub(crate) fn open(path: PathBuf) -> Result<Self> {
         let file = OpenOptions::new().write(true).open(&path)?;
         Self::from_file(file, path.file_name().expect("file name").to_owned().into())
+    }
+
+    pub(crate) fn revert_to_offset(&mut self, offset: u64) -> io::Result<()> {
+        // Shouldn't revert prior to the last commit.
+        assert!(offset >= self.last_committed_offset);
+        self.inner.seek(Start(offset))?;
+        self.inner.set_len(offset)
     }
 
     pub(crate) fn new(dir: impl AsRef<Path>) -> anyhow::Result<ExclusiveFile> {

@@ -10,6 +10,7 @@ typedef enum {
   SqliteError,
   IoError,
   AnyhowError,
+  UnsupportedFilesystem,
 } PossumError;
 
 typedef struct BatchWriter BatchWriter;
@@ -31,9 +32,9 @@ typedef struct {
   size_t size;
 } PossumBuf;
 
-typedef BatchWriter *PossumWriter;
+typedef BatchWriter PossumWriter;
 
-typedef ValueWriter *PossumValueWriter;
+typedef ValueWriter PossumValueWriter;
 
 typedef struct {
   int64_t secs;
@@ -60,11 +61,11 @@ PossumError possum_set_instance_limits(Handle *handle, const PossumLimits *limit
 
 size_t possum_single_write_buf(Handle *handle, PossumBuf key, PossumBuf value);
 
-PossumWriter possum_new_writer(Handle *handle);
+PossumWriter *possum_new_writer(Handle *handle);
 
-PossumError possum_start_new_value(PossumWriter writer, PossumValueWriter *value);
+PossumError possum_start_new_value(PossumWriter *writer, PossumValueWriter **value);
 
-int possum_value_writer_fd(PossumValueWriter value);
+int possum_value_writer_fd(PossumValueWriter *value);
 
 bool possum_single_stat(const Handle *handle, PossumBuf key, PossumStat *out_stat);
 
@@ -100,3 +101,7 @@ PossumError possum_reader_list_items(const PossumReader *reader,
                                      PossumBuf prefix,
                                      PossumItem **out_items,
                                      size_t *out_len);
+
+PossumError possum_writer_commit(PossumWriter *writer);
+
+PossumError possum_writer_stage(PossumWriter *writer, PossumBuf key, PossumValueWriter *value);

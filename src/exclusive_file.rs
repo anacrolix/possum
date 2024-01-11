@@ -15,7 +15,7 @@ pub(crate) struct ExclusiveFile {
 
 impl ExclusiveFile {
     pub(crate) fn open(path: PathBuf) -> Result<Self> {
-        let file = OpenOptions::new().write(true).open(&path)?;
+        let file = OpenOptions::new().append(true).open(&path)?;
         Self::from_file(file, path.file_name().expect("file name").to_owned().into())
     }
 

@@ -252,7 +252,6 @@ fn missing_holes(
     let mut binding = tx.file_values(file_id)?;
     let values_iter = binding
         .begin()?
-        .into_iter()
         .filter_map_ok(|value| value.location.into_non_zero());
     missing_holes_pure(iter, values_iter)
 }

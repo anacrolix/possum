@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use std::ffi::{c_char, CStr, OsStr};
 use std::os::fd::RawFd;
 use std::path::PathBuf;

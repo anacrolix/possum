@@ -255,7 +255,7 @@ impl<'handle> BatchWriter<'handle> {
                 return Err(err.into());
             }
         };
-        let mut exclusive_file = value.exclusive_file;
+        let exclusive_file = value.exclusive_file;
         let value_file_id = exclusive_file.id.clone();
         self.exclusive_files.push(exclusive_file);
         self.pending_writes.push(PendingWrite {
@@ -546,8 +546,9 @@ where
     /// For testing: Leak a reference to the snapshot tempdir so it's not cleaned up when all
     /// references are forgotten. This could possibly be used from internal tests instead.
     pub fn leak_snapshot_dir(&self) {
-        self.file_clone()
-            .map(|file_clone| std::mem::forget(Arc::clone(&file_clone.lock().unwrap().tempdir)));
+        if let Some(file_clone) = self.file_clone() {
+            std::mem::forget(Arc::clone(&file_clone.lock().unwrap().tempdir));
+        }
     }
 }
 

@@ -99,6 +99,6 @@ impl AsRef<FileId> for FileId {
 
 impl Borrow<FileIdFancy> for FileId {
     fn borrow(&self) -> &FileIdFancy {
-        &*self
+        self
     }
 }

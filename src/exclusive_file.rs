@@ -1,6 +1,6 @@
 use std::fs::{File, OpenOptions};
+use std::io::Seek;
 use std::io::SeekFrom::End;
-use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use super::*;

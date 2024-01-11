@@ -1,6 +1,5 @@
 use std::hash::Hasher;
 use std::io::Write;
-use std::iter;
 
 use anyhow::anyhow;
 use fdlimit::raise_fd_limit;
@@ -59,7 +58,7 @@ pub fn torrent_storage_inner(opts: TorrentStorageOpts) -> anyhow::Result<()> {
     };
     let handle = new_handle()?;
     let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(1).build()?;
-    for piece_index in 0..num_pieces {
+    for _piece_index in 0..num_pieces {
         let byte = rand::thread_rng().gen_range(1..u8::MAX);
         let mut piece_data = io::repeat(byte).take(piece_size as u64);
         // Hi alec
@@ -80,7 +79,7 @@ pub fn torrent_storage_inner(opts: TorrentStorageOpts) -> anyhow::Result<()> {
             assert_eq!(written, block_size as u64);
             Ok(())
         };
-        if let Some(num_threads) = opts.num_threads {
+        if let Some(_num_threads) = opts.num_threads {
             thread_pool.scope(|scope| {
                 for offset in block_offset_iter.clone() {
                     // let handle = Handle::new(tempdir.path.clone())?;

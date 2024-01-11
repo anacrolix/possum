@@ -328,29 +328,82 @@ type ValueLength = u64;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Value {
-    file_id: FileId,
-    file_offset: u64,
-    length: ValueLength,
+    pub location: ValueLocation,
     last_used: Timestamp,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NonzeroValueLocation {
+    pub file_id: FileId,
+    pub file_offset: u64,
+    pub length: ValueLength,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValueLocation {
+    ZeroLength,
+    Nonzero(NonzeroValueLocation),
+}
+
+impl ValueLocation {
+    pub fn into_non_zero(self) -> Option<NonzeroValueLocation> {
+        match self {
+            ZeroLength => None,
+            Nonzero(a) => Some(a),
+        }
+    }
+
+    pub fn file_offset(&self) -> Option<u64> {
+        match self {
+            ZeroLength => None,
+            Nonzero(NonzeroValueLocation { file_offset, .. }) => Some(*file_offset),
+        }
+    }
+
+    pub fn file_id(&self) -> Option<&FileIdFancy> {
+        match self {
+            ZeroLength => None,
+            Nonzero(NonzeroValueLocation { file_id, .. }) => Some(file_id),
+        }
+    }
+
+    pub fn length(&self) -> u64 {
+        match self {
+            ZeroLength => 0,
+            Nonzero(NonzeroValueLocation { length, .. }) => *length,
+        }
+    }
+}
+
+impl Deref for Value {
+    type Target = ValueLocation;
+
+    fn deref(&self) -> &Self::Target {
+        &self.location
+    }
 }
 
 impl Value {
     fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
-        let file_id: FileId = row.get(0)?;
+        let file_id: Option<FileId> = row.get(0)?;
+        let file_offset: Option<u64> = row.get(1)?;
+        let length = row.get(2)?;
+        let last_used = row.get(3)?;
+        let location = if length == 0 {
+            assert_eq!(file_id, None);
+            assert_eq!(file_offset, None);
+            ZeroLength
+        } else {
+            Nonzero(NonzeroValueLocation {
+                file_id: file_id.unwrap(),
+                file_offset: file_offset.unwrap(),
+                length,
+            })
+        };
         Ok(Value {
-            file_id,
-            file_offset: row.get(1)?,
-            length: row.get(2)?,
-            last_used: row.get(3)?,
+            location,
+            last_used,
         })
-    }
-
-    pub fn file_offset(&self) -> u64 {
-        self.file_offset
-    }
-
-    pub fn length(&self) -> u64 {
-        self.length
     }
 
     pub fn last_used(&self) -> Timestamp {
@@ -384,7 +437,8 @@ pub struct Snapshot {
 #[derive(Debug)]
 pub struct SnapshotValue<V> {
     value: V,
-    cloned_file: Arc<Mutex<FileClone>>,
+    // This is Some if value is Nonzero.
+    cloned_file: Option<Arc<Mutex<FileClone>>>,
 }
 
 impl<V> Deref for SnapshotValue<V> {
@@ -401,7 +455,10 @@ impl Snapshot {
         V: AsRef<Value>,
     {
         SnapshotValue {
-            cloned_file: Arc::clone(self.file_clones.get(&value.as_ref().file_id).unwrap()),
+            cloned_file: value
+                .as_ref()
+                .file_id()
+                .map(|file_id| Arc::clone(self.file_clones.get(file_id).unwrap())),
             value,
         }
     }
@@ -427,30 +484,47 @@ impl<V> SnapshotValue<V>
 where
     V: AsRef<Value>,
 {
-    fn file_clone(&self) -> &Arc<Mutex<FileClone>> {
-        &self.cloned_file
+    fn file_clone(&self) -> Option<&Arc<Mutex<FileClone>>> {
+        self.cloned_file.as_ref()
     }
 
     pub fn view<R>(&self, f: impl FnOnce(&[u8]) -> R) -> io::Result<R> {
         let value = self.value.as_ref();
-        let file_clone = self.file_clone();
-        let start = to_usize_io(value.file_offset)?;
-        let usize_length = to_usize_io(value.length)?;
-        let end = usize::checked_add(start, usize_length).ok_or_else(make_to_usize_io_error)?;
-        let mut mutex_guard = file_clone.lock().unwrap();
-        let mmap = mutex_guard.get_mmap()?;
-        Ok(f(&mmap[start..end]))
+        match value.location {
+            Nonzero(NonzeroValueLocation {
+                file_offset,
+                length,
+                ..
+            }) => {
+                let file_clone = self.file_clone().unwrap();
+                let start = to_usize_io(file_offset)?;
+                let usize_length = to_usize_io(length)?;
+                let end =
+                    usize::checked_add(start, usize_length).ok_or_else(make_to_usize_io_error)?;
+                let mut mutex_guard = file_clone.lock().unwrap();
+                let mmap = mutex_guard.get_mmap()?;
+                Ok(f(&mmap[start..end]))
+            }
+            ZeroLength => Ok(f(&[])),
+        }
     }
 
     pub fn read(&self, mut buf: &mut [u8]) -> Result<usize> {
-        let value = self.value.as_ref();
-        buf = buf
-            .split_at_mut(min(buf.len() as u64, value.length) as usize)
-            .0;
-        let mut file_clone = self.file_clone().lock().unwrap();
-        let file = &mut file_clone.file;
-        file.seek(Start(value.file_offset))?;
-        file.read(buf).map_err(Into::into)
+        match self.value.as_ref().location {
+            ValueLocation::ZeroLength => Ok(0),
+            Nonzero(NonzeroValueLocation {
+                file_offset,
+                length,
+                ..
+            }) => {
+                let _value = self.value.as_ref();
+                buf = buf.split_at_mut(min(buf.len() as u64, length) as usize).0;
+                let mut file_clone = self.file_clone().unwrap().lock().unwrap();
+                let file = &mut file_clone.file;
+                file.seek(Start(file_offset))?;
+                file.read(buf).map_err(Into::into)
+            }
+        }
     }
 
     pub fn new_reader(&self) -> impl Read + '_ {
@@ -460,7 +534,8 @@ where
     /// For testing: Leak a reference to the snapshot tempdir so it's not cleaned up when all
     /// references are forgotten. This could possibly be used from internal tests instead.
     pub fn leak_snapshot_dir(&self) {
-        std::mem::forget(Arc::clone(&self.file_clone().lock().unwrap().tempdir))
+        self.file_clone()
+            .map(|file_clone| std::mem::forget(Arc::clone(&file_clone.lock().unwrap().tempdir)));
     }
 }
 
@@ -496,23 +571,25 @@ impl<'a> Reader<'a> {
         let res = self.owned_tx.touch_for_read(key);
         match res {
             Ok(value) => {
-                let Value {
+                if let Nonzero(NonzeroValueLocation {
                     file_offset,
                     length,
-                    ..
-                } = value;
-                let file = self.files.entry(value.file_id.clone());
-                let value_end = file_offset + length;
-                use hash_map::Entry::*;
-                match file {
-                    Occupied(mut entry) => {
-                        let value = entry.get_mut();
-                        *value = max(*value, value_end);
-                    }
-                    Vacant(entry) => {
-                        entry.insert(value_end);
-                    }
-                };
+                    file_id,
+                }) = value.location.clone()
+                {
+                    let file = self.files.entry(file_id);
+                    let value_end = file_offset + length;
+                    use hash_map::Entry::*;
+                    match file {
+                        Occupied(mut entry) => {
+                            let value = entry.get_mut();
+                            *value = max(*value, value_end);
+                        }
+                        Vacant(entry) => {
+                            entry.insert(value_end);
+                        }
+                    };
+                }
                 Ok(Some(value))
             }
             Err(QueryReturnedNoRows) => Ok(None),
@@ -664,6 +741,7 @@ use file_id::{FileId, FileIdFancy};
 
 pub use crate::tx::Transaction;
 use crate::tx::{PostCommitWork, ReadTransactionOwned};
+use crate::ValueLocation::{Nonzero, ZeroLength};
 
 struct PunchValueConstraints {
     greedy_start: bool,

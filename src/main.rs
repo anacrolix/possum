@@ -6,11 +6,12 @@ use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context};
+use itertools::Itertools;
 use log::info;
 use possum::punchfile::punchfile;
 use possum::seekhole::{file_regions, Region, RegionType};
 use possum::tx::ReadTransactionRef;
-use possum::{ceil_multiple, check_hole, Handle, Value, WalkEntry};
+use possum::{ceil_multiple, check_hole, Handle, NonzeroValueLocation, WalkEntry};
 
 #[derive(clap::Subcommand)]
 enum Commands {
@@ -225,11 +226,11 @@ impl From<Region> for FileRegion {
     }
 }
 
-impl From<Value> for FileRegion {
-    fn from(value: Value) -> Self {
+impl From<NonzeroValueLocation> for FileRegion {
+    fn from(value: NonzeroValueLocation) -> Self {
         Self {
-            start: value.file_offset(),
-            length: value.length(),
+            start: value.file_offset,
+            length: value.length,
         }
     }
 }
@@ -249,13 +250,18 @@ fn missing_holes(
             Err(err) => Some(Err(err)),
         });
     let mut binding = tx.file_values(file_id)?;
-    let values_iter = binding.begin()?;
+    let values_iter = binding
+        .begin()?
+        .into_iter()
+        .filter_map_ok(|value| value.location.into_non_zero());
     missing_holes_pure(iter, values_iter)
 }
 
 fn missing_holes_pure(
     mut iter: impl Iterator<Item = Result<FileRegion, impl std::error::Error + Send + Sync + 'static>>,
-    values: impl Iterator<Item = Result<Value, impl std::error::Error + Send + Sync + 'static>>,
+    values: impl Iterator<
+        Item = Result<NonzeroValueLocation, impl std::error::Error + Send + Sync + 'static>,
+    >,
 ) -> anyhow::Result<Vec<FileRegion>> {
     let mut ret = vec![];
     let mut hole: Option<FileRegion> = None;

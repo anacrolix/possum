@@ -241,18 +241,15 @@ impl Handle {
 
     /// Starts a read transaction to determine punch boundaries. Since punching is never expanded to
     /// offsets above the targeted values, ongoing writes should not be affected.
-    pub(crate) fn punch_values<V>(&self, values: &[V]) -> PubResult<()>
-    where
-        V: AsRef<Value>,
-    {
+    pub(crate) fn punch_values(&self, values: &[NonzeroValueLocation]) -> PubResult<()> {
         let transaction = self.start_deferred_transaction_for_read()?;
         for v in values {
-            let Value {
+            let NonzeroValueLocation {
                 file_id,
                 file_offset,
                 length,
                 ..
-            } = v.as_ref();
+            } = v;
             let value_length = length;
             let msg = format!(
                 "deleting value at {:?} {} {}",

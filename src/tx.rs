@@ -9,7 +9,7 @@ use super::*;
 #[must_use]
 pub struct PostCommitWork<'h, T> {
     handle: &'h Handle,
-    deleted_values: Vec<Value>,
+    deleted_values: Vec<NonzeroValueLocation>,
     altered_files: HashSet<FileId>,
     reward: T,
 }
@@ -174,7 +174,7 @@ impl<'h, T> PostCommitWork<'h, T> {
 pub struct Transaction<'h> {
     tx: rusqlite::Transaction<'h>,
     handle: &'h Handle,
-    deleted_values: Vec<Value>,
+    deleted_values: Vec<NonzeroValueLocation>,
     altered_files: HashSet<FileId>,
 }
 
@@ -230,15 +230,21 @@ impl<'h> Transaction<'h> {
             Err(QueryReturnedNoRows) => {}
             Err(err) => return Err(err.into()),
             Ok(existing_value) => {
-                let a = &existing_value;
-                let b = value;
-                if a.file_offset == b.file_offset && a.file_id == b.file_id {
-                    assert_eq!(a.length, b.length);
-                    // Renamed but the name is the same.
-                    return Ok(true);
+                match existing_value.location {
+                    Nonzero(a) => {
+                        let b = value;
+                        if Some(a.file_offset) == b.file_offset()
+                            && Some(&*a.file_id) == b.file_id()
+                        {
+                            assert_eq!(a.length, b.length());
+                            // Renamed but the name is the same.
+                            return Ok(true);
+                        }
+                        // Schedule the value that previously had the key to be hole punched.
+                        self.deleted_values.push(a);
+                    }
+                    ZeroLength => {}
                 }
-                // Schedule the value that previously had the key to be hole punched.
-                self.deleted_values.push(existing_value);
             }
         };
 
@@ -249,14 +255,14 @@ impl<'h> Transaction<'h> {
                 returning value_length",
             )?
             .query_row(
-                params![new_key, &*value.file_id, value.file_offset],
+                params![new_key, value.file_id(), value.file_offset()],
                 |row| row.get(0),
             );
         match res {
             Err(QueryReturnedNoRows) => Ok(false),
             Err(err) => Err(err).context("updating value key").map_err(Into::into),
             Ok(value_length) => {
-                assert_eq!(value_length, value.length);
+                assert_eq!(value_length, value.length());
                 Ok(true)
             }
         }
@@ -280,6 +286,12 @@ impl<'h> Transaction<'h> {
     }
 
     pub(crate) fn insert_key(&mut self, pw: PendingWrite) -> rusqlite::Result<()> {
+        let mut file_id = Some(pw.value_file_id.deref());
+        let mut file_offset = Some(pw.value_file_offset);
+        if pw.value_length == 0 {
+            file_id = None;
+            file_offset = None;
+        }
         let inserted = self
             .tx
             .prepare_cached(
@@ -288,8 +300,8 @@ impl<'h> Transaction<'h> {
             )?
             .execute(rusqlite::params!(
                 pw.key,
-                pw.value_file_id.deref(),
-                pw.value_file_offset,
+                file_id,
+                file_offset,
                 pw.value_length
             ))?;
         assert_eq!(inserted, 1);
@@ -299,19 +311,26 @@ impl<'h> Transaction<'h> {
         Ok(())
     }
 
+    fn push_value_for_deletion(&mut self, value: Value) {
+        match value.location {
+            Nonzero(location) => self.deleted_values.push(location),
+            ZeroLength => {}
+        }
+    }
+
     pub fn delete_key(&mut self, key: &[u8]) -> rusqlite::Result<Option<c_api::PossumStat>> {
-        match self
+        let res = self
             .tx
             .prepare_cached(&format!(
                 "delete from keys where key=? returning {}",
                 value_columns_sql()
             ))?
-            .query_row([key], Value::from_row)
-        {
+            .query_row([key], Value::from_row);
+        match res {
             Err(QueryReturnedNoRows) => Ok(None),
             Ok(value) => {
                 let stat = value.as_ref().into();
-                self.deleted_values.push(value);
+                self.push_value_for_deletion(value);
                 Ok(Some(stat))
             }
             Err(err) => Err(err),
@@ -340,11 +359,16 @@ impl<'h> Transaction<'h> {
             value_columns_sql()
         ))?;
         let mut value_bytes_deleted = 0;
+        let mut values_deleted = vec![];
         while value_bytes_deleted < target_bytes {
             let value = stmt.query_row([], Value::from_row)?;
             value_bytes_deleted += value.length();
             info!("evicting {:?}", &value);
-            self.deleted_values.push(value);
+            values_deleted.push(value);
+        }
+        drop(stmt);
+        for value in values_deleted {
+            self.push_value_for_deletion(value);
         }
         Ok(())
     }

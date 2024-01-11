@@ -7,13 +7,17 @@ create table if not exists keys (
     -- maybe it's not worth the risk.
     file_id blob,
     file_offset integer,
-    value_length integer,
+    value_length integer not null,
     -- This is the most (concrete?) representation for the finest time granularity sqlite's internal time functions support.
     last_used integer not null default (cast(unixepoch('subsec')*1e3 as integer)),
     -- Put this last because it's most likely looked up in the index and not needed when looking at the row.
     key blob unique not null,
     -- This is necessary for value renames
     unique (file_id, file_offset)
+    check ( iif (
+        value_length=0,
+        file_id is null and file_offset is null,
+        file_id is not null and file_offset is not null ) )
 ) strict;
 
 create index if not exists last_used_index on keys (

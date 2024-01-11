@@ -1,3 +1,5 @@
+use std::borrow::Borrow;
+
 use super::*;
 
 #[derive(Eq, PartialEq, Hash)]
@@ -92,5 +94,11 @@ impl Display for FileId {
 impl AsRef<FileId> for FileId {
     fn as_ref(&self) -> &FileId {
         self
+    }
+}
+
+impl Borrow<FileIdFancy> for FileId {
+    fn borrow(&self) -> &FileIdFancy {
+        &*self
     }
 }

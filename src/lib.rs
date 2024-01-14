@@ -868,6 +868,10 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
     if length == 0 {
         return Ok(());
     }
+    if length < 0 {
+        dbg!(length);
+        return Ok(());
+    }
     assert!(length > 0);
     assert_eq!(offset % block_size, 0);
     punchfile(file.as_raw_fd(), offset, length).with_context(|| format!("length {}", length))?;

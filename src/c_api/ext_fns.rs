@@ -9,10 +9,6 @@ use positioned_io::ReadAt;
 
 use super::*;
 use crate::c_api::PossumError::{NoError, NoSuchKey};
-use crate::c_api::{
-    items_list_to_c, PossumBuf, PossumError, PossumItem, PossumOffset, PossumReader, PossumStat,
-    PossumValue, PossumValueWriter, PossumWriter,
-};
 use crate::Handle;
 
 #[no_mangle]
@@ -167,16 +163,18 @@ pub extern "C" fn possum_single_delete(
     key: PossumBuf,
     stat: *mut PossumStat,
 ) -> PossumError {
-    let handle = unsafe { &*handle };
-    let value = match handle.single_delete(key.as_ref()) {
-        Ok(None) => return NoSuchKey,
-        Err(err) => return err.into(),
-        Ok(Some(value)) => value,
-    };
-    if let Some(stat) = unsafe { stat.as_mut() } {
-        *stat = value;
-    }
-    NoError
+    with_residual(|| {
+        let handle = unsafe { &*handle };
+        let value = match handle.single_delete(key.as_ref()) {
+            Ok(None) => return Err(crate::Error::NoSuchKey),
+            Err(err) => return Err(err),
+            Ok(Some(value)) => value,
+        };
+        if let Some(stat) = unsafe { stat.as_mut() } {
+            *stat = value;
+        }
+        Ok(())
+    })
 }
 
 #[no_mangle]

@@ -3,7 +3,6 @@ package possum
 import (
 	possumC "github.com/anacrolix/possum/go/cpossum"
 	"os"
-	"syscall"
 )
 
 type Writer struct {
@@ -43,11 +42,11 @@ func (me *ValueWriter) Fd() uintptr {
 func (me *ValueWriter) NewFile(name string) (f *os.File, err error) {
 	// I wonder if closing this will close the fd belong to possum. If so, we should dup, and then
 	// kill it remotely if the writer is committed.
-	fd, err := syscall.Dup(int(me.Fd()))
+	fd, err := duplicateFileHandle(me.Fd())
 	if err != nil {
 		return
 	}
-	f = os.NewFile(uintptr(fd), name)
+	f = os.NewFile(fd, name)
 	me.files = append(me.files, f)
 	return
 }

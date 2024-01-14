@@ -1,11 +1,10 @@
 //! Syscall wrappers for hole punching, system configuration, hole-seeking ( ͡° ͜ʖ ͡°), file cloning
 //! etc.
 
+use super::*;
 use std::io;
 use std::io::Error;
 use std::os::fd::AsRawFd;
-
-use libc::off_t;
 
 pub fn punchfile(file: impl AsRawFd, offset: off_t, length: off_t) -> io::Result<()> {
     // TODO: On solaris we want fcntl(F_FREESP);
@@ -27,7 +26,7 @@ pub fn punchfile(file: impl AsRawFd, offset: off_t, length: off_t) -> io::Result
     {
         let fd = file.as_raw_fd();
         let mode = libc::FALLOC_FL_KEEP_SIZE | libc::FALLOC_FL_PUNCH_HOLE;
-        if -1 == unsafe { libc::fallocate(fd, mode, offset, length) } {
+        if -1 == unsafe { libc::fallocate64(fd, mode, offset, length) } {
             return Err(Error::last_os_error());
         }
     }

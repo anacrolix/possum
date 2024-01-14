@@ -34,6 +34,7 @@ use std::{fs, io};
 
 use anyhow::Result;
 use anyhow::{bail, Context};
+use cfg_if::cfg_if;
 use chrono::NaiveDateTime;
 use clonefile::clonefile;
 use cpathbuf::CPathBuf;
@@ -968,4 +969,16 @@ fn inc_big_endian_array(arr: &mut [u8]) -> bool {
         }
     }
     false
+}
+
+// These are typedefs for 64bit file syscalls.
+
+cfg_if! {
+    if #[cfg(not(target_pointer_width = "64"))] {
+        use libc::off64_t as off_t;
+        use nix::libc::lseek64 as lseek;
+    } else {
+        use libc::off_t;
+        use nix::libc::lseek;
+    }
 }

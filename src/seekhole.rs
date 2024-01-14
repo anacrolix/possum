@@ -37,7 +37,7 @@ pub fn seek_hole_whence(
 /// anyway).
 fn lseek(fd: RawFd, offset: i64, whence: impl Into<SeekWhence>) -> Result<RegionOffset, i32> {
     // lseek64?
-    let new_offset = unsafe { nix::libc::lseek(fd, offset, whence.into()) };
+    let new_offset = unsafe { super::lseek(fd, offset, whence.into()) };
     if new_offset == -1 {
         return Err(errno());
     }

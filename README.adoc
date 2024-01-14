@@ -22,6 +22,10 @@ The committing of keys when a write batch is finalized, and the creation of a re
 
 Efficiently removing data, and creating read snapshots requires hole punching, and sparse files respectively. Both features are available on Windows, macOS, Solaris, BSDs and Linux, depending on the filesystem in use.
 
+= Supported systems
+
+macOS and Linux are supported. BSD should work. Solaris requires a small amount of work to complete the implementation. Windows is not supported: It has the necessary features, but https://learn.microsoft.com/en-us/windows/win32/fileio/block-cloning[only ReFS implements block cloning].
+
 = anacrolix/squirrel
 
 I previously wrote https://github.com/anacrolix/squirrel[anacrolix/squirrel], which can fit the role of both in-memory or disk caching due to SQLite's VFS. However, it's written in Go and so is less accessible from other languages. Using SQLite for value storage means large streaming writes are exclusive, even within a single transaction. Value data is serialized to the blob format, potentially across multiple linked pages, and copied multiple times as items are evicted and moved around. Direct file I/O isn't available with SQLite, and the size of values must be known before they can be written, which can mean copying streams to temporary files before they can be written into the SQLite file.

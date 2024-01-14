@@ -17,8 +17,8 @@ use possum::{ceil_multiple, check_hole, Handle, NonzeroValueLocation, WalkEntry}
 enum Commands {
     PunchHole {
         file: String,
-        offset: libc::off_t,
-        length: libc::off_t,
+        offset: i64,
+        length: i64,
     },
     Database {
         dir: PathBuf,

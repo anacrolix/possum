@@ -7,5 +7,3 @@ For filesystems where cloning is not supported, it should be possible to "fall b
 Here's a list of support https://www.ctrl.blog/entry/file-cloning.html.
 
 Solaris will need this https://docs.oracle.com/cd/E88353_01/html/E37843/reflink-3c.html.
-
-cargo test on Linux can be done by creating an XFS filesystem in a file and mounting that. Symlink the tmp dir in the repo root, and set the TMPDIR environment variable to point into the XFS filesystem mount directory.

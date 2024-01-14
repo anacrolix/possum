@@ -5,23 +5,41 @@ package possumC
 import "C"
 import (
 	"errors"
+	"fmt"
 	"github.com/anacrolix/generics"
-	"io/fs"
 	"math"
 	"runtime"
 	"time"
 	"unsafe"
 )
 
-func mapError(err C.PossumError) error {
-	switch err {
-	case C.NoError:
-		return nil
-	case C.NoSuchKey:
-		return fs.ErrNotExist
-	default:
-		panic(err)
+var NoSuchKey = Error{
+	pec: C.NoSuchKey,
+}
+
+type Error struct {
+	pec             C.PossumError
+	displayGoesHere string
+}
+
+const cErrorEnumNoSuchKey = C.NoSuchKey
+
+func (me Error) Is(err error) bool {
+	if err == NoSuchKey {
+		return me.pec == cErrorEnumNoSuchKey
 	}
+	return false
+}
+
+func (me Error) Error() string {
+	return fmt.Sprintf("possum error code %v", me.pec)
+}
+
+func mapError(err C.PossumError) error {
+	if err == C.NoError {
+		return nil
+	}
+	return Error{pec: err}
 }
 
 type Stat = C.PossumStat

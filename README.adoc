@@ -1,16 +1,16 @@
 = Possum
 
-= What is it?
+== What is it?
 
 Possum is a key-value cache stored directly on disk. It supports concurrent access from multiple processes without requiring interprocess communication or sidecar processes. It efficiently evicts data by using hole punching and sparse files. It supports read snapshots by using file cloning, a feature available on https://www.ctrl.blog/entry/file-cloning.html[filesystems] such as Btrfs, XFS, ZFS, APFS and ReFSv2.
 
 Value reads and writes occur directly on files, allowing memory-mapping, zero-copy/splicing, vector I/O, polling and more.
 
-= Why?
+== Why?
 
 I couldn't find cache implementations that supported storing directly on disk, and concurrent access from multiple processes without IPC, but also maintaining disk usage limits. They always seem to be in-memory with snapshots to disk, or single-process with the disk management (including all keys) maintained in memory too. There are plenty of single-process, and fewer concurrent key-value disk stores, but they have no regard for space limits and don't do user-level caching well. So while in-memory key-value caches are well-supported, there is an unfilled niche for disk-caches, particularly one that can be shared by multiple applications. There are plenty of systems out there that have huge amounts of disk space that could be shared by package managers, HTTP proxies and reverse proxies, thumbnail generation, API caches and more where main memory latency isn't needed.
 
-= Technical Details
+== Technical Details
 
 Possum maintains a pool of sparse files and a manifest file to synchronize writes and reads.
 
@@ -22,10 +22,10 @@ The committing of keys when a write batch is finalized, and the creation of a re
 
 Efficiently removing data, and creating read snapshots requires hole punching, and sparse files respectively. Both features are available on Windows, macOS, Solaris, BSDs and Linux, depending on the filesystem in use.
 
-= Supported systems
+== Supported systems
 
 macOS and Linux are supported. BSD should work. Solaris requires a small amount of work to complete the implementation. Windows is not supported: It has the necessary features, but https://learn.microsoft.com/en-us/windows/win32/fileio/block-cloning[only ReFS implements block cloning].
 
-= anacrolix/squirrel
+== anacrolix/squirrel
 
 I previously wrote https://github.com/anacrolix/squirrel[anacrolix/squirrel], which can fit the role of both in-memory or disk caching due to SQLite's VFS. However, it's written in Go and so is less accessible from other languages. Using SQLite for value storage means large streaming writes are exclusive, even within a single transaction. Value data is serialized to the blob format, potentially across multiple linked pages, and copied multiple times as items are evicted and moved around. Direct file I/O isn't available with SQLite, and the size of values must be known before they can be written, which can mean copying streams to temporary files before they can be written into the SQLite file.

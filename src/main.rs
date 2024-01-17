@@ -155,8 +155,11 @@ fn main() -> anyhow::Result<()> {
                                 start += delay;
                                 length -= delay;
                                 length -= length % handle.block_size();
+                                if length == 0 {
+                                    continue;
+                                }
                                 println!(
-                                    "punching hole in {}: {}-{} (length {}, block_size mod {})",
+                                    "{}: {}-{} (length {}, block_size mod {})",
                                     &values_file_entry.path.display(),
                                     start,
                                     start + length,

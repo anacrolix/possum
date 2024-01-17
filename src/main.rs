@@ -40,11 +40,23 @@ enum Commands {
 
 #[derive(clap::Subcommand, Clone)]
 enum DatabaseCommands {
-    WriteFile { file: OsString },
-    ListKeys { prefix: String },
-    ReadKey { key: String },
-    PrintMissingHoles { file_id: Option<PathBuf> },
-    PunchMissingHoles { file_id: Option<PathBuf> },
+    WriteFile {
+        file: OsString,
+    },
+    ListKeys {
+        prefix: String,
+    },
+    ReadKey {
+        key: String,
+    },
+    PrintMissingHoles {
+        file_id: Option<PathBuf>,
+        #[arg(short, long)]
+        fragments: bool,
+    },
+    PunchMissingHoles {
+        file_id: Option<PathBuf>,
+    },
 }
 
 #[derive(clap::Parser)]
@@ -101,11 +113,14 @@ fn main() -> anyhow::Result<()> {
                 }
                 PrintMissingHoles {
                     file_id: values_file_path,
+                    fragments,
                 } => {
                     let tx = handle.start_deferred_transaction_for_read()?;
                     for values_file_entry in handle.walk_dir()?.iter().filter(|entry| {
                         matches!(entry.entry_type, possum::walk::EntryType::ValuesFile)
                     }) {
+                        // Require that the values file path matches the file_id given if it's Some,
+                        // otherwise show everything.
                         if values_file_path
                             .as_ref()
                             .map(|path| path == &values_file_entry.path)
@@ -115,6 +130,7 @@ fn main() -> anyhow::Result<()> {
                                 tx.as_ref(),
                                 values_file_entry,
                                 handle.block_size(),
+                                fragments,
                             )?;
                         }
                     }
@@ -309,9 +325,18 @@ fn print_missing_holes(
     tx: ReadTransactionRef,
     values_file_entry: &WalkEntry,
     block_size: u64,
+    fragments: bool,
 ) -> anyhow::Result<()> {
     let file_id = values_file_entry.file_id().unwrap();
+    let mut last_hole_end = None;
     for FileRegion { start, length } in missing_holes(tx, values_file_entry)? {
+        if let Some(last_hole_end) = last_hole_end {
+            assert!(start > last_hole_end);
+        }
+        last_hole_end = Some(start + length);
+        if !fragments && length < block_size {
+            continue;
+        }
         println!(
             "{}: {}-{} (length {}, block_size mod: {})",
             file_id,

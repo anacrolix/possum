@@ -1,5 +1,7 @@
 # TODO: Do this in build.rs instead
 
-.PHONY: possum.h
-possum.h:
+go_possum_h := go/cpossum/possum.h
+
+.PHONY: $(go_possum_h)
+$(go_possum_h):
 	cbindgen --output $@

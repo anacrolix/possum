@@ -1,7 +1,7 @@
 package possumC
 
 // #cgo LDFLAGS: -lpossum
-// #include "../../possum.h"
+// #include "possum.h"
 import "C"
 import (
 	"errors"

@@ -312,7 +312,18 @@ impl Handle {
     }
 
     pub(crate) fn send_values_for_delete(&self, values: Vec<NonzeroValueLocation>) {
-        self.deleted_values.as_ref().unwrap().send(values).unwrap()
+        use std::sync::mpsc::TrySendError::*;
+        let sender = self.deleted_values.as_ref().unwrap();
+        match sender.try_send(values) {
+            Ok(()) => (),
+            Err(Disconnected(values)) => {
+                error!("sending {values:?}: channel disconnected");
+            }
+            Err(Full(values)) => {
+                warn!("channel full while sending values. blocking.");
+                sender.send(values).unwrap()
+            }
+        }
     }
 }
 

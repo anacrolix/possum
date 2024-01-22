@@ -159,7 +159,7 @@ impl<'h, T> PostCommitWork<'h, T> {
         // This has to happen after exclusive files are flushed or there's a tendency for hole
         // punches to not persist. It doesn't fix the problem but it significantly reduces it.
         if !self.handle.instance_limits.disable_hole_punching {
-            self.handle.punch_values(&self.deleted_values)?;
+            self.handle.send_values_for_delete(self.deleted_values);
         }
         // Forget any references to clones of files that have changed.
         for file_id in self.altered_files {

@@ -10,12 +10,16 @@ pub struct Limits {
     pub disable_hole_punching: bool,
 }
 
+type DeletedValuesSender = std::sync::mpsc::SyncSender<Vec<NonzeroValueLocation>>;
+
 pub struct Handle {
     pub(crate) conn: Mutex<Connection>,
     pub(crate) exclusive_files: Mutex<HashMap<FileId, ExclusiveFile>>,
     pub(crate) dir: Dir,
     pub(crate) clones: Mutex<FileCloneCache>,
     pub(crate) instance_limits: Limits,
+    deleted_values: Option<DeletedValuesSender>,
+    value_puncher: Option<std::thread::JoinHandle<()>>,
 }
 
 /// 4 bytes stored in the database header https://sqlite.org/fileformat2.html#database_header.
@@ -85,12 +89,19 @@ impl Handle {
         let conn = Connection::open(dir.path().join(MANIFEST_DB_FILE_NAME))?;
         Self::init_sqlite_conn(&conn)?;
         conn.pragma_update(None, "synchronous", "off")?;
+        let (deleted_values, receiver) = std::sync::mpsc::sync_channel(10);
         let handle = Self {
             conn: Mutex::new(conn),
             exclusive_files: Default::default(),
             dir: dir.clone(),
             clones: Default::default(),
             instance_limits: Default::default(),
+            deleted_values: Some(deleted_values),
+            value_puncher: Some(std::thread::spawn(|| {
+                if let Err(err) = Self::value_puncher(dir, receiver) {
+                    error!("value puncher thread failed with {err:?}");
+                }
+            })),
         };
         Ok(handle)
     }
@@ -239,10 +250,39 @@ impl Handle {
             .list_items(prefix)
     }
 
+    /// Punches values in batches with its own dedicated connection and read-only transactions.
+    fn value_puncher(
+        dir: Dir,
+        values_receiver: std::sync::mpsc::Receiver<Vec<NonzeroValueLocation>>,
+    ) -> Result<()> {
+        let manifest_path = dir.path().join(MANIFEST_DB_FILE_NAME);
+        use rusqlite::OpenFlags;
+        let mut conn = Connection::open_with_flags(
+            manifest_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | OpenFlags::SQLITE_OPEN_URI,
+        )?;
+        while let Ok(mut values) = values_receiver.recv() {
+            while let Ok(mut more_values) = values_receiver.try_recv() {
+                values.append(&mut more_values);
+            }
+            let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
+            let tx = ReadTransaction {
+                tx: ReadOnlyRusqliteTransaction { conn: tx },
+            };
+            Self::punch_values(&dir, &values, &tx)?;
+        }
+        Ok(())
+    }
+
     /// Starts a read transaction to determine punch boundaries. Since punching is never expanded to
     /// offsets above the targeted values, ongoing writes should not be affected.
-    pub(crate) fn punch_values(&self, values: &[NonzeroValueLocation]) -> PubResult<()> {
-        let transaction = self.start_deferred_transaction_for_read()?;
+    pub(crate) fn punch_values(
+        dir: &Dir,
+        values: &[NonzeroValueLocation],
+        transaction: &ReadTransactionOwned,
+    ) -> PubResult<()> {
         for v in values {
             let NonzeroValueLocation {
                 file_id,
@@ -258,17 +298,21 @@ impl Handle {
             debug!("{}", msg);
             // self.handle.clones.lock().unwrap().remove(&file_id);
             punch_value(PunchValueOptions {
-                dir: self.dir.path(),
+                dir: dir.path(),
                 file_id,
                 offset: *file_offset,
                 length: *value_length,
-                tx: &transaction,
-                block_size: self.block_size(),
+                tx: transaction,
+                block_size: dir.block_size(),
                 constraints: Default::default(),
             })
             .context(msg)?;
         }
         Ok(())
+    }
+
+    pub(crate) fn send_values_for_delete(&self, values: Vec<NonzeroValueLocation>) {
+        self.deleted_values.as_ref().unwrap().send(values).unwrap()
     }
 }
 
@@ -277,3 +321,13 @@ use item::Item;
 
 use crate::ownedtx::{OwnedReadTx, OwnedTxInner};
 use crate::tx::{ReadOnlyRusqliteTransaction, ReadTransaction};
+
+impl Drop for Handle {
+    fn drop(&mut self) {
+        self.deleted_values.take();
+        if let Some(join_handle) = self.value_puncher.take() {
+            join_handle.thread().unpark();
+            join_handle.join().unwrap()
+        }
+    }
+}

@@ -111,7 +111,7 @@ pub struct BeginWriteValue<'writer, 'handle> {
 impl BeginWriteValue<'_, '_> {
     pub fn clone_fd(self, fd: RawFd, _flags: u32) -> Result<ValueWriter> {
         let dst_path = loop {
-            let dst_path = random_file_name_in_dir(&self.batch.handle.dir);
+            let dst_path = random_file_name_in_dir(self.batch.handle.dir.path());
             match fclonefile_noflags(fd, &dst_path) {
                 Err(err) if err.is_file_already_exists() => continue,
                 Err(err) => return Err(err.into()),
@@ -629,8 +629,14 @@ impl<'a> Reader<'a> {
         for (file_id, min_len) in files {
             file_clones.insert(
                 file_id.clone(),
-                Self::get_file_clone(file_id, &mut tempdir, handle_clones, &handle.dir, min_len)
-                    .context("getting file clone")?,
+                Self::get_file_clone(
+                    file_id,
+                    &mut tempdir,
+                    handle_clones,
+                    handle.dir.path(),
+                    min_len,
+                )
+                .context("getting file clone")?,
             );
         }
         Ok(file_clones)
@@ -748,6 +754,7 @@ fn valid_file_name(file_name: &str) -> bool {
     file_name.starts_with(VALUES_FILE_NAME_PREFIX)
 }
 
+mod dir;
 mod file_id;
 pub mod tx;
 

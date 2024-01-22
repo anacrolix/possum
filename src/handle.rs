@@ -13,7 +13,7 @@ pub struct Limits {
 pub struct Handle {
     pub(crate) conn: Mutex<Connection>,
     pub(crate) exclusive_files: Mutex<HashMap<FileId, ExclusiveFile>>,
-    pub(crate) dir: PathBuf,
+    pub(crate) dir: Dir,
     pub(crate) clones: Mutex<FileCloneCache>,
     pub(crate) instance_limits: Limits,
 }
@@ -27,8 +27,8 @@ impl Handle {
         self.start_deferred_transaction()?.apply_limits()
     }
 
-    pub fn dir(&self) -> &PathBuf {
-        &self.dir
+    pub fn dir(&self) -> &Path {
+        self.dir.as_ref()
     }
 
     pub(crate) fn get_exclusive_file(&self) -> Result<ExclusiveFile> {
@@ -72,7 +72,6 @@ impl Handle {
     const USER_VERSION: u32 = 1;
 
     pub fn new(dir: PathBuf) -> Result<Self> {
-        fs::create_dir_all(&dir)?;
         let sqlite_version = rusqlite::version_number();
         // TODO: Why?
         if sqlite_version < 3042000 {
@@ -82,13 +81,14 @@ impl Handle {
                 "3.42"
             );
         }
-        let conn = Connection::open(dir.join(MANIFEST_DB_FILE_NAME))?;
+        let dir = Dir::new(dir)?;
+        let conn = Connection::open(dir.path().join(MANIFEST_DB_FILE_NAME))?;
         Self::init_sqlite_conn(&conn)?;
         conn.pragma_update(None, "synchronous", "off")?;
         let handle = Self {
             conn: Mutex::new(conn),
             exclusive_files: Default::default(),
-            dir,
+            dir: dir.clone(),
             clones: Default::default(),
             instance_limits: Default::default(),
         };
@@ -111,11 +111,11 @@ impl Handle {
     }
 
     pub fn cleanup_snapshots(&self) -> PubResult<()> {
-        delete_unused_snapshots(&self.dir).map_err(Into::into)
+        delete_unused_snapshots(self.dir.path()).map_err(Into::into)
     }
 
     pub fn block_size(&self) -> u64 {
-        4096
+        self.dir.block_size()
     }
 
     pub fn new_writer(&self) -> Result<BatchWriter> {
@@ -258,7 +258,7 @@ impl Handle {
             debug!("{}", msg);
             // self.handle.clones.lock().unwrap().remove(&file_id);
             punch_value(PunchValueOptions {
-                dir: &self.dir,
+                dir: self.dir.path(),
                 file_id,
                 offset: *file_offset,
                 length: *value_length,
@@ -272,6 +272,7 @@ impl Handle {
     }
 }
 
+use crate::dir::Dir;
 use item::Item;
 
 use crate::ownedtx::{OwnedReadTx, OwnedTxInner};

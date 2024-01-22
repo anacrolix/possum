@@ -155,7 +155,7 @@ impl From<PossumLimits> for handle::Limits {
                 u64::MAX => None,
                 otherwise => Some(otherwise),
             },
-            disable_hole_punching: false,
+            disable_hole_punching: from.disable_hole_punching,
         }
     }
 }

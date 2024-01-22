@@ -207,12 +207,14 @@ type Item struct {
 }
 
 type Limits struct {
-	MaxValueLengthSum generics.Option[uint64]
+	MaxValueLengthSum   generics.Option[uint64]
+	DisableHolePunching bool
 }
 
 func SetInstanceLimits(h *Handle, limits Limits) error {
 	var cLimits C.PossumLimits
 	cLimits.max_value_length_sum = C.uint64_t(limits.MaxValueLengthSum.UnwrapOr(math.MaxUint64))
+	cLimits.disable_hole_punching = C.bool(limits.DisableHolePunching)
 	return mapError(C.possum_set_instance_limits(h, &cLimits))
 }
 

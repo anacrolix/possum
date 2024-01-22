@@ -47,4 +47,5 @@ pub enum PossumError {
 #[repr(C)]
 pub(crate) struct PossumLimits {
     pub max_value_length_sum: u64,
+    pub disable_hole_punching: bool,
 }

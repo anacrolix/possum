@@ -25,6 +25,7 @@ typedef struct ValueWriter ValueWriter;
 
 typedef struct {
   uint64_t max_value_length_sum;
+  bool disable_hole_punching;
 } PossumLimits;
 
 typedef struct {

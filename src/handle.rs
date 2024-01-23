@@ -86,8 +86,8 @@ impl Handle {
             );
         }
         let dir = Dir::new(dir)?;
-        let conn = Connection::open(dir.path().join(MANIFEST_DB_FILE_NAME))?;
-        Self::init_sqlite_conn(&conn)?;
+        let mut conn = Connection::open(dir.path().join(MANIFEST_DB_FILE_NAME))?;
+        Self::init_sqlite_conn(&mut conn)?;
         conn.pragma_update(None, "synchronous", "off")?;
         let (deleted_values, receiver) = std::sync::mpsc::sync_channel(10);
         let handle = Self {
@@ -106,19 +106,28 @@ impl Handle {
         Ok(handle)
     }
 
-    fn init_sqlite_conn(conn: &Connection) -> rusqlite::Result<()> {
-        let user_version: ManifestUserVersion =
-            conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    fn init_sqlite_conn(conn: &mut Connection) -> rusqlite::Result<()> {
+        let get_user_version = |conn: &Connection| -> Result<ManifestUserVersion, _> {
+            conn.pragma_query_value(None, "user_version", |row| row.get(0))
+        };
+        let user_version: ManifestUserVersion = get_user_version(conn)?;
         conn.pragma_update(None, "synchronous", "off")?;
-        if user_version < Self::USER_VERSION {
-            conn.pragma_update(None, "journal_mode", "wal")?;
-            init_manifest_schema(conn)?;
-            conn.pragma_update(None, "user_version", Self::USER_VERSION)?;
+        if user_version == Self::USER_VERSION {
+            return Ok(());
+        }
+        // This is sticky and sync-safe.
+        conn.pragma_update(None, "journal_mode", "wal")?;
+        // Make sure nobody is reading while we're doing this change, and that nobody else attempts
+        // to start initializing the schema while we're doing it.
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if get_user_version(&*tx)? < Self::USER_VERSION {
+            init_manifest_schema(&*tx)?;
+            tx.pragma_update(None, "user_version", Self::USER_VERSION)?;
         }
         if false {
-            conn.pragma_update(None, "locking_mode", "exclusive")?;
+            tx.pragma_update(None, "locking_mode", "exclusive")?;
         }
-        Ok(())
+        tx.commit()
     }
 
     pub fn cleanup_snapshots(&self) -> PubResult<()> {

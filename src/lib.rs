@@ -100,8 +100,6 @@ struct PendingWrite {
 const MANIFEST_SCHEMA_SQL: &str = include_str!("../manifest.sql");
 
 fn init_manifest_schema(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
-    // We could do something smarter here like check a schema version and test for the existence of
-    // tables.
     conn.execute_batch(MANIFEST_SCHEMA_SQL)
 }
 

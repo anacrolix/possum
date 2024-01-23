@@ -17,19 +17,23 @@ pub(crate) fn benchmark(c: &mut Criterion) {
         ))
         .sample_size(10)
         .bench_function("no_hole_punching", |b| {
-            b.iter(|| {
-                torrent_storage_inner(TorrentStorageOpts {
-                    disable_hole_punching: true,
-                    ..opts
-                })
-            })
+            let inner = TorrentStorageOpts {
+                disable_hole_punching: true,
+                static_tempdir_name: "benchmark_torrent_storage_no_hole_punching",
+                ..opts
+            }
+            .build()
+            .unwrap();
+            b.iter(|| inner.run().unwrap())
         })
         .bench_function("hole_punching", |b| {
-            b.iter(|| {
-                torrent_storage_inner(TorrentStorageOpts {
-                    disable_hole_punching: false,
-                    ..opts
-                })
-            })
+            let inner = TorrentStorageOpts {
+                disable_hole_punching: false,
+                static_tempdir_name: "benchmark_torrent_storage_hole_punching",
+                ..opts
+            }
+            .build()
+            .unwrap();
+            b.iter(|| inner.run().unwrap())
         });
 }

@@ -172,5 +172,5 @@ fn punch_value_before_snapshot_cloned() -> anyhow::Result<()> {
 #[test]
 fn test_torrent_storage_benchmark() -> anyhow::Result<()> {
     use testing::torrent_storage::*;
-    torrent_storage_inner(BENCHMARK_OPTS)
+    BENCHMARK_OPTS.build()?.run()
 }

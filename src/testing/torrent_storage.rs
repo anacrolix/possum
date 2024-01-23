@@ -30,34 +30,76 @@ pub const BENCHMARK_OPTS: TorrentStorageOpts = TorrentStorageOpts {
     num_threads: None,
 };
 
+impl TorrentStorageOpts {
+    pub fn build(self) -> Result<TorrentStorageInner> {
+        let opts = self;
+        // Need to set this globally when testing, but you can't know what test will run first. At least
+        // if this is the only test to run, it will be guaranteed to run first.
+        let _ = env_logger::builder()
+            .is_test(true)
+            .format_timestamp_micros()
+            .try_init();
+        let _ = raise_fd_limit();
+        // Running in the same directory messes with the disk analysis at the end of the test.
+        let _tempdir = test_tempdir(opts.static_tempdir_name)?;
+        let new_handle = || -> anyhow::Result<Handle> {
+            let mut handle = Handle::new(_tempdir.path.clone())?;
+            handle.set_instance_limits(handle::Limits {
+                disable_hole_punching: opts.disable_hole_punching,
+                max_value_length_sum: Some(opts.piece_size as u64 * opts.num_pieces as u64 / 2),
+            })?;
+            Ok(handle)
+        };
+        let handle = new_handle()?;
+        let thread_pool = if let Some(num_threads) = opts.num_threads {
+            Some(
+                rayon::ThreadPoolBuilder::new()
+                    .num_threads(num_threads)
+                    .build()?,
+            )
+        } else {
+            None
+        };
+        Ok(TorrentStorageInner {
+            opts,
+            handle,
+            thread_pool,
+            _tempdir,
+        })
+    }
+}
+
+pub struct TorrentStorageInner {
+    opts: TorrentStorageOpts,
+    handle: Handle,
+    _tempdir: TestTempDir,
+    thread_pool: Option<rayon::ThreadPool>,
+}
+
+impl TorrentStorageInner {
+    pub fn run(&self) -> Result<()> {
+        torrent_storage_inner_run(self)
+    }
+}
+
 // TODO: Rename. Maybe make this a method on Opts. Mirror the squirrel benchmark closer by not
 // creating a completed key, but by renaming chunks when they're verified.
-pub fn torrent_storage_inner(opts: TorrentStorageOpts) -> anyhow::Result<()> {
+fn torrent_storage_inner_run(inner: &TorrentStorageInner) -> anyhow::Result<()> {
+    let TorrentStorageInner {
+        opts,
+        handle,
+        thread_pool,
+        ..
+    } = inner;
     let TorrentStorageOpts {
         piece_size,
         block_size,
         num_pieces,
         ..
     } = opts;
-    // Need to set this globally when testing, but you can't know what test will run first. At least
-    // if this is the only test to run, it will be guaranteed to run first.
-    let _ = env_logger::builder()
-        .is_test(true)
-        .format_timestamp_micros()
-        .try_init();
-    let _ = raise_fd_limit();
-    // Running in the same directory messes with the disk analysis at the end of the test.
-    let tempdir = test_tempdir(opts.static_tempdir_name)?;
-    let new_handle = || -> anyhow::Result<Handle> {
-        let mut handle = Handle::new(tempdir.path.clone())?;
-        handle.set_instance_limits(handle::Limits {
-            disable_hole_punching: opts.disable_hole_punching,
-            max_value_length_sum: None,
-        })?;
-        Ok(handle)
-    };
-    let handle = new_handle()?;
-    let thread_pool = rayon::ThreadPoolBuilder::new().num_threads(1).build()?;
+    let num_pieces = *num_pieces;
+    let piece_size = *piece_size;
+    let block_size = *block_size;
     for _piece_index in 0..num_pieces {
         let byte = rand::thread_rng().gen_range(1..u8::MAX);
         let mut piece_data = io::repeat(byte).take(piece_size as u64);
@@ -79,7 +121,7 @@ pub fn torrent_storage_inner(opts: TorrentStorageOpts) -> anyhow::Result<()> {
             assert_eq!(written, block_size as u64);
             Ok(())
         };
-        if let Some(_num_threads) = opts.num_threads {
+        if let Some(thread_pool) = thread_pool {
             thread_pool.scope(|scope| {
                 for offset in block_offset_iter.clone() {
                     // let handle = Handle::new(tempdir.path.clone())?;

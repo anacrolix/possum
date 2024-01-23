@@ -73,7 +73,7 @@ impl Handle {
     }
 
     // Expected manifest sqlite user version field value.
-    const USER_VERSION: u32 = 1;
+    const USER_VERSION: u32 = 2;
 
     pub fn new(dir: PathBuf) -> Result<Self> {
         let sqlite_version = rusqlite::version_number();

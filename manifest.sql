@@ -8,7 +8,8 @@ create table if not exists keys (
     file_id blob,
     file_offset integer,
     value_length integer not null,
-    -- This is the most (concrete?) representation for the finest time granularity sqlite's internal time functions support.
+    -- This is the most (concrete?) representation for the finest time granularity sqlite's internal
+    -- time functions support.
     last_used integer not null default (cast(unixepoch('subsec')*1e3 as integer)),
     -- Put this last because it's most likely looked up in the index and not needed when looking at the row.
     key blob unique not null,
@@ -29,3 +30,18 @@ create index if not exists last_used_index on keys (
 CREATE INDEX if not exists file_id_then_offset on keys (file_id, file_offset);
 -- This is for last_end_offset
 CREATE INDEX if not exists file_id_then_end_offset on keys (file_id, file_offset+value_length);
+
+create table if not exists sums (
+    key text primary key,
+    value integer not null
+) strict, without rowid;
+
+insert or ignore into sums values ('value_length', (select coalesce(sum(value_length), 0) from keys));
+
+create trigger if not exists value_length_sum_on_delete delete on keys begin
+    update sums set value=value-old.value_length where key='value_length';
+end;
+
+create trigger if not exists value_length_sum_on_insert insert on keys begin
+    update sums set value=value+new.value_length where key='value_length';
+end;

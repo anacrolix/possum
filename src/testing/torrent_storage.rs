@@ -12,7 +12,7 @@ use crate::Handle;
 #[derive(Clone, Copy)]
 pub struct TorrentStorageOpts {
     pub piece_size: usize,
-    pub block_size: usize,
+    pub chunk_size: usize,
     pub num_pieces: usize,
     pub static_tempdir_name: &'static str,
     pub disable_hole_punching: bool,
@@ -24,7 +24,7 @@ pub const BENCHMARK_OPTS: TorrentStorageOpts = TorrentStorageOpts {
     piece_size: 2 << 20,
     static_tempdir_name: "benchmark_torrent_storage_default",
     num_pieces: 8,
-    block_size: 1 << 14,
+    chunk_size: 1 << 14,
     disable_hole_punching: false,
     rename_values: true,
     num_threads: None,
@@ -93,13 +93,13 @@ fn torrent_storage_inner_run(inner: &TorrentStorageInner) -> anyhow::Result<()> 
     } = inner;
     let TorrentStorageOpts {
         piece_size,
-        block_size,
+        chunk_size,
         num_pieces,
         ..
     } = opts;
     let num_pieces = *num_pieces;
     let piece_size = *piece_size;
-    let block_size = *block_size;
+    let chunk_size = *chunk_size;
     for _piece_index in 0..num_pieces {
         let byte = rand::thread_rng().gen_range(1..u8::MAX);
         let mut piece_data = io::repeat(byte).take(piece_size as u64);
@@ -112,32 +112,32 @@ fn torrent_storage_inner_run(inner: &TorrentStorageInner) -> anyhow::Result<()> 
             );
             hash.finish()
         };
-        let block_offset_iter = (0..piece_size).step_by(block_size);
+        let chunk_offset_iter = (0..piece_size).step_by(chunk_size);
         let unverified_key = |offset| format!("unverified/{piece_data_hash:x}/{offset}");
-        let write_unverified_block = |handle: &Handle, offset| -> anyhow::Result<()> {
+        let write_unverified_chunk = |handle: &Handle, offset| -> anyhow::Result<()> {
             let key = unverified_key(offset);
             let (written, _) = handle
-                .single_write_from(key.into_bytes(), io::repeat(byte).take(block_size as u64))?;
-            assert_eq!(written, block_size as u64);
+                .single_write_from(key.into_bytes(), io::repeat(byte).take(chunk_size as u64))?;
+            assert_eq!(written, chunk_size as u64);
             Ok(())
         };
         if let Some(thread_pool) = thread_pool {
             thread_pool.scope(|scope| {
-                for offset in block_offset_iter.clone() {
+                for offset in chunk_offset_iter.clone() {
                     // let handle = Handle::new(tempdir.path.clone())?;
                     let handle = &handle;
-                    scope.spawn(move |_scope| write_unverified_block(handle, offset).unwrap());
+                    scope.spawn(move |_scope| write_unverified_chunk(handle, offset).unwrap());
                 }
                 anyhow::Ok(())
             })?;
         } else {
-            for offset in block_offset_iter.clone() {
-                write_unverified_block(&handle, offset)?;
+            for offset in chunk_offset_iter.clone() {
+                write_unverified_chunk(&handle, offset)?;
             }
         }
         debug!("starting piece");
         let mut reader = handle.read()?;
-        let values = block_offset_iter
+        let values = chunk_offset_iter
             .clone()
             .map(|offset| {
                 anyhow::Ok((
@@ -157,7 +157,7 @@ fn torrent_storage_inner_run(inner: &TorrentStorageInner) -> anyhow::Result<()> 
             for (offset, value) in values {
                 snapshot.value(value.clone()).view(|bytes| {
                     stored_hash.write(bytes);
-                    compare_reads(bytes, io::repeat(byte).take(block_size as u64)).unwrap();
+                    compare_reads(bytes, io::repeat(byte).take(chunk_size as u64)).unwrap();
                     writer.rename_value(value, make_verified_key(offset))
                 })?;
             }
@@ -166,13 +166,13 @@ fn torrent_storage_inner_run(inner: &TorrentStorageInner) -> anyhow::Result<()> 
             let mut reader = handle.read()?;
             let mut verified_hash = Hash::default();
             let mut values = vec![];
-            for offset in block_offset_iter.clone() {
+            for offset in chunk_offset_iter.clone() {
                 values.push(reader.add(&make_verified_key(offset))?.unwrap());
             }
             let snapshot = reader.begin()?;
             for value in values {
                 snapshot.value(value).view(|bytes| {
-                    assert_eq!(bytes.len(), block_size);
+                    assert_eq!(bytes.len(), chunk_size);
                     verified_hash.write(bytes)
                 })?;
             }

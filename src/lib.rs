@@ -10,6 +10,7 @@ mod owned_cell;
 mod pathconf;
 pub mod punchfile;
 pub mod seekhole;
+#[cfg(feature = "testing")]
 pub mod testing;
 #[cfg(test)]
 mod tests;

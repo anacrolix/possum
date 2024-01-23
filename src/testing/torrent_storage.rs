@@ -152,7 +152,7 @@ fn torrent_storage_inner_run(inner: &TorrentStorageInner) -> anyhow::Result<()> 
         let mut stored_hash = Hash::default();
         let mut writer = handle.new_writer()?;
         let make_verified_key =
-            |offset| format!("verified/{piece_data_hash:x}/{offset}").into_bytes();
+            |offset| format!("verified/{piece_data_hash:016x}/{offset}").into_bytes();
         if opts.rename_values {
             for (offset, value) in values {
                 snapshot.value(value.clone()).view(|bytes| {
@@ -186,7 +186,7 @@ fn torrent_storage_inner_run(inner: &TorrentStorageInner) -> anyhow::Result<()> 
                 })??;
             }
             assert_eq!(stored_hash.finish(), piece_data_hash);
-            let completed_key = format!("completed/{:x}", piece_data_hash).into_bytes();
+            let completed_key = format!("completed/{:016x}", piece_data_hash).into_bytes();
             writer.stage_write(completed_key.clone(), completed)?;
             writer.commit()?;
             // let completed_value = handle

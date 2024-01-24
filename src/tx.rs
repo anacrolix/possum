@@ -334,6 +334,9 @@ impl<'h> Transaction<'h> {
     }
 
     pub fn apply_limits(&mut self) -> Result<()> {
+        if self.tx.transaction_state(None)? != rusqlite::TransactionState::Write {
+            return Ok(());
+        }
         if let Some(max) = self.handle.instance_limits.max_value_length_sum {
             loop {
                 let actual = self

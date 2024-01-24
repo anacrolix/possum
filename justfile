@@ -13,4 +13,4 @@ sync-repo dest *args:
     rsync ./ {{ dest }} -rv --filter ':- .gitignore' --exclude '.git*' {{ args }}
 
 flamegraph-macos bench_filter:
-    CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph --root --bench possum -- --bench {{ bench_filter }}
+    CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph --root --bench possum -- --bench '{{ bench_filter }}'

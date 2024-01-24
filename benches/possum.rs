@@ -221,6 +221,40 @@ pub fn multiple_benchmarks_fallible(c: &mut Criterion) -> Result<()> {
                 .unwrap()
             });
     }
+    {
+        let mut group = c.benchmark_group("operations");
+        group.throughput(Throughput::Elements(1));
+        group.bench_function("rusqlite noop read transaction", |b| {
+            let tempfile = tempfile::NamedTempFile::new().unwrap();
+            let mut conn = rusqlite::Connection::open(tempfile.path()).unwrap();
+            b.iter(|| {
+                conn.transaction_with_behavior(TransactionBehavior::Deferred)
+                    .unwrap()
+                    .commit()
+                    .unwrap()
+            });
+        });
+        group.bench_function("rusqlite noop write transaction", |b| {
+            let tempfile = tempfile::NamedTempFile::new().unwrap();
+            let mut conn = rusqlite::Connection::open(tempfile.path()).unwrap();
+            b.iter(|| {
+                conn.transaction_with_behavior(TransactionBehavior::Immediate)
+                    .unwrap()
+                    .commit()
+                    .unwrap()
+            });
+        });
+        group.bench_function("rusqlite open connection", |b| {
+            let tempfile = tempfile::NamedTempFile::new().unwrap();
+            b.iter(|| rusqlite::Connection::open(tempfile.path()).unwrap());
+        });
+        group.bench_function("open handle", |b| {
+            let tempdir = tempfile::TempDir::new().unwrap();
+            b.iter(|| {
+                Handle::new(tempdir.path().to_path_buf()).unwrap();
+            });
+        });
+    }
     Ok(())
 }
 
@@ -249,6 +283,7 @@ fn multiple_benchmarks(c: &mut Criterion) {
 
 mod clonefile;
 mod torrent_storage;
+use rusqlite::TransactionBehavior;
 use std::time::Duration;
 
 use tempfile::tempdir;

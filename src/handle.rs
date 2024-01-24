@@ -88,7 +88,6 @@ impl Handle {
         let dir = Dir::new(dir)?;
         let mut conn = Connection::open(dir.path().join(MANIFEST_DB_FILE_NAME))?;
         Self::init_sqlite_conn(&mut conn)?;
-        conn.pragma_update(None, "synchronous", "off")?;
         let (deleted_values, receiver) = std::sync::mpsc::sync_channel(10);
         let handle = Self {
             conn: Mutex::new(conn),
@@ -107,11 +106,11 @@ impl Handle {
     }
 
     fn init_sqlite_conn(conn: &mut Connection) -> rusqlite::Result<()> {
+        conn.pragma_update(None, "synchronous", "off")?;
         let get_user_version = |conn: &Connection| -> Result<ManifestUserVersion, _> {
             conn.pragma_query_value(None, "user_version", |row| row.get(0))
         };
         let user_version: ManifestUserVersion = get_user_version(conn)?;
-        conn.pragma_update(None, "synchronous", "off")?;
         if user_version == Self::USER_VERSION {
             return Ok(());
         }

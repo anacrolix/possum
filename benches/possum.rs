@@ -104,47 +104,70 @@ pub fn benchmark_list_keys_fallible(c: &mut Criterion) -> Result<()> {
 // benchmark is always run, even if the benchmark itself isn't.
 pub fn multiple_benchmarks_fallible(c: &mut Criterion) -> Result<()> {
     {
-        let tempdir = test_tempdir("benchmark_read_multiple_keys")?;
-        let handle = Handle::new(tempdir.path)?;
-        let batch_size = 10;
-        let keys = {
-            (0..batch_size)
-                .map(|suffix: i32| suffix.to_ne_bytes())
-                .collect::<Vec<_>>()
-        };
-        let mut writer = handle.new_writer()?;
-        for key in &keys {
-            let mut value = writer.new_value().begin()?;
-            value.copy_from(&key[..])?;
-            writer.stage_write(key.to_vec(), value)?;
-        }
-        writer.commit()?;
         let mut group = c.benchmark_group("batch_read");
         group.bench_function("existing", |b| {
-            b.iter(|| -> () {
-                (|| -> Result<()> {
-                    let mut reader = handle.read()?;
-                    for key in &keys {
-                        assert!(reader.add(key.as_slice())?.is_some());
-                    }
-                    reader.begin()?;
-                    Ok(())
-                })()
-                .unwrap()
-            });
+            (|| -> Result<()> {
+                let tempdir = test_tempdir("benchmark_read_multiple_keys")?;
+                let handle = Handle::new(tempdir.path)?;
+                let batch_size = 10;
+                let keys = {
+                    (0..batch_size)
+                        .map(|suffix: i32| suffix.to_ne_bytes())
+                        .collect::<Vec<_>>()
+                };
+                let mut writer = handle.new_writer()?;
+                for key in &keys {
+                    let mut value = writer.new_value().begin()?;
+                    value.copy_from(&key[..])?;
+                    writer.stage_write(key.to_vec(), value)?;
+                }
+                writer.commit()?;
+                b.iter(|| -> () {
+                    (|| -> Result<()> {
+                        let mut reader = handle.read()?;
+                        for key in &keys {
+                            assert!(reader.add(key.as_slice())?.is_some());
+                        }
+                        reader.begin()?;
+                        Ok(())
+                    })()
+                    .unwrap()
+                });
+                Ok(())
+            })()
+            .unwrap()
         });
         group.bench_function("missing", |b| {
-            b.iter(|| -> () {
-                (|| -> Result<()> {
-                    let mut reader = handle.read()?;
-                    for key in (batch_size..batch_size * 2).map(i32::to_ne_bytes) {
-                        assert!(reader.add(key.as_slice())?.is_none());
-                    }
-                    reader.begin()?;
-                    Ok(())
-                })()
-                .unwrap()
-            });
+            (|| -> Result<()> {
+                let tempdir = test_tempdir("benchmark_read_multiple_keys")?;
+                let handle = Handle::new(tempdir.path)?;
+                let batch_size = 10;
+                let keys = {
+                    (0..batch_size)
+                        .map(|suffix: i32| suffix.to_ne_bytes())
+                        .collect::<Vec<_>>()
+                };
+                let mut writer = handle.new_writer()?;
+                for key in &keys {
+                    let mut value = writer.new_value().begin()?;
+                    value.copy_from(&key[..])?;
+                    writer.stage_write(key.to_vec(), value)?;
+                }
+                writer.commit()?;
+                b.iter(|| -> () {
+                    (|| -> Result<()> {
+                        let mut reader = handle.read()?;
+                        for key in (batch_size..batch_size * 2).map(i32::to_ne_bytes) {
+                            assert!(reader.add(key.as_slice())?.is_none());
+                        }
+                        reader.begin()?;
+                        Ok(())
+                    })()
+                    .unwrap()
+                });
+                Ok(())
+            })()
+            .unwrap()
         });
     }
     {

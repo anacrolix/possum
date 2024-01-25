@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
+use super::*;
 use std::convert::TryFrom;
 use std::ffi::{c_char, CString, NulError};
-use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 /// A PathBuf like implementation for use with C APIs that expect a nul-terminated C string. Should

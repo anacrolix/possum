@@ -259,15 +259,14 @@ fn missing_holes(
     values_file_entry: &WalkEntry,
 ) -> anyhow::Result<Vec<FileRegion>> {
     let file_id = values_file_entry.file_id().unwrap();
-    let file = File::open(&values_file_entry.path)?;
-    let iter =
-        possum::seekhole::Iter::new(file.as_raw_fd()).filter_map(|region_res| match region_res {
-            Ok(walk_reg) if matches!(walk_reg.region_type, RegionType::Hole) => {
-                Some(Ok(walk_reg.into()))
-            }
-            Ok(_) => None,
-            Err(err) => Some(Err(err)),
-        });
+    let mut file = File::open(&values_file_entry.path)?;
+    let iter = possum::seekhole::Iter::new(&mut file).filter_map(|region_res| match region_res {
+        Ok(walk_reg) if matches!(walk_reg.region_type, RegionType::Hole) => {
+            Some(Ok(walk_reg.into()))
+        }
+        Ok(_) => None,
+        Err(err) => Some(Err(err)),
+    });
     let mut binding = tx.file_values(file_id)?;
     let values_iter = binding
         .begin()?

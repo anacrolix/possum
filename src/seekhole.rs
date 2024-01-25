@@ -1,62 +1,19 @@
 //! Syscall wrappers for hole punching, system configuration, hole-seeking ( ͡° ͜ʖ ͡°), file cloning
 //! etc.
 
-use std::ffi::c_int;
-use std::io::Error;
-use std::os::fd::RawFd;
-
-use libc::{ENXIO, SEEK_END};
-use nix::errno::errno;
-use nix::libc::{SEEK_DATA, SEEK_HOLE};
-
 use super::*;
 
-type SeekWhence = c_int;
-
-/// Using i64 rather than off_t to enforce 64-bit offsets (the libc wrappers all use type aliases
-/// anyway).
-pub fn seek_hole_whence(
-    fd: RawFd,
-    offset: i64,
-    whence: impl Into<SeekWhence>,
-) -> io::Result<Option<RegionOffset>> {
-    // lseek64?
-    match lseek(fd, offset, whence) {
-        Ok(offset) => Ok(Some(offset as RegionOffset)),
-        Err(errno) => {
-            if errno == ENXIO {
-                Ok(None)
-            } else {
-                Err(Error::from_raw_os_error(errno))
-            }
-        }
+cfg_if! {
+    if #[cfg(unix)] {
+        mod unix;
+        pub use unix::*;
     }
-}
-
-/// Using i64 rather than off_t to enforce 64-bit offsets (the libc wrappers all use type aliases
-/// anyway).
-fn lseek(fd: RawFd, offset: i64, whence: impl Into<SeekWhence>) -> Result<RegionOffset, i32> {
-    // lseek64?
-    let new_offset = unsafe { super::lseek(fd, offset, whence.into()) };
-    if new_offset == -1 {
-        return Err(errno());
-    }
-    Ok(new_offset as RegionOffset)
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum RegionType {
     Hole,
     Data,
-}
-
-impl From<RegionType> for SeekWhence {
-    fn from(value: RegionType) -> Self {
-        match value {
-            Hole => SEEK_HOLE,
-            Data => SEEK_DATA,
-        }
-    }
 }
 
 impl std::ops::Not for RegionType {
@@ -128,26 +85,26 @@ pub fn file_regions(file: &mut File) -> Result<Vec<Region>> {
     Ok(output)
 }
 
-pub struct Iter {
+pub struct Iter<'a> {
     last_whence: RegionType,
     offset: RegionOffset,
-    fd: RawFd,
+    file: &'a mut File,
 }
 
-impl Iter {
-    pub fn new(fd: RawFd) -> Self {
+impl<'a> Iter<'a> {
+    pub fn new(file: &'a mut File) -> Self {
         Self {
             // We want to start with whatever will most likely result in a positive seek on the
             // first next. Most files start with Data. This might not be the case for long-term
             // values files, but let's find out.
             last_whence: Data,
             offset: 0,
-            fd,
+            file,
         }
     }
 }
 
-impl Iterator for Iter {
+impl Iterator for Iter<'_> {
     type Item = io::Result<Region>;
 
     // We don't enter a final state, I think fused iterators are for that purpose. Plus it's valid
@@ -158,7 +115,7 @@ impl Iterator for Iter {
         // This only runs twice. Once with each whence, starting with the one we didn't try last.
         loop {
             // dbg!(self.offset, whence);
-            match seek_hole_whence(self.fd, self.offset as i64, whence) {
+            match seek_hole_whence(self.file.as_raw_fd(), self.offset as i64, whence) {
                 Ok(Some(offset)) if offset != self.offset => {
                     let region = Region {
                         region_type: !whence,
@@ -180,8 +137,8 @@ impl Iterator for Iter {
         // We do this when both SEEK_DATA and SEEK_HOLE fail to move the offset. If a file ends in
         // data, SEEK_HOLE will always get to the end, but if it ends in a hole, SEEK_HOLE will get
         // stuck. Therefore, SEEK_END will progress past a final hole.
-        match lseek(self.fd, 0, SEEK_END) {
-            Err(errno) => Some(Err(Error::from_raw_os_error(errno))),
+        match self.file.seek(End(0)) {
+            Err(err) => Some(Err(err)),
             Ok(offset) => {
                 if offset == self.offset {
                     None
@@ -204,8 +161,7 @@ impl Iterator for Iter {
 }
 
 fn regions_iter_to_vec(file: &mut File) -> io::Result<Vec<Region>> {
-    let fd = file.as_raw_fd();
-    let itered: Vec<_> = Iter::new(fd).collect::<io::Result<Vec<_>>>()?;
+    let itered: Vec<_> = Iter::new(file).collect::<io::Result<Vec<_>>>()?;
     Ok(itered)
 }
 
@@ -219,8 +175,7 @@ mod tests {
     use crate::testing::write_random_tempfile;
 
     fn get_regions(file: &mut File) -> Result<Vec<Region>> {
-        let fd = file.as_raw_fd();
-        let itered: Vec<_> = Iter::new(fd).collect::<io::Result<Vec<_>>>()?;
+        let itered: Vec<_> = Iter::new(file).collect::<io::Result<Vec<_>>>()?;
         let vec = file_regions(file)?;
         assert_eq!(itered, vec);
         Ok(vec)

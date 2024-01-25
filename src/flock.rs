@@ -1,29 +1,16 @@
-use std::fs::File;
-use std::os::fd::AsRawFd;
+use super::*;
 
-use nix::errno::Errno;
-use nix::fcntl::FlockArg;
-
-const EWOULDBLOCK: Errno = Errno::EWOULDBLOCK;
-
-pub(crate) fn try_lock_file_exclusive(file: &mut File) -> nix::Result<bool> {
-    try_lock_file(file, LockExclusiveNonblock)
+cfg_if! {
+    if #[cfg(unix)] {
+        mod unix;
+        pub use unix::*;
+    }
 }
 
-pub use nix::fcntl::FlockArg::*;
+use std::fs::File;
 
-pub fn try_lock_file(file: &mut File, arg: FlockArg) -> nix::Result<bool> {
-    let flock_res = nix::fcntl::flock(file.as_raw_fd(), arg);
-    match flock_res {
-        Ok(()) => Ok(true),
-        Err(errno) => {
-            if errno == EWOULDBLOCK {
-                Ok(false)
-            } else {
-                Err(errno)
-            }
-        }
-    }
+pub(crate) fn try_lock_file_exclusive(file: &mut File) -> anyhow::Result<bool> {
+    try_lock_file(file, LockExclusiveNonblock).map_err(Into::into)
 }
 
 #[cfg(test)]

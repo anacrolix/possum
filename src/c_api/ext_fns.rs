@@ -1,5 +1,4 @@
 use std::ffi::{c_char, CStr, OsStr};
-use std::os::fd::RawFd;
 use std::path::PathBuf;
 use std::ptr::null_mut;
 
@@ -91,7 +90,7 @@ pub extern "C" fn possum_start_new_value(
 }
 
 #[no_mangle]
-pub extern "C" fn possum_value_writer_fd(value: *mut PossumValueWriter) -> RawFd {
+pub extern "C" fn possum_value_writer_fd(value: *mut PossumValueWriter) -> RawFileHandle {
     unsafe { &mut *value }.get_file().unwrap().as_raw_fd()
 }
 

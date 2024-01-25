@@ -233,7 +233,7 @@ impl Handle {
         Ok(deleted)
     }
 
-    pub fn clone_from_fd(&mut self, key: Vec<u8>, fd: RawFd) -> Result<u64> {
+    pub fn clone_from_fd(&mut self, key: Vec<u8>, fd: RawFileHandle) -> Result<u64> {
         let mut writer = self.new_writer()?;
         let mut value = writer.new_value().clone_fd(fd, 0)?;
         let n = value.value_length()?;

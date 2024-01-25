@@ -10,6 +10,7 @@ mod owned_cell;
 mod pathconf;
 pub mod punchfile;
 pub mod seekhole;
+mod sys;
 #[cfg(feature = "testing")]
 pub mod testing;
 #[cfg(test)]
@@ -25,13 +26,12 @@ use std::io::SeekFrom::{End, Start};
 use std::io::{ErrorKind, Read, Seek, Write};
 use std::num::TryFromIntError;
 use std::ops::{Deref, DerefMut};
-use std::os::fd::{AsRawFd, RawFd};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::str;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 use std::{fs, io};
+use sys::*;
 
 use anyhow::Result;
 use anyhow::{bail, Context};
@@ -44,7 +44,6 @@ use exclusive_file::ExclusiveFile;
 pub use handle::Handle;
 use log::*;
 use memmap2::Mmap;
-use nix::fcntl::FlockArg::{LockExclusiveNonblock, LockSharedNonblock};
 use num::Integer;
 use positioned_io::ReadAt;
 use rand::Rng;
@@ -108,7 +107,7 @@ pub struct BeginWriteValue<'writer, 'handle> {
 }
 
 impl BeginWriteValue<'_, '_> {
-    pub fn clone_fd(self, fd: RawFd, _flags: u32) -> Result<ValueWriter> {
+    pub fn clone_fd(self, fd: RawFileHandle, _flags: u32) -> Result<ValueWriter> {
         let dst_path = loop {
             let dst_path = random_file_name_in_dir(self.batch.handle.dir.path());
             match fclonefile_noflags(fd, &dst_path) {
@@ -979,16 +978,4 @@ fn inc_big_endian_array(arr: &mut [u8]) -> bool {
         }
     }
     false
-}
-
-// These are typedefs for 64bit file syscalls.
-
-cfg_if! {
-    if #[cfg(not(target_pointer_width = "64"))] {
-        use libc::off64_t as off_t;
-        use nix::libc::lseek64 as lseek;
-    } else {
-        use libc::off_t;
-        use nix::libc::lseek;
-    }
 }

@@ -6,7 +6,6 @@ use anyhow::Result;
 
 use self::test;
 use super::*;
-use crate::seekhole::*;
 use crate::testing::*;
 
 #[test]

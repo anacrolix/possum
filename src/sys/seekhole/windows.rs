@@ -1,7 +1,5 @@
 use super::*;
 
-struct SeekWhence;
-
 pub fn seek_hole_whence(
     file: &mut File,
     offset: i64,

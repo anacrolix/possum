@@ -170,7 +170,6 @@ fn regions_iter_to_vec(file: &mut File) -> std::io::Result<Vec<Region>> {
 #[cfg(test)]
 mod tests {
     use std::env::temp_dir;
-    use std::os::fd::AsRawFd;
 
     use super::*;
     use crate::pathconf::path_min_hole_size;
@@ -200,7 +199,7 @@ mod tests {
                 end: min_hole_size
             }]
         );
-        punchfile(file.as_raw_fd(), 0, min_hole_size as libc::off_t)?;
+        punchfile(&file, 0, min_hole_size as libc::off_t)?;
         file.seek(Start(0))?;
         let regions: Vec<_> = get_regions(file.as_file_mut())?;
         assert_eq!(

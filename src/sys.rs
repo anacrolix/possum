@@ -10,7 +10,6 @@ pub use flock::*;
 pub use punchfile::*;
 pub use seekhole::*;
 
-use std::ffi::*;
 use std::fs::File;
 use std::io::SeekFrom::*;
 
@@ -29,6 +28,7 @@ cfg_if! {
         pub use nix::errno::errno;
         pub use nix::errno::Errno;
         pub use std::os::fd::RawFd as RawFileHandle;
+        pub use std::os::fd::AsFd;
     }
 }
 

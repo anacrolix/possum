@@ -5,9 +5,10 @@ use std::io::Read;
 
 use anyhow::Result;
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use possum::flock::try_lock_file;
+use possum::sys::flock;
+use possum::sys::flock::try_lock_file;
 use possum::testing::test_tempdir;
-use possum::{flock, Handle};
+use possum::Handle;
 
 pub fn benchmark_read_fallible(c: &mut Criterion) -> anyhow::Result<()> {
     let tempdir = test_tempdir("benchmark_get_exists")?;

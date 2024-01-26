@@ -46,7 +46,6 @@ use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRe
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{params, CachedStatement, Connection, Statement};
 use sys::flock;
-use sys::*;
 use tempfile::TempDir;
 #[cfg(test)]
 pub use test_log::test;
@@ -54,7 +53,6 @@ pub use walk::Entry as WalkEntry;
 use ErrorKind::InvalidInput;
 
 use crate::item::Item;
-use crate::sys::*;
 use crate::walk::walk_dir;
 
 /// Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.

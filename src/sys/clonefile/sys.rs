@@ -1,3 +1,4 @@
+#![allow(unused_imports)]
 use super::*;
 
 use std::ffi::CString;
@@ -34,7 +35,7 @@ fn last_errno() -> crate::Error {
 pub fn clonefile(src_path: &Path, dst_path: &Path) -> PubResult<()> {
     cfg_if! {
         if #[cfg(windows)] {
-
+            unimplemented!();
         } else if #[cfg(not(target_os = "linux"))] {
             let src_buf = CString::new(src_path.as_os_str().as_bytes()).unwrap();
             let dst_buf = CString::new(dst_path.as_os_str().as_bytes()).unwrap();
@@ -56,6 +57,7 @@ pub fn clonefile(src_path: &Path, dst_path: &Path) -> PubResult<()> {
 pub fn fclonefile_noflags(src_file: &File, dst_path: &Path) -> PubResult<()> {
     cfg_if! {
         if #[cfg(windows)] {
+            use std::ffi::c_void;
             let dst_file = File::create(dst_path)?;
             let dst_handle = dst_file.as_raw_handle();
             let src_metadata = src_file.metadata()?;
@@ -94,7 +96,7 @@ pub fn fclonefile_noflags(src_file: &File, dst_path: &Path) -> PubResult<()> {
             // assert!(dst_path.is_absolute());
             let dst_buf = CPathBuf::try_from(dst_path).unwrap();
             let dst = dst_buf.as_ptr();
-            let val = unsafe { libc::fclonefileat(src_fd.as_raw_fd(), -1, dst, 0) };
+            let val = unsafe { libc::fclonefileat(src_file.as_raw_fd(), -1, dst, 0) };
             if val != 0 {
                 return Err(last_errno());
             }

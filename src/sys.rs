@@ -21,6 +21,7 @@ cfg_if! {
         use windows::Win32::System::IO::DeviceIoControl;
         use windows::Win32::Foundation::HANDLE;
         use std::os::windows::io::AsRawHandle;
+        use windows::Win32::Storage::FileSystem::*;
     } else if #[cfg(unix)] {
         pub use std::os::unix::prelude::OsStrExt;
         pub use std::os::unix::ffi::OsStringExt;

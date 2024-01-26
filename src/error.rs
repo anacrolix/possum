@@ -29,3 +29,10 @@ impl Error {
         }
     }
 }
+
+#[cfg(windows)]
+impl From<windows::core::Error> for Error {
+    fn from(from: windows::core::Error) -> Self {
+        anyhow::Error::from(from).into()
+    }
+}

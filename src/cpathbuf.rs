@@ -15,7 +15,7 @@ impl TryFrom<&Path> for CPathBuf {
     fn try_from(value: &Path) -> Result<Self, Self::Error> {
         // I wonder if checking is necessary. If Path must have an inner OS implementation, can we
         // know for sure there are no interior nul bytes?
-        Ok(Self(CString::new(value.as_os_str().as_bytes())?))
+        Ok(Self(CString::new(value.as_os_str().as_encoded_bytes())?))
     }
 }
 

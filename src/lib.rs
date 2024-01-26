@@ -6,7 +6,7 @@ mod handle;
 mod item;
 mod owned_cell;
 mod pathconf;
-mod sys;
+pub mod sys;
 #[cfg(feature = "testing")]
 pub mod testing;
 #[cfg(test)]
@@ -78,7 +78,7 @@ impl FileClone {
         if let Some(mmap) = mmap_opt {
             return Ok(mmap);
         }
-        let mmap = unsafe { Mmap::map(self.file.as_raw_fd()) }?;
+        let mmap = unsafe { Mmap::map(&self.file) }?;
         Ok(mmap_opt.insert(mmap))
     }
 }
@@ -101,10 +101,10 @@ pub struct BeginWriteValue<'writer, 'handle> {
 }
 
 impl BeginWriteValue<'_, '_> {
-    pub fn clone_fd(self, fd: RawFileHandle, _flags: u32) -> Result<ValueWriter> {
+    pub fn clone_file(self, file: &File, _flags: u32) -> Result<ValueWriter> {
         let dst_path = loop {
             let dst_path = random_file_name_in_dir(self.batch.handle.dir.path());
-            match fclonefile_noflags(fd, &dst_path) {
+            match fclonefile_noflags(file, &dst_path) {
                 Err(err) if err.is_file_already_exists() => continue,
                 Err(err) => return Err(err.into()),
                 Ok(()) => break dst_path,
@@ -734,7 +734,7 @@ fn random_file_name() -> OsString {
             .sample_iter(rand::distributions::Alphanumeric)
             .take(FILE_NAME_RAND_LENGTH),
     );
-    OsString::from_vec(begin)
+    unsafe { OsString::from_encoded_bytes_unchecked(begin) }
 }
 
 pub const MANIFEST_DB_FILE_NAME: &str = "manifest.db";
@@ -873,7 +873,7 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
     }
     assert!(length > 0);
     assert_eq!(offset % block_size, 0);
-    punchfile(file.as_raw_fd(), offset, length).with_context(|| format!("length {}", length))?;
+    punchfile(&file, offset, length).with_context(|| format!("length {}", length))?;
     // fcntl(file.as_raw_fd(), nix::fcntl::F_FULLFSYNC)?;
     // file.flush()?;
     if check_holes {
@@ -885,7 +885,7 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
 }
 
 pub fn check_hole(file: &mut File, offset: u64, length: u64) -> Result<()> {
-    match seek_hole_whence(file.as_raw_fd(), offset as i64, seekhole::Data)? {
+    match seek_hole_whence(file, offset as i64, seekhole::Data)? {
         // Data starts after the hole we just punched.
         Some(seek_offset) if seek_offset >= offset + length => Ok(()),
         // There's no data after the hole we just punched.

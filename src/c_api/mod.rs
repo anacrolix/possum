@@ -159,3 +159,14 @@ impl From<PossumLimits> for handle::Limits {
         }
     }
 }
+
+/// Converts from types to the RawFileHandle exposed in the Possum C API.
+trait AsRawFileHandle {
+    fn as_raw_file_handle(&self) -> RawFileHandle;
+}
+
+impl AsRawFileHandle for File {
+    fn as_raw_file_handle(&self) -> RawFileHandle {
+        todo!()
+    }
+}

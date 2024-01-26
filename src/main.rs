@@ -1,15 +1,13 @@
 use std::cmp::max;
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
-use std::os::fd::AsRawFd;
-use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, bail, Context};
 use itertools::Itertools;
 use log::info;
-use possum::punchfile::punchfile;
-use possum::seekhole::{file_regions, Region, RegionType};
+use possum::sys::punchfile::punchfile;
+use possum::sys::seekhole::{file_regions, Region, RegionType};
 use possum::tx::ReadTransactionRef;
 use possum::{ceil_multiple, check_hole, Handle, NonzeroValueLocation, WalkEntry};
 
@@ -76,7 +74,7 @@ fn main() -> anyhow::Result<()> {
             length,
         } => {
             let file = OpenOptions::new().write(true).open(file)?;
-            punchfile(file, offset, length)?;
+            punchfile(&file, offset, length)?;
             Ok(())
         }
         Database { dir, command } => {
@@ -89,7 +87,7 @@ fn main() -> anyhow::Result<()> {
                         .file_name()
                         .ok_or_else(|| anyhow!("can't extract file name"))?;
                     let file = File::open(&file).with_context(|| format!("opening {:?}", key))?;
-                    handle.single_write_from(key.to_os_string().into_vec(), file)?;
+                    handle.single_write_from(key.to_os_string().into_encoded_bytes(), file)?;
                     Ok(())
                 }
                 ListKeys { prefix } => {
@@ -154,9 +152,9 @@ fn main() -> anyhow::Result<()> {
                             // Make sure nobody could be writing to the file. It should be possible
                             // to punch holes before the last value despite this (just as greedy
                             // start hole punching occurs during regular key deletes).
-                            possum::flock::try_lock_file(
+                            possum::sys::flock::try_lock_file(
                                 &mut file,
-                                possum::flock::LockExclusiveNonblock,
+                                possum::sys::flock::LockExclusiveNonblock,
                             )?;
                             for FileRegion {
                                 mut start,
@@ -182,8 +180,8 @@ fn main() -> anyhow::Result<()> {
                                     length,
                                     start % handle.block_size(),
                                 );
-                                possum::punchfile::punchfile(
-                                    file.as_raw_fd(),
+                                possum::sys::punchfile::punchfile(
+                                    &file,
                                     start as i64,
                                     length as i64,
                                 )?;
@@ -260,13 +258,14 @@ fn missing_holes(
 ) -> anyhow::Result<Vec<FileRegion>> {
     let file_id = values_file_entry.file_id().unwrap();
     let mut file = File::open(&values_file_entry.path)?;
-    let iter = possum::seekhole::Iter::new(&mut file).filter_map(|region_res| match region_res {
-        Ok(walk_reg) if matches!(walk_reg.region_type, RegionType::Hole) => {
-            Some(Ok(walk_reg.into()))
-        }
-        Ok(_) => None,
-        Err(err) => Some(Err(err)),
-    });
+    let iter =
+        possum::sys::seekhole::Iter::new(&mut file).filter_map(|region_res| match region_res {
+            Ok(walk_reg) if matches!(walk_reg.region_type, RegionType::Hole) => {
+                Some(Ok(walk_reg.into()))
+            }
+            Ok(_) => None,
+            Err(err) => Some(Err(err)),
+        });
     let mut binding = tx.file_values(file_id)?;
     let values_iter = binding
         .begin()?

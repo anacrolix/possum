@@ -50,7 +50,7 @@ impl From<String> for FileId {
 
 impl From<Vec<u8>> for FileId {
     fn from(value: Vec<u8>) -> Self {
-        OsString::from_vec(value).into()
+        unsafe { OsString::from_encoded_bytes_unchecked(value) }.into()
     }
 }
 
@@ -62,7 +62,9 @@ impl FileIdFancy {
 
 impl rusqlite::ToSql for FileIdFancy {
     fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        Ok(ToSqlOutput::Borrowed(ValueRef::Blob(self.0.as_bytes())))
+        Ok(ToSqlOutput::Borrowed(ValueRef::Blob(
+            self.0.as_encoded_bytes(),
+        )))
     }
 }
 

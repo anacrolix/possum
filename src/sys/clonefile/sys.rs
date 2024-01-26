@@ -18,6 +18,7 @@ cfg_if! {
     }
 }
 
+#[cfg(unix)]
 // Here and not in crate::Error because ENOTSUP has special meaning for clonefile.
 fn last_errno() -> crate::Error {
     let errno = errno();
@@ -52,28 +53,32 @@ pub fn clonefile(src_path: &Path, dst_path: &Path) -> PubResult<()> {
 }
 
 // fclonefileat but the dst is probably supposed to be an absolute path.
-pub fn fclonefile_noflags(src_file: &mut File, dst_path: &Path) -> PubResult<()> {
+pub fn fclonefile_noflags(src_file: &File, dst_path: &Path) -> PubResult<()> {
     cfg_if! {
         if #[cfg(windows)] {
             let dst_file = File::create(dst_path)?;
             let dst_handle = dst_file.as_raw_handle();
-            let ByteCount = src_file.seek(End(0))?;
+            let src_metadata = src_file.metadata()?;
+            let ByteCount = src_metadata.len() as i64;
             let data = DUPLICATE_EXTENTS_DATA {
-                FileHandle: src_file.as_raw_handle(),
+                FileHandle: HANDLE(src_file.as_raw_handle() as isize),
                 SourceFileOffset: 0,
                 TargetFileOffset: 0,
                 ByteCount,
             };
-            DeviceIoControl(
-                dst_file.as_raw_handle(),
+            let data_ptr = &data as *const _ as *const c_void;
+            unsafe {
+                DeviceIoControl
+            (
+                HANDLE(dst_file.as_raw_handle() as isize),
                 FSCTL_DUPLICATE_EXTENTS_TO_FILE,
-                &data,
-                std::mem::size_of(data),
+                Some(data_ptr),
+                std::mem::size_of_val(&data) as u32,
                 None,
                 0,
                 None,
                 None,
-            )?;
+            )}.map_err(anyhow::Error::from)?;
 
         } else if #[cfg(target_os = "linux")] {
             let dst_file = File::create(dst_path)?;

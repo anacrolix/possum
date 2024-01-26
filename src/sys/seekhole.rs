@@ -49,13 +49,12 @@ impl Region {
 
 /// Mutable because the File offset may be changed.
 pub fn file_regions(file: &mut File) -> Result<Vec<Region>> {
-    let fd = file.as_raw_fd();
     let mut offsets = vec![];
     {
         let mut offset = 0;
         let mut whence = Data;
         loop {
-            let new_offset = match seek_hole_whence(fd, offset as i64, whence)? {
+            let new_offset = match seek_hole_whence(file, offset as i64, whence)? {
                 Some(a) => a,
                 None => match whence {
                     Hole => break,
@@ -118,7 +117,7 @@ impl Iterator for Iter<'_> {
         // This only runs twice. Once with each whence, starting with the one we didn't try last.
         loop {
             // dbg!(self.offset, whence);
-            match seek_hole_whence(self.file.as_raw_fd(), self.offset as i64, whence) {
+            match seek_hole_whence(self.file, self.offset as i64, whence) {
                 Ok(Some(offset)) if offset != self.offset => {
                     let region = Region {
                         region_type: !whence,

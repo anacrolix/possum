@@ -13,12 +13,12 @@ type SeekWhence = c_int;
 /// Using i64 rather than off_t to enforce 64-bit offsets (the libc wrappers all use type aliases
 /// anyway).
 pub fn seek_hole_whence(
-    fd: RawFd,
+    file: &mut File,
     offset: i64,
     whence: impl Into<SeekWhence>,
 ) -> io::Result<Option<RegionOffset>> {
     // lseek64?
-    match lseek(fd, offset, whence) {
+    match lseek(file.as_raw_fd(), offset, whence) {
         Ok(offset) => Ok(Some(offset as RegionOffset)),
         Err(errno) => {
             if errno == ENXIO {

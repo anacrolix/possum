@@ -98,7 +98,10 @@ pub extern "C" fn possum_start_new_value(
 
 #[no_mangle]
 pub extern "C" fn possum_value_writer_fd(value: *mut PossumValueWriter) -> RawFileHandle {
-    unsafe { &mut *value }.get_file().unwrap().as_raw_fd()
+    unsafe { &mut *value }
+        .get_file()
+        .unwrap()
+        .as_raw_file_handle()
 }
 
 #[no_mangle]

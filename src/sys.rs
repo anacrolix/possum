@@ -7,8 +7,10 @@ pub mod seekhole;
 
 pub use clonefile::*;
 pub use flock::*;
+pub use punchfile::*;
 pub use seekhole::*;
 
+use std::ffi::*;
 use std::fs::File;
 use std::io::SeekFrom::*;
 
@@ -18,6 +20,8 @@ cfg_if! {
         pub use std::os::windows::io::AsRawHandle as AsRawFd;
         use windows::Win32::System::Ioctl::*;
         use windows::Win32::System::IO::DeviceIoControl;
+        use windows::Win32::Foundation::HANDLE;
+        use std::os::windows::io::AsRawHandle;
     } else if #[cfg(unix)] {
         pub use std::os::unix::prelude::OsStrExt;
         pub use std::os::unix::ffi::OsStringExt;

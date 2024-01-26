@@ -108,7 +108,7 @@ impl<'a> Iter<'a> {
 }
 
 impl Iterator for Iter<'_> {
-    type Item = io::Result<Region>;
+    type Item = std::io::Result<Region>;
 
     // We don't enter a final state, I think fused iterators are for that purpose. Plus it's valid
     // for an iterator to start working again if the file changes.
@@ -163,8 +163,8 @@ impl Iterator for Iter<'_> {
     }
 }
 
-fn regions_iter_to_vec(file: &mut File) -> io::Result<Vec<Region>> {
-    let itered: Vec<_> = Iter::new(file).collect::<io::Result<Vec<_>>>()?;
+fn regions_iter_to_vec(file: &mut File) -> std::io::Result<Vec<Region>> {
+    let itered: Vec<_> = Iter::new(file).collect::<std::io::Result<Vec<_>>>()?;
     Ok(itered)
 }
 

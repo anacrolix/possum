@@ -15,8 +15,6 @@ use crate::cpathbuf::CPathBuf;
 use crate::PubResult;
 cfg_if! {
     if #[cfg(windows)] {
-        use windows::Win32::System::Ioctl::*;
-        use windows::Win32::System::IO::DeviceIoControl;
     }
 }
 

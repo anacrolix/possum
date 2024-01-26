@@ -1,15 +1,11 @@
 mod c_api;
-pub mod clonefile;
 mod cpathbuf;
 mod error;
 mod exclusive_file;
-pub mod flock;
 mod handle;
 mod item;
 mod owned_cell;
 mod pathconf;
-pub mod punchfile;
-pub mod seekhole;
 mod sys;
 #[cfg(feature = "testing")]
 pub mod testing;
@@ -37,7 +33,6 @@ use anyhow::Result;
 use anyhow::{bail, Context};
 use cfg_if::cfg_if;
 use chrono::NaiveDateTime;
-use clonefile::clonefile;
 use cpathbuf::CPathBuf;
 pub use error::Error;
 use exclusive_file::ExclusiveFile;
@@ -50,17 +45,16 @@ use rand::Rng;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{params, CachedStatement, Connection, Statement};
+use sys::flock;
+use sys::*;
 use tempfile::TempDir;
 #[cfg(test)]
 pub use test_log::test;
 pub use walk::Entry as WalkEntry;
 use ErrorKind::InvalidInput;
 
-use crate::clonefile::fclonefile_noflags;
-use crate::flock::*;
 use crate::item::Item;
-use crate::punchfile::punchfile;
-use crate::seekhole::seek_hole_whence;
+use crate::sys::*;
 use crate::walk::walk_dir;
 
 /// Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.

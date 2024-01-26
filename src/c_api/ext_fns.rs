@@ -16,7 +16,14 @@ pub extern "C" fn possum_new(path: *const c_char) -> *mut Handle {
         warn!("error initing env_logger: {}", err);
     }
     let c_str = unsafe { CStr::from_ptr(path) };
-    let path_buf: PathBuf = OsStr::from_bytes(c_str.to_bytes()).into();
+    cfg_if::cfg_if! {
+        if #[cfg(windows)] {
+            let str = ::std::str::from_utf8(c_str.to_bytes()).expect("keep your surrogates paired");
+            let path_buf = PathBuf::from(str);
+        } else {
+            let path_buf: PathBuf = OsStr::from_bytes(c_str.to_bytes()).into();
+        }
+    }
     let handle = match Handle::new(path_buf.clone()) {
         Ok(handle) => handle,
         Err(err) => {

@@ -14,7 +14,7 @@ pub(crate) struct ExclusiveFile {
 }
 
 impl ExclusiveFile {
-    pub(crate) fn open(path: PathBuf) -> Result<Self> {
+    pub(crate) fn open(path: PathBuf) -> Result<Option<Self>> {
         let file = OpenOptions::new().append(true).open(&path)?;
         Self::from_file(file, path.file_name().expect("file name").to_owned().into())
     }
@@ -37,23 +37,23 @@ impl ExclusiveFile {
                 Ok(file) => file,
                 Err(err) => return Err(err.into()),
             };
-            if try_lock_file_exclusive(&mut file)? {
-                return Self::from_file(file, id);
+            if let Some(exclusive_file) = Self::from_file(file, id)? {
+                return Ok(exclusive_file);
             }
         }
         bail!("gave up trying to create exclusive file")
     }
 
-    pub(crate) fn from_file(mut file: File, id: FileId) -> anyhow::Result<ExclusiveFile> {
+    pub(crate) fn from_file(mut file: File, id: FileId) -> anyhow::Result<Option<ExclusiveFile>> {
         if !try_lock_file_exclusive(&mut file)? {
-            bail!("file is locked");
+            return Ok(None);
         }
         let end = file.seek(End(0))?;
-        Ok(ExclusiveFile {
+        Ok(Some(ExclusiveFile {
             inner: file,
             id,
             last_committed_offset: end,
-        })
+        }))
     }
 
     pub(crate) fn committed(&mut self) -> io::Result<()> {

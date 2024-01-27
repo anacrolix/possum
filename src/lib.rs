@@ -108,8 +108,9 @@ impl BeginWriteValue<'_, '_> {
                 Ok(()) => break dst_path,
             }
         };
-        // TODO: Delete the file if this errors?
-        let exclusive_file = ExclusiveFile::open(dst_path)?;
+        // Should we delete this file if we fail to open it exclusively? I think it is possible that someone else
+        // could open it before us. In that case we probably want to punch out the part we cloned and move on.
+        let exclusive_file = ExclusiveFile::open(dst_path)?.unwrap();
         Ok(ValueWriter {
             exclusive_file,
             value_file_offset: 0,

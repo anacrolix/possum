@@ -66,7 +66,7 @@ impl Handle {
                 continue;
             }
             if let Ok(ef) = ExclusiveFile::open(entry.path()) {
-                return Ok(Some(ef));
+                return Ok(ef);
             }
         }
         Ok(None)

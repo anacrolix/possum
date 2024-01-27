@@ -28,7 +28,7 @@ pub fn try_lock_file(file: &mut File, arg: FlockArg) -> PubResult<bool> {
     // ERROR_SUCCESS Windows error.
     let convert = |res: ::windows::core::Result<()>| match res {
         Ok(()) => Ok(true),
-        Err(err) if err.code().is_ok() || err.code()==ERROR_LOCK_VIOLATION.into() => Ok(false),
+        Err(err) if err.code().is_ok() || err.code() == ERROR_LOCK_VIOLATION.into() => Ok(false),
         Err(err) => Err(err.into()),
     };
     if matches!(arg, Unlock | UnlockNonblock) {
@@ -41,7 +41,8 @@ pub fn try_lock_file(file: &mut File, arg: FlockArg) -> PubResult<bool> {
     if matches!(arg, LockSharedNonblock | LockExclusiveNonblock) {
         dwflags |= LOCKFILE_FAIL_IMMEDIATELY;
     }
-    let result = convert(unsafe { LockFileEx(handle, dwflags, 0, lock_low, lock_high, lpoverlapped) });
-    unsafe{CloseHandle(event)}.unwrap();
+    let result =
+        convert(unsafe { LockFileEx(handle, dwflags, 0, lock_low, lock_high, lpoverlapped) });
+    unsafe { CloseHandle(event) }.unwrap();
     result
 }

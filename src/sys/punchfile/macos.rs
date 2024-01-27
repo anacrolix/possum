@@ -2,7 +2,7 @@ use super::*;
 use std::io;
 use std::io::Error;
 
-pub fn punchfile(file: impl AsFd, offset: off_t, length: off_t) -> io::Result<()> {
+pub fn punchfile(file: impl AsFd, offset: i64, length: i64) -> io::Result<()> {
     // TODO: On solaris we want fcntl(F_FREESP);
     let punchhole = libc::fpunchhole_t {
         fp_flags: 0,

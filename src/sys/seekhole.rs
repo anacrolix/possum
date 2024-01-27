@@ -6,10 +6,10 @@ use super::*;
 cfg_if! {
     if #[cfg(unix)] {
         mod unix;
-        pub use unix::*;
+        pub use self::unix::*;
     } else if #[cfg(windows)] {
         mod windows;
-        pub use windows::*;
+        pub use self::windows::*;
     }
 }
 
@@ -189,8 +189,8 @@ mod tests {
         if min_hole_size <= 1 {
             min_hole_size = 2;
         }
-        let mut file = write_random_tempfile(min_hole_size)?;
-        let regions = get_regions(file.as_file_mut())?;
+        let mut temp_file = write_random_tempfile(min_hole_size)?;
+        let regions = get_regions(temp_file.as_file_mut())?;
         assert_eq!(
             regions,
             vec![Region {
@@ -199,9 +199,9 @@ mod tests {
                 end: min_hole_size
             }]
         );
-        punchfile(&file, 0, min_hole_size as libc::off_t)?;
-        file.seek(Start(0))?;
-        let regions: Vec<_> = get_regions(file.as_file_mut())?;
+        punchfile(temp_file.as_file(), 0, min_hole_size as i64)?;
+        temp_file.seek(Start(0))?;
+        let regions: Vec<_> = get_regions(temp_file.as_file_mut())?;
         assert_eq!(
             regions,
             vec![Region {

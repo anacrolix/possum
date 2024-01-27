@@ -15,20 +15,21 @@ use std::io::SeekFrom::*;
 
 cfg_if! {
     if #[cfg(windows)] {
-        pub use std::os::windows::io::RawHandle as RawFileHandle;
-        pub use std::os::windows::io::AsRawHandle as AsRawFd;
-        use windows::Win32::System::Ioctl::*;
-        use windows::Win32::System::IO::DeviceIoControl;
-        use windows::Win32::Foundation::HANDLE;
+        mod windows;
+        pub use windows::*;
+        pub use ::windows::Win32::System::Ioctl::*;
+        use ::windows::Win32::System::IO::DeviceIoControl;
+        use ::windows::Win32::Foundation::HANDLE;
         use std::os::windows::io::AsRawHandle;
-        use windows::Win32::Storage::FileSystem::*;
+        use ::windows::Win32::Storage::FileSystem::*;
     } else if #[cfg(unix)] {
+        mod unix;
+        pub use unix::*;
         pub use std::os::unix::prelude::OsStrExt;
         pub use std::os::unix::ffi::OsStringExt;
         pub use std::os::fd::AsRawFd;
         pub use nix::errno::errno;
         pub use nix::errno::Errno;
-        pub use std::os::fd::RawFd as RawFileHandle;
         pub use std::os::fd::AsFd;
     }
 }

@@ -3,10 +3,10 @@ use super::*;
 cfg_if! {
     if #[cfg(unix)] {
         mod unix;
-        pub use unix::*;
+        pub use self::unix::*;
     } else if #[cfg(windows)] {
         mod windows;
-        pub use windows::*;
+        pub use self::windows::*;
     }
 }
 
@@ -18,8 +18,6 @@ pub(crate) fn try_lock_file_exclusive(file: &mut File) -> anyhow::Result<bool> {
 
 #[cfg(test)]
 mod tests {
-    use std::os::fd::FromRawFd;
-
     use super::*;
     use crate::test;
 
@@ -32,7 +30,7 @@ mod tests {
         let mut second_handle = File::open(file.path())?;
         // You can't take the lock from another file instance.
         assert!(!try_lock_file_exclusive(&mut second_handle)?);
-        let mut file_dup = unsafe { File::from_raw_fd(libc::dup(file.as_raw_fd())) };
+        let mut file_dup = file.as_file().try_clone()?;
         assert!(!try_lock_file_exclusive(&mut second_handle)?);
         // You can take the existing lock from a file descriptor to the same file.
         assert!(try_lock_file_exclusive(&mut file_dup)?);

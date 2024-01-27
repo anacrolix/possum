@@ -167,6 +167,13 @@ trait AsRawFileHandle {
 
 impl AsRawFileHandle for File {
     fn as_raw_file_handle(&self) -> RawFileHandle {
-        todo!()
+        cfg_if! {
+            if #[cfg(windows)] {
+                use std::os::windows::io::AsRawHandle;
+                self.as_raw_handle() as RawFileHandle
+            } else {
+                self.as_raw_fd() as isize
+            }
+        }
     }
 }

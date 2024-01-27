@@ -8,7 +8,6 @@ use std::io::SeekFrom::Start;
 use std::io::{Seek, Write};
 use std::ops::Bound::Included;
 use std::ops::{RangeBounds, RangeInclusive};
-use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::thread::sleep;
@@ -283,13 +282,7 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
         if entry.entry_type != ValuesFile {
             continue;
         }
-        let metadata = std::fs::metadata(&entry.path)?;
-        //dbg!(metadata.blocks(), metadata.blksize());
-        values_file_total_len += if false {
-            metadata.len()
-        } else {
-            metadata.blocks() * 512
-        };
+        values_file_total_len += possum::sys::path_disk_allocation(&entry.path)?;
     }
     if false {
         dbg!(values_file_total_len);

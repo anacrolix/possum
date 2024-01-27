@@ -7,7 +7,7 @@ cfg_if! {
         pub use linux::*;
     } else if #[cfg(windows)] {
         mod windows;
-        pub use windows::*;
+        pub use self::windows::*;
     } else {
         mod macos;
         pub use macos::*;

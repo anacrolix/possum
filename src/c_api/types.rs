@@ -1,11 +1,11 @@
+use crate::BatchWriter;
+use libc::size_t;
 use std::ffi::c_char;
 
-use libc::size_t;
-
-use crate::BatchWriter;
-
-pub type PossumWriter = BatchWriter<'static>;
 pub(crate) type PossumOffset = u64;
+
+pub type RawFileHandle = libc::intptr_t;
+pub type PossumWriter = BatchWriter<'static>;
 
 #[repr(C)]
 #[derive(Debug)]

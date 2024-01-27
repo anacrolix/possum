@@ -9,7 +9,7 @@ pub fn query_allocated_ranges(
     file: &File,
     input: &[FILE_ALLOCATED_RANGE_BUFFER],
     output: &mut AllocatedRanges,
-) -> Result<()> {
+) -> ::windows::core::Result<()> {
     let handle = std_handle_to_windows(file.as_raw_handle());
     let out_buffer =
         unsafe { std::slice::from_raw_parts_mut(output.as_mut_ptr(), output.capacity()) };

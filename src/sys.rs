@@ -18,10 +18,11 @@ cfg_if! {
         mod windows;
         pub use windows::*;
         pub use ::windows::Win32::System::Ioctl::*;
-        use ::windows::Win32::System::IO::DeviceIoControl;
-        use ::windows::Win32::Foundation::HANDLE;
+        use ::windows::Win32::Foundation::*;
         use std::os::windows::io::AsRawHandle;
         use ::windows::Win32::Storage::FileSystem::*;
+        use ::windows::core::*;
+        use ::windows::Win32::System::IO::*;
     } else if #[cfg(unix)] {
         mod unix;
         pub use unix::*;

@@ -104,7 +104,7 @@ pub struct BeginWriteValue<'writer, 'handle> {
 }
 
 impl BeginWriteValue<'_, '_> {
-    pub fn clone_file(self, file: &File, _flags: u32) -> Result<ValueWriter> {
+    pub fn clone_file(self, file: &File, _flags: u32) -> PubResult<ValueWriter> {
         let dst_path = loop {
             let dst_path = random_file_name_in_dir(self.batch.handle.dir.path());
             match fclonefile_noflags(file, &dst_path) {

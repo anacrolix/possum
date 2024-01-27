@@ -27,7 +27,7 @@ mod tests {
         assert!(try_lock_file_exclusive(file.as_file_mut())?);
         // Taking an existing lock for the same underlying file succeeds.
         assert!(try_lock_file_exclusive(file.as_file_mut())?);
-        let mut second_handle = File::open(file.path())?;
+        let mut second_handle = OpenOptions::new().write(true).open(file.path())?;
         // You can't take the lock from another file instance.
         assert!(!try_lock_file_exclusive(&mut second_handle)?);
         let mut file_dup = file.as_file().try_clone()?;

@@ -57,20 +57,20 @@ pub fn fclonefile_noflags(src_file: &File, dst_path: &Path) -> PubResult<()> {
         if #[cfg(windows)] {
             use std::ffi::c_void;
             let dst_file = File::create(dst_path)?;
-            let dst_handle = dst_file.as_raw_handle();
+            let dst_handle = HANDLE(dst_file.as_raw_handle() as isize);
             let src_metadata = src_file.metadata()?;
-            let ByteCount = src_metadata.len() as i64;
+            let byte_count = src_metadata.len() as i64;
             let data = DUPLICATE_EXTENTS_DATA {
                 FileHandle: HANDLE(src_file.as_raw_handle() as isize),
                 SourceFileOffset: 0,
                 TargetFileOffset: 0,
-                ByteCount,
+                ByteCount: byte_count,
             };
             let data_ptr = &data as *const _ as *const c_void;
             unsafe {
                 DeviceIoControl
             (
-                HANDLE(dst_file.as_raw_handle() as isize),
+                dst_handle,
                 FSCTL_DUPLICATE_EXTENTS_TO_FILE,
                 Some(data_ptr),
                 std::mem::size_of_val(&data) as u32,

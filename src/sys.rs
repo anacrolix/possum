@@ -11,7 +11,6 @@ pub use punchfile::*;
 pub use seekhole::*;
 
 use std::fs::File;
-use std::io::SeekFrom::*;
 
 cfg_if! {
     if #[cfg(windows)] {

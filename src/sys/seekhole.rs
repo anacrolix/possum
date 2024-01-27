@@ -48,7 +48,7 @@ impl Region {
 }
 
 /// Mutable because the File offset may be changed.
-pub fn file_regions(file: &mut File) -> Result<Vec<Region>> {
+pub fn file_regions(file: &mut File) -> io::Result<Vec<Region>> {
     let mut offsets = vec![];
     {
         let mut offset = 0;
@@ -175,7 +175,7 @@ mod tests {
     use crate::pathconf::path_min_hole_size;
     use crate::testing::write_random_tempfile;
 
-    fn get_regions(file: &mut File) -> Result<Vec<Region>> {
+    fn get_regions(file: &mut File) -> anyhow::Result<Vec<Region>> {
         let itered: Vec<_> = Iter::new(file).collect::<io::Result<Vec<_>>>()?;
         let vec = file_regions(file)?;
         assert_eq!(itered, vec);
@@ -183,7 +183,7 @@ mod tests {
     }
 
     #[self::test]
-    fn just_a_hole() -> Result<()> {
+    fn just_a_hole() -> anyhow::Result<()> {
         let os_temp_dir = temp_dir();
         let mut min_hole_size = path_min_hole_size(&os_temp_dir)?;
         if min_hole_size <= 1 {

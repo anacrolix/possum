@@ -33,7 +33,7 @@ impl ExclusiveFile {
                 .create(true)
                 .write(true)
                 .open(dir.as_ref().join(&id));
-            let mut file = match file {
+            let file = match file {
                 Ok(file) => file,
                 Err(err) => return Err(err.into()),
             };

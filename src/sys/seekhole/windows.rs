@@ -6,16 +6,16 @@ pub fn seek_hole_whence(
     whence: RegionType,
 ) -> io::Result<Option<RegionOffset>> {
     let mut output = Vec::with_capacity(1);
-    let FileOffset = match whence {
+    let file_offset = match whence {
         Hole => offset,
         Data => offset + 1,
     };
     query_allocated_ranges(
         file,
         &[FILE_ALLOCATED_RANGE_BUFFER {
-            FileOffset,
+            FileOffset: file_offset,
             // Invalid parameter if FileOffset+Length > i64::MAX.
-            Length: i64::MAX - FileOffset,
+            Length: i64::MAX - file_offset,
         }],
         &mut output,
     )

@@ -1,18 +1,3 @@
-mod c_api;
-mod cpathbuf;
-mod error;
-mod exclusive_file;
-mod handle;
-mod item;
-mod owned_cell;
-mod pathconf;
-pub mod sys;
-#[cfg(feature = "testing")]
-pub mod testing;
-#[cfg(test)]
-mod tests;
-pub mod walk;
-
 use std::cmp::{max, min};
 use std::collections::{hash_map, HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
@@ -27,16 +12,12 @@ use std::str;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 use std::{fs, io};
-use sys::*;
+use ErrorKind::InvalidInput;
 
 use anyhow::Result;
 use anyhow::{bail, Context};
 use cfg_if::cfg_if;
 use chrono::NaiveDateTime;
-use cpathbuf::CPathBuf;
-pub use error::Error;
-use exclusive_file::ExclusiveFile;
-pub use handle::Handle;
 use log::*;
 use memmap2::Mmap;
 use num::Integer;
@@ -45,15 +26,39 @@ use rand::Rng;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{params, CachedStatement, Connection, Statement};
-use sys::flock;
 use tempfile::TempDir;
 #[cfg(test)]
 pub use test_log::test;
+
+pub use error::Error;
+use exclusive_file::ExclusiveFile;
+use file_id::{FileId, FileIdFancy};
+pub use handle::Handle;
+use ownedtx::OwnedTx;
+use sys::flock;
+use sys::*;
 pub use walk::Entry as WalkEntry;
-use ErrorKind::InvalidInput;
 
 use crate::item::Item;
+pub use crate::tx::Transaction;
+use crate::tx::{PostCommitWork, ReadTransactionOwned};
 use crate::walk::walk_dir;
+use crate::ValueLocation::{Nonzero, ZeroLength};
+
+mod c_api;
+mod cpathbuf;
+mod error;
+mod exclusive_file;
+mod handle;
+mod item;
+mod owned_cell;
+mod pathconf;
+pub mod sys;
+#[cfg(feature = "testing")]
+pub mod testing;
+#[cfg(test)]
+mod tests;
+pub mod walk;
 
 /// Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.
 pub type PubResult<T> = Result<T, Error>;
@@ -545,7 +550,6 @@ where
 }
 
 mod ownedtx;
-use ownedtx::OwnedTx;
 
 pub struct FileValues<'a, S> {
     stmt: S,
@@ -748,12 +752,6 @@ fn valid_file_name(file_name: &str) -> bool {
 mod dir;
 mod file_id;
 pub mod tx;
-
-use file_id::{FileId, FileIdFancy};
-
-pub use crate::tx::Transaction;
-use crate::tx::{PostCommitWork, ReadTransactionOwned};
-use crate::ValueLocation::{Nonzero, ZeroLength};
 
 struct PunchValueConstraints {
     greedy_start: bool,

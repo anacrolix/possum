@@ -34,9 +34,7 @@ fn last_errno() -> crate::Error {
 
 pub fn clonefile(src_path: &Path, dst_path: &Path) -> PubResult<()> {
     cfg_if! {
-        if #[cfg(windows)] {
-            unimplemented!();
-        } else if #[cfg(not(target_os = "linux"))] {
+        if #[cfg(target_os = "darwin")] {
             let src_buf = CString::new(src_path.as_os_str().as_bytes()).unwrap();
             let dst_buf = CString::new(dst_path.as_os_str().as_bytes()).unwrap();
             let src = src_buf.as_ptr();
@@ -47,7 +45,7 @@ pub fn clonefile(src_path: &Path, dst_path: &Path) -> PubResult<()> {
             }
         } else {
             let src_file = File::open(src_path)?;
-            fclonefile_noflags(src_file.as_raw_fd(), dst_path)?;
+            fclonefile_noflags(&src_file, dst_path)?;
         }
     }
     Ok(())
@@ -81,7 +79,6 @@ pub fn fclonefile_noflags(src_file: &File, dst_path: &Path) -> PubResult<()> {
                 None,
                 None,
             )}.map_err(anyhow::Error::from)?;
-
         } else if #[cfg(target_os = "linux")] {
             let dst_file = File::create(dst_path)?;
             let src_fd = src_fd.as_raw_fd();

@@ -37,6 +37,8 @@ typedef BatchWriter PossumWriter;
 
 typedef ValueWriter PossumValueWriter;
 
+typedef intptr_t RawFileHandle;
+
 typedef struct {
   int64_t secs;
   uint32_t nanos;
@@ -66,7 +68,7 @@ PossumWriter *possum_new_writer(Handle *handle);
 
 PossumError possum_start_new_value(PossumWriter *writer, PossumValueWriter **value);
 
-int possum_value_writer_fd(PossumValueWriter *value);
+RawFileHandle possum_value_writer_fd(PossumValueWriter *value);
 
 bool possum_single_stat(const Handle *handle, PossumBuf key, PossumStat *out_stat);
 

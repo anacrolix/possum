@@ -1,4 +1,3 @@
-use std::fs::File;
 use std::path::Path;
 
 pub fn path_disk_allocation(path: &Path) -> anyhow::Result<u64> {

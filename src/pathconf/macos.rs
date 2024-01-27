@@ -28,7 +28,7 @@ pub(crate) fn fd_min_hole_size(file: &File) -> std::io::Result<u64> {
 /// fpathconf(_PC_MIN_HOLE_SIZE). On macOS this returns positive if holes are supported, and returns
 /// 1 if holes are supported but the minimum hole size is unspecified.
 pub(crate) fn path_min_hole_size(path: &Path) -> std::io::Result<u64> {
-    let path: CPathBuf = path.try_into()?;
+    let path: crate::cpathbuf::CPathBuf = path.try_into()?;
     let long = unsafe { libc::pathconf(path.as_ptr(), _PC_MIN_HOLE_SIZE) };
     if long == -1 {
         return Err(std::io::Error::last_os_error());

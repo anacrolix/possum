@@ -39,6 +39,7 @@ stable_deref_trait = "1.2.0"
 take_mut = "0.2.2"
 tempfile = "3.8.0"
 thiserror = "1.0.50"
+tracing = { version = "0.1.40", features = ["log"] }
 twox-hash = { version = "1.6.3", optional = true }
 windows = { version = "0.52.0", features = ["Win32_Foundation", "Win32_System_IO", "Win32_System_Ioctl", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_Security", "Win32_System"] }
 

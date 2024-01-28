@@ -3,7 +3,6 @@ use std::io::Write;
 
 use anyhow::anyhow;
 use fdlimit::raise_fd_limit;
-use log::debug;
 
 use super::*;
 use crate::testing::{test_tempdir, Hash};

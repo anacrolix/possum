@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::ptr::null_mut;
 
 use libc::size_t;
-use log::{error, warn};
 use positioned_io::ReadAt;
+use tracing::{error, warn};
 
 use super::*;
 use crate::c_api::PossumError::{NoError, NoSuchKey};

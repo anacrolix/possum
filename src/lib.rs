@@ -66,7 +66,7 @@ struct FileClone {
     file: File,
     /// This exists to destroy clone tempdirs after they become empty.
     #[allow(unused)]
-    tempdir: Arc<TempDir>,
+    tempdir: Option<Arc<TempDir>>,
     mmap: Option<Mmap>,
     len: u64,
 }
@@ -542,7 +542,9 @@ where
     /// references are forgotten. This could possibly be used from internal tests instead.
     pub fn leak_snapshot_dir(&self) {
         if let Some(file_clone) = self.file_clone() {
-            std::mem::forget(Arc::clone(&file_clone.lock().unwrap().tempdir));
+            if let Some(tempdir) = &file_clone.lock().unwrap().tempdir {
+                std::mem::forget(Arc::clone(tempdir));
+            }
         }
     }
 }
@@ -567,10 +569,19 @@ where
 
 type ReaderFiles = HashMap<FileId, u64>;
 
+#[derive(Ord, PartialOrd, Eq, PartialEq)]
+struct ReadExtent {
+    pub offset: u64,
+    pub len: u64,
+}
+
+// BTree possibly so we can merge extents in the future.
+type Reads = HashMap<FileId, BTreeSet<ReadExtent>>;
+
 pub struct Reader<'handle> {
     owned_tx: OwnedTx<'handle>,
     handle: &'handle Handle,
-    files: ReaderFiles,
+    reads: Reads,
 }
 
 impl<'a> Reader<'a> {
@@ -584,18 +595,11 @@ impl<'a> Reader<'a> {
                     file_id,
                 }) = value.location.clone()
                 {
-                    let file = self.files.entry(file_id);
-                    let value_end = file_offset + length;
-                    use hash_map::Entry::*;
-                    match file {
-                        Occupied(mut entry) => {
-                            let value = entry.get_mut();
-                            *value = max(*value, value_end);
-                        }
-                        Vacant(entry) => {
-                            entry.insert(value_end);
-                        }
-                    };
+                    let file = self.reads.entry(file_id);
+                    file.or_default().insert(ReadExtent {
+                        offset: file_offset,
+                        len: length,
+                    });
                 }
                 Ok(Some(value))
             }
@@ -606,7 +610,7 @@ impl<'a> Reader<'a> {
 
     /// Takes a snapshot and commits the read transaction.
     pub fn begin(self) -> Result<Snapshot> {
-        let file_clones = Self::clone_files(self.handle, self.files).context("cloning files")?;
+        let file_clones = self.clone_files().context("cloning files")?;
         self.owned_tx
             .commit(())
             .context("committing transaction")?
@@ -614,20 +618,23 @@ impl<'a> Reader<'a> {
         Ok(Snapshot { file_clones })
     }
 
-    fn clone_files(handle: &Handle, files: ReaderFiles) -> Result<FileCloneCache> {
+    fn clone_files(&self) -> Result<FileCloneCache> {
+        let handle = self.handle;
+        let reads = &self.reads;
         let mut tempdir = None;
         let mut file_clones: FileCloneCache = Default::default();
+        // This isn't needed if file cloning is disabled...
         let mut handle_clone_guard = handle.clones.lock().unwrap();
         let handle_clones = handle_clone_guard.deref_mut();
-        for (file_id, min_len) in files {
+        for (file_id, extents) in reads {
             file_clones.insert(
                 file_id.clone(),
-                Self::get_file_clone(
+                self.get_file_clone(
                     file_id,
                     &mut tempdir,
                     handle_clones,
                     handle.dir.path(),
-                    min_len,
+                    extents,
                 )
                 .context("getting file clone")?,
             );
@@ -640,58 +647,91 @@ impl<'a> Reader<'a> {
     }
 
     fn get_file_clone(
-        file_id: FileId,
+        &self,
+        file_id: &FileId,
         tempdir: &mut Option<Arc<TempDir>>,
         cache: &mut FileCloneCache,
         src_dir: &Path,
-        min_len: u64,
+        read_extents: &BTreeSet<ReadExtent>,
     ) -> Result<Arc<Mutex<FileClone>>> {
-        if let Some(ret) = cache.get(&file_id) {
+        if let Some(ret) = cache.get(file_id) {
+            let min_len = read_extents
+                .iter()
+                .map(|re| re.offset + re.len)
+                .max()
+                .unwrap();
             let file_clone_guard = ret.lock().unwrap();
             if file_clone_guard.len >= min_len {
                 return Ok(ret.clone());
             }
         }
-        let tempdir: &Arc<TempDir> = match tempdir {
-            Some(tempdir) => tempdir,
-            None => {
-                let mut builder = tempfile::Builder::new();
-                builder.prefix(SNAPSHOT_DIR_NAME_PREFIX);
-                let new = Arc::new(builder.tempdir_in(src_dir)?);
-                *tempdir = Some(new);
-                tempdir.as_ref().unwrap()
+        if self.handle.file_cloning_enabled() {
+            let tempdir: &Arc<TempDir> = match tempdir {
+                Some(tempdir) => tempdir,
+                None => {
+                    let mut builder = tempfile::Builder::new();
+                    builder.prefix(SNAPSHOT_DIR_NAME_PREFIX);
+                    let new = Arc::new(builder.tempdir_in(src_dir)?);
+                    *tempdir = Some(new);
+                    tempdir.as_ref().unwrap()
+                }
+            };
+            let src_path = file_path(src_dir, &file_id);
+            // TODO: In order for value files to support truncation, a shared or exclusive lock would
+            // need to be taken before cloning. I don't think this is possible, we would have to wait
+            // for anyone holding an exclusive lock to release it. Handles already cache these, plus
+            // Writers could hold them for a long time while writing. Then we need a separate cloning
+            // lock. Also distinct Handles, even across processes can own each exclusive file.
+            if false {
+                let mut src_file = OpenOptions::new().read(true).open(&src_path)?;
+                assert!(try_lock_file(&mut src_file, flock::LockSharedNonblock)?);
             }
-        };
-        let src_path = file_path(src_dir, &file_id);
-        // TODO: In order for value files to support truncation, a shared or exclusive lock would
-        // need to be taken before cloning. I don't think this is possible, we would have to wait
-        // for anyone holding an exclusive lock to release it. Handles already cache these, plus
-        // Writers could hold them for a long time while writing. Then we need a separate cloning
-        // lock. Also distinct Handles, even across processes can own each exclusive file.
-        if false {
-            let mut src_file = OpenOptions::new().read(true).open(&src_path)?;
-            assert!(try_lock_file(&mut src_file, flock::LockSharedNonblock)?);
+            let tempdir_path = tempdir.path();
+            let dst_path = file_path(tempdir_path, &file_id);
+            clonefile(&src_path, &dst_path).context("cloning file")?;
+            let mut file = open_file_id(OpenOptions::new().read(true), tempdir_path, &file_id)
+                .context("opening value file")?;
+            // This prevents the snapshot file from being cleaned up. There's probably a race between
+            // here and when it was cloned above. I wonder if the snapshot dir can be locked, or if we
+            // can retry the cloning until we are able to lock it.
+            let locked = try_lock_file(&mut file, LockSharedNonblock)?;
+            assert!(locked);
+            let len = file.seek(End(0))?;
+            let file_clone = Arc::new(Mutex::new(FileClone {
+                file,
+                tempdir: Some(tempdir.clone()),
+                mmap: None,
+                len,
+            }));
+
+            cache.insert(file_id.to_owned(), file_clone.clone());
+            Ok(file_clone)
+        } else {
+            self.get_file_for_read_by_segment_locking(file_id, read_extents)
         }
-        let tempdir_path = tempdir.path();
-        let dst_path = file_path(tempdir_path, &file_id);
-        clonefile(&src_path, &dst_path).context("cloning file")?;
-        let mut file = open_file_id(OpenOptions::new().read(true), tempdir_path, &file_id)
-            .context("opening value file")?;
-        // This prevents the snapshot file from being cleaned up. There's probably a race between
-        // here and when it was cloned above. I wonder if the snapshot dir can be locked, or if we
-        // can retry the cloning until we are able to lock it.
-        let locked = try_lock_file(&mut file, LockSharedNonblock)?;
-        assert!(locked);
-        let len = file.seek(End(0))?;
-        let file_clone = Arc::new(Mutex::new(FileClone {
+    }
+
+    fn get_file_for_read_by_segment_locking(
+        &self,
+        file_id: &FileId,
+        read_extents: &BTreeSet<ReadExtent>,
+    ) -> Result<Arc<Mutex<FileClone>>> {
+        let mut file = open_file_id(OpenOptions::new().read(true), self.handle.dir(), file_id)?;
+        for extent in read_extents {
+            assert!(lock_file_segment(
+                &file,
+                LockSharedNonblock,
+                Some(extent.len as i64),
+                Start(extent.offset),
+            )?);
+        }
+        let len = file.seek(std::io::SeekFrom::End(0))?;
+        Ok(Arc::new(Mutex::new(FileClone {
             file,
-            tempdir: tempdir.clone(),
+            tempdir: None,
             mmap: None,
             len,
-        }));
-
-        cache.insert(file_id, file_clone.clone());
-        Ok(file_clone)
+        })))
     }
 }
 
@@ -868,6 +908,17 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
     }
     assert!(length > 0);
     assert_eq!(offset % block_size, 0);
+    if !lock_file_segment(
+        &file,
+        LockExclusiveNonblock,
+        Some(length),
+        Start(offset as u64),
+    )? {
+        // TODO: If we can't delete immediately, we should schedule to try again later. Maybe
+        // spinning up a thread, or putting in a slow queue.
+        warn!(%file_id, %offset, %length, "can't punch, file segment locked");
+        return Ok(());
+    }
     punchfile(&file, offset, length).with_context(|| format!("length {}", length))?;
     // fcntl(file.as_raw_fd(), nix::fcntl::F_FULLFSYNC)?;
     // file.flush()?;

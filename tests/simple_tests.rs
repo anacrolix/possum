@@ -203,7 +203,7 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
     let _ = raise_fd_limit();
     // Running in the same directory messes with the disk analysis at the end of the test.
     let tempdir = test_tempdir(opts.static_tempdir_name)?;
-    let handle = Handle::new(tempdir.path)?;
+    let handle = Arc::new(Handle::new(tempdir.path)?);
     let mut piece_data = vec![0; piece_size];
     // Hi alec
     rand::rngs::SmallRng::seed_from_u64(420).fill_bytes(&mut piece_data);
@@ -215,28 +215,25 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
     dbg!(format!("{:x}", piece_data_hash));
     let block_offset_iter = (0..piece_size).step_by(block_size);
     let offset_key = |offset| format!("piece/{}", offset);
-    std::thread::scope(|scope| {
-        let mut join_handles = vec![];
-        for (index, offset) in block_offset_iter.clone().enumerate() {
-            let piece_data = &piece_data;
-            let start_delay = Duration::from_micros(1000 * (index / 2) as u64);
-            let handle = &handle;
-            join_handles.push(scope.spawn(move || -> Result<()> {
-                let key = offset_key(offset);
-                sleep(start_delay);
-                debug!("starting block write");
-                handle.single_write_from(
-                    key.into_bytes(),
-                    &piece_data[offset..offset + block_size],
-                )?;
-                Ok(())
-            }));
-        }
-        for jh in join_handles {
-            jh.join().unwrap()?;
-        }
-        anyhow::Ok(())
-    })?;
+    use std::sync::Arc;
+    let piece_data = Arc::new(piece_data);
+
+    let mut join_handles = vec![];
+    for (index, offset) in block_offset_iter.clone().enumerate() {
+        let piece_data = Arc::clone(&piece_data);
+        let start_delay = Duration::from_micros(1000 * (index / 2) as u64);
+        let handle = Arc::clone(&handle);
+        join_handles.push(std::thread::spawn(move || -> Result<()> {
+            let key = offset_key(offset);
+            sleep(start_delay);
+            debug!("starting block write");
+            handle.single_write_from(key.into_bytes(), &piece_data[offset..offset + block_size])?;
+            Ok(())
+        }));
+    }
+    for jh in join_handles {
+        jh.join().unwrap()?;
+    }
     debug!("starting piece");
     let mut reader = handle.read()?;
     let values = block_offset_iter
@@ -366,6 +363,9 @@ fn cleanup_snapshots() -> Result<()> {
             .count()
     };
     let handle = Handle::new(tempdir.path.clone())?;
+    if !handle.file_cloning_enabled() {
+        return Ok(());
+    }
     handle.cleanup_snapshots()?;
     handle.single_write_from("hello".as_bytes().to_vec(), "world".as_bytes())?;
     let value = handle.read_single("hello".as_bytes())?.unwrap();

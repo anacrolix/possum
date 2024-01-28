@@ -45,10 +45,10 @@ impl ExclusiveFile {
     }
 
     pub(crate) fn from_file(mut file: File, id: FileId) -> anyhow::Result<Option<ExclusiveFile>> {
-        if !try_lock_file_exclusive(&mut file)? {
+        let end = file.seek(End(0))?;
+        if !lock_file_segment(&mut file, LockExclusiveNonblock, None, Start(end))? {
             return Ok(None);
         }
-        let end = file.seek(End(0))?;
         Ok(Some(ExclusiveFile {
             inner: file,
             id,
@@ -57,7 +57,15 @@ impl ExclusiveFile {
     }
 
     pub(crate) fn committed(&mut self) -> io::Result<()> {
-        self.last_committed_offset = self.inner.stream_position()?;
+        let new_committed_offset = self.inner.stream_position()?;
+        // Unlocking should never block, at least according to the change in FlockArg in nix.
+        assert!(lock_file_segment(
+            &self.inner,
+            Unlock,
+            Some((new_committed_offset - self.last_committed_offset) as i64),
+            Start(self.last_committed_offset),
+        )?);
+        self.last_committed_offset = new_committed_offset;
         if false {
             self.inner.flush()
         } else {

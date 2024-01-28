@@ -26,6 +26,12 @@ pub struct Handle {
 type ManifestUserVersion = u32;
 
 impl Handle {
+    /// Whether file cloning should be attempted.
+    pub fn file_cloning_enabled(&self) -> bool {
+        // Ultimately this should depend on configuration, system, and filesystem capabilities.
+        false
+    }
+
     pub fn set_instance_limits(&mut self, limits: Limits) -> Result<()> {
         self.instance_limits = limits;
         self.start_deferred_transaction()?.apply_limits()
@@ -195,7 +201,7 @@ impl Handle {
         let reader = Reader {
             owned_tx: self.start_deferred_transaction()?,
             handle: self,
-            files: Default::default(),
+            reads: Default::default(),
         };
         Ok(reader)
     }

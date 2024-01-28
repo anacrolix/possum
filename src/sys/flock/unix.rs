@@ -8,11 +8,7 @@ pub use nix::fcntl::FlockArg::*;
 const EWOULDBLOCK: Errno = Errno::EWOULDBLOCK;
 
 pub fn try_lock_file(file: &mut File, arg: FlockArg) -> nix::Result<bool> {
-    let flock_res = if false {
-        nix::fcntl::flock(file.as_raw_fd(), arg)
-    } else {
-        lock_file_segment(file, arg, None, SeekFrom::Start(0))
-    };
+    let flock_res = lock_file_segment(file, arg, None, SeekFrom::Start(0));
     match flock_res {
         Ok(()) => Ok(true),
         Err(errno) => {
@@ -53,28 +49,37 @@ pub fn lock_file_segment(
         // This has special meaning on macOS: To the end of the file. Use None instead.
         assert_ne!(len, 0);
     }
-    let flock_arg = libc::flock {
+    let flock_arg = nix::libc::flock {
         l_start: seek_from_offset(whence),
         l_len: len.unwrap_or_default(),
         l_pid: 0,
         l_type: match arg {
             LockShared | LockSharedNonblock => libc::F_RDLCK,
             LockExclusive | LockExclusiveNonblock => libc::F_WRLCK,
-            Unlock | UnlockNonblock => libc::F_UNLCK,
+            Unlock => libc::F_UNLCK,
             // Silly non-exhaustive enum.
             _ => unimplemented!(),
         },
         l_whence: seek_from_whence(whence),
     };
-    let cmd = match arg {
-        LockShared | LockExclusive | Unlock => 91,
-        LockSharedNonblock | LockExclusiveNonblock | UnlockNonblock => 90,
-        _ => unimplemented!(),
-    };
-    // nix::fcntl::fcntl()
-    let nix_result: nix::Result<c_int> = nix::errno::Errno::result(unsafe {
-        libc::fcntl(file.as_raw_fd(), cmd, &flock_arg as *const _)
-    });
-    nix_result?;
-    Ok(())
+    if false {
+        let cmd = match arg {
+            LockShared | LockExclusive | Unlock => libc::F_OFD_SETLKW,
+            LockSharedNonblock | LockExclusiveNonblock => libc::F_OFD_SETLK,
+            _ => unimplemented!(),
+        };
+        let nix_result: nix::Result<c_int> = nix::errno::Errno::result(unsafe {
+            libc::fcntl(file.as_raw_fd(), cmd, &flock_arg as *const _)
+        });
+        nix_result?;
+        Ok(())
+    } else {
+        use nix::fcntl::*;
+        let arg = match arg {
+            LockShared | LockExclusive | Unlock => nix::fcntl::F_OFD_SETLKW(&flock_arg),
+            LockSharedNonblock | LockExclusiveNonblock => F_OFD_SETLK(&flock_arg),
+            _ => unimplemented!(),
+        };
+        nix::fcntl::fcntl(file.as_raw_fd(), arg).map(|_| ())
+    }
 }

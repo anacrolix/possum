@@ -40,7 +40,7 @@ fn lseek(
     // lseek64?
     let new_offset = unsafe { super::lseek(fd, offset, whence.into()) };
     if new_offset == -1 {
-        return Err(errno());
+        return Err(Errno::last_raw());
     }
     Ok(new_offset as RegionOffset)
 }

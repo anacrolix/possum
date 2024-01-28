@@ -904,7 +904,7 @@ fn delete_unused_snapshots(dir: &Path) -> Result<()> {
                 debug!("removing snapshot dir {:?}: {:?}", &entry.path, res);
             }
             SnapshotValue => {
-                match std::fs::File::open(&entry.path) {
+                match std::fs::OpenOptions::new().write(true).open(&entry.path) {
                     Err(err) if err.kind() == ErrorKind::NotFound => {}
                     Err(err) => {
                         return Err(err)

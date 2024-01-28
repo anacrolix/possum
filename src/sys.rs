@@ -28,7 +28,6 @@ cfg_if! {
         pub use std::os::unix::prelude::OsStrExt;
         pub use std::os::unix::ffi::OsStringExt;
         pub use std::os::fd::AsRawFd;
-        pub use nix::errno::errno;
         pub use nix::errno::Errno;
         pub use std::os::fd::AsFd;
     }

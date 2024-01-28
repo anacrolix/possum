@@ -22,7 +22,7 @@ cfg_if! {
 #[cfg(unix)]
 // Here and not in crate::Error because ENOTSUP has special meaning for clonefile.
 fn last_errno() -> crate::Error {
-    let errno = errno();
+    let errno = Errno::last_raw();
     if errno == ENOTSUP {
         crate::Error::UnsupportedFilesystem
     } else {

@@ -80,8 +80,12 @@ impl FileClone {
         if let Some(mmap) = mmap_opt {
             return Ok(mmap);
         }
-        let mmap = unsafe { Mmap::map(&self.file) }?;
-        assert!(mmap.len() as u64 >= self.len);
+        let mmap = unsafe {
+            memmap2::MmapOptions::new()
+                .len(self.len.try_into().unwrap())
+                .map_copy_read_only(&self.file)
+        }?;
+        assert_eq!(mmap.len() as u64, self.len);
         Ok(mmap_opt.insert(mmap))
     }
 }
@@ -166,7 +170,9 @@ impl ValueWriter {
 
 impl Write for ValueWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.exclusive_file.inner.write(buf)
+        let file = &mut self.exclusive_file.inner;
+        dbg!(file.stream_position()?, &file, buf.len());
+        file.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {

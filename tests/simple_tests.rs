@@ -2,6 +2,7 @@ use std::borrow::Borrow;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::{Debug, Display};
+use std::fs::OpenOptions;
 use std::hash::Hasher;
 use std::io::SeekFrom::Start;
 use std::io::{copy, Read};
@@ -162,6 +163,23 @@ struct TorrentStorageOpts {
     piece_size: usize,
     block_size: usize,
     static_tempdir_name: &'static str,
+    view_snapshot_values: bool,
+}
+
+#[std_test]
+#[ignore]
+fn torrent_storage_kernel_bug_min_repro() -> Result<()> {
+    let block_size = 4096;
+    let stop = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < stop {
+        torrent_storage_inner(TorrentStorageOpts {
+            block_size,
+            piece_size: block_size,
+            static_tempdir_name: "torrent_storage_kernel_bug",
+            view_snapshot_values: true,
+        })?;
+    }
+    Ok(())
 }
 
 #[std_test]
@@ -173,6 +191,7 @@ fn torrent_storage_small() -> Result<()> {
             block_size,
             piece_size: 4 * block_size,
             static_tempdir_name: "torrent_storage_small",
+            view_snapshot_values: true,
         })?;
     }
     Ok(())
@@ -185,6 +204,7 @@ fn torrent_storage_big() -> Result<()> {
         block_size,
         piece_size: 2 << 20,
         static_tempdir_name: "torrent_storage_big",
+        view_snapshot_values: true,
     })
 }
 
@@ -259,7 +279,7 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
     let mut completed = writer.new_value().begin()?;
     for value in values {
         let mut snapshot_value = snapshot.value(value);
-        if false {
+        if opts.view_snapshot_values {
             snapshot_value.view(|bytes| {
                 stored_hash.write(bytes);
                 completed.write_all(bytes)
@@ -502,5 +522,22 @@ where
             last_i = new_i;
         }
     }
+    Ok(())
+}
+
+#[test]
+fn test_writeback_mmap() -> anyhow::Result<()> {
+    let mut file = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open("writeback")?;
+    file.set_len(0x1000)?;
+    let read_file = OpenOptions::new().read(true).open("writeback")?;
+    let mmap = unsafe {
+        memmap2::MmapOptions::new()
+            .len(0x1000)
+            .map_copy_read_only(&read_file)
+    }?;
+    file.write_all(&mmap)?;
     Ok(())
 }

@@ -30,7 +30,7 @@ pub fn write_random_tempfile(len: u64) -> Result<NamedTempFile> {
 }
 
 // Takes &mut because XxHash64 implements Copy and it's really easy to make a mistake.
-struct HashWriter<'a, T: Hasher>(&'a mut T);
+pub struct HashWriter<'a, T: Hasher>(pub &'a mut T);
 
 impl<T: Hasher> Write for HashWriter<'_, T> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {

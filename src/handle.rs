@@ -2,7 +2,7 @@ use rusqlite::TransactionBehavior;
 
 use super::*;
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 #[repr(C)]
 pub struct Limits {
     pub max_value_length_sum: Option<u64>,
@@ -12,6 +12,7 @@ pub struct Limits {
 
 type DeletedValuesSender = std::sync::mpsc::SyncSender<Vec<NonzeroValueLocation>>;
 
+#[derive(Debug)]
 pub struct Handle {
     pub(crate) conn: Mutex<Connection>,
     pub(crate) exclusive_files: Mutex<HashMap<FileId, ExclusiveFile>>,
@@ -42,19 +43,23 @@ impl Handle {
     }
 
     pub(crate) fn get_exclusive_file(&self) -> Result<ExclusiveFile> {
-        let mut files = self.exclusive_files.lock().unwrap();
-        // How do we avoid cloning the key and skipping the unnecessary remove check? Do we need a
-        // pop method on HashMap?
-        if let Some(id) = files.keys().next().cloned() {
-            let file = files.remove(&id).unwrap();
-            debug_assert_eq!(id, file.id);
-            debug!("using exclusive file {} from handle", &file.id);
-            return Ok(file);
+        {
+            let mut files = self.exclusive_files.lock().unwrap();
+            // How do we avoid cloning the key and skipping the unnecessary remove check? Do we need a
+            // pop method on HashMap?
+            if let Some(id) = files.keys().next().cloned() {
+                let file = files.remove(&id).unwrap();
+                debug_assert_eq!(id, file.id);
+                debug!("using exclusive file {} from handle", &file.id);
+                return Ok(file);
+            }
         }
+        trace!("about to open existing files");
         if let Some(file) = self.open_existing_exclusive_file()? {
             debug!("opened existing values file {}", file.id);
             return Ok(file);
         }
+        trace!("here");
         let ret = ExclusiveFile::new(&self.dir);
         if let Ok(file) = &ret {
             debug!("created new exclusive file {}", file.id);
@@ -71,8 +76,13 @@ impl Handle {
             if !valid_file_name(entry.file_name().to_str().unwrap()) {
                 continue;
             }
-            if let Ok(ef) = ExclusiveFile::open(entry.path()) {
-                return Ok(ef);
+            let path = entry.path();
+            debug!(?path, "opening existing file");
+            match ExclusiveFile::open(path.clone()) {
+                Ok(ef) => return Ok(ef),
+                Err(err) => {
+                    debug!(?path, "open");
+                }
             }
         }
         Ok(None)
@@ -102,7 +112,7 @@ impl Handle {
             clones: Default::default(),
             instance_limits: Default::default(),
             deleted_values: Some(deleted_values),
-            value_puncher: Some(std::thread::spawn(|| {
+            value_puncher: Some(std::thread::spawn(|| -> () {
                 if let Err(err) = Self::value_puncher(dir, receiver) {
                     error!("value puncher thread failed with {err:?}");
                 }
@@ -222,6 +232,7 @@ impl Handle {
     ) -> Result<(u64, WriteCommitResult)> {
         let mut writer = self.new_writer()?;
         let mut value = writer.new_value().begin()?;
+        trace!("got value writer");
         let n = value.copy_from(r)?;
         writer.stage_write(key, value)?;
         let commit = writer.commit()?;
@@ -349,10 +360,10 @@ use crate::tx::{ReadOnlyRusqliteTransaction, ReadTransaction};
 
 impl Drop for Handle {
     fn drop(&mut self) {
-        self.deleted_values.take();
-        if let Some(join_handle) = self.value_puncher.take() {
-            join_handle.thread().unpark();
-            join_handle.join().unwrap()
-        }
+        // self.deleted_values.take();
+        // if let Some(join_handle) = self.value_puncher.take() {
+        //     join_handle.thread().unpark();
+        //     join_handle.join().unwrap()
+        // }
     }
 }

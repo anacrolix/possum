@@ -27,13 +27,14 @@ fn seek_from_whence(seek_from: SeekFrom) -> c_short {
     }) as c_short
 }
 
+// #[instrument]
 pub fn lock_file_segment(
     file: &File,
     arg: FlockArg,
     len: Option<i64>,
     whence: SeekFrom,
 ) -> nix::Result<bool> {
-    debug!(?arg, ?len, ?whence, "locking file segment");
+    debug!(?file, ?arg, ?len, ?whence, "locking file segment");
     if let Some(len) = len {
         // This has special meaning on macOS: To the end of the file. Use None instead.
         if len == 0 {
@@ -42,7 +43,7 @@ pub fn lock_file_segment(
     }
     let flock_arg = nix::libc::flock {
         l_start: seek_from_offset(whence),
-        l_len: len.unwrap_or_default(),
+        l_len: len.unwrap_or(0),
         l_pid: 0,
         l_type: match arg {
             LockShared | LockSharedNonblock => libc::F_RDLCK,
@@ -64,6 +65,9 @@ pub fn lock_file_segment(
     match fcntl(file.as_raw_fd(), arg) {
         Ok(_) => Ok(true),
         Err(errno) if errno == Errno::EWOULDBLOCK || errno == Errno::EAGAIN => Ok(false),
-        Err(err) => Err(err),
+        Err(err) => {
+            error!(?err, "fcntl");
+            Err(err)
+        }
     }
 }

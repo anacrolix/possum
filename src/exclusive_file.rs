@@ -15,8 +15,14 @@ pub(crate) struct ExclusiveFile {
 
 impl ExclusiveFile {
     pub(crate) fn open(path: PathBuf) -> Result<Option<Self>> {
-        let file = OpenOptions::new().append(true).open(&path)?;
+        let file = Self::new_open_options().open(&path)?;
         Self::from_file(file, path.file_name().expect("file name").to_owned().into())
+    }
+
+    fn new_open_options() -> OpenOptions {
+        let mut ret = OpenOptions::new();
+        ret.append(true);
+        ret
     }
 
     pub(crate) fn revert_to_offset(&mut self, offset: u64) -> io::Result<()> {
@@ -27,12 +33,11 @@ impl ExclusiveFile {
     }
 
     pub(crate) fn new(dir: impl AsRef<Path>) -> anyhow::Result<ExclusiveFile> {
-        for _ in 0..10000 {
+        for _ in 0..10 {
             let id = random_file_name().into();
-            let file = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .open(dir.as_ref().join(&id));
+            let path = dir.as_ref().join(&id);
+            debug!(?path, "opening new exclusive file");
+            let file = Self::new_open_options().create(true).open(path);
             let file = match file {
                 Ok(file) => file,
                 Err(err) => return Err(err.into()),

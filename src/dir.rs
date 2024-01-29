@@ -1,7 +1,7 @@
 use super::*;
 use std::borrow::Borrow;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct Dir {
     path_buf: PathBuf,
     block_size: u64,

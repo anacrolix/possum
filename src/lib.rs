@@ -30,6 +30,7 @@ use std::io::{ErrorKind, Read, Seek, Write};
 use std::num::TryFromIntError;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
+use std::process::abort;
 use std::str;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
@@ -47,7 +48,7 @@ mod c_api;
 mod cpathbuf;
 mod error;
 mod exclusive_file;
-mod handle;
+pub mod handle;
 mod item;
 mod owned_cell;
 mod pathconf;
@@ -80,10 +81,12 @@ impl FileClone {
             return Ok(mmap);
         }
         let mmap = unsafe { Mmap::map(&self.file) }?;
+        assert!(mmap.len() as u64 >= self.len);
         Ok(mmap_opt.insert(mmap))
     }
 }
 
+#[derive(Debug)]
 struct PendingWrite {
     key: Vec<u8>,
     value_file_offset: u64,
@@ -172,11 +175,13 @@ impl Write for ValueWriter {
     }
 }
 
+#[derive(Debug)]
 struct ValueRename {
     value: Value,
     new_key: Vec<u8>,
 }
 
+#[derive(Debug)]
 pub struct BatchWriter<'a> {
     handle: &'a Handle,
     exclusive_files: Vec<ExclusiveFile>,
@@ -301,33 +306,20 @@ impl<'handle> BatchWriter<'handle> {
     /// Flush Writer's exclusive files and return them to the Handle pool.
     fn flush_exclusive_files(&mut self) {
         let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
-        // dbg!(
-        //     "adding {} exclusive files to handle",
-        //     self.exclusive_files.len()
-        // );
         for mut ef in self.exclusive_files.drain(..) {
             ef.committed().unwrap();
             debug!("returning exclusive file {} to handle", ef.id);
             assert!(handle_exclusive_files.insert(ef.id.clone(), ef).is_none());
         }
-        // dbg!(
-        //     "handle has {} exclusive files",
-        //     handle_exclusive_files.len()
-        // );
     }
 }
 
 impl Drop for BatchWriter<'_> {
     fn drop(&mut self) {
-        // dbg!(
-        //     "adding exclusive files to handle",
-        //     self.exclusive_files.len()
-        // );
         let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
         for ef in self.exclusive_files.drain(..) {
             assert!(handle_exclusive_files.insert(ef.id.clone(), ef).is_none());
         }
-        // dbg!("handle exclusive files", handle_exclusive_files.len());
     }
 }
 
@@ -475,15 +467,38 @@ impl<V> ReadAt for SnapshotValue<V>
 where
     V: AsRef<Value>,
 {
-    fn read_at(&self, pos: u64, buf: &mut [u8]) -> io::Result<usize> {
-        // TODO: Create a thiserror or io::Error for non-usize pos.
-        // let pos = usize::try_from(pos).expect("pos should be usize");
-        let n = self.view(|view| {
-            let r = view;
-            r.read_at(pos, buf)
-        })??;
-        // dbg!(buf.split_at(n).0);
-        Ok(n)
+    fn read_at(&self, pos: u64, mut buf: &mut [u8]) -> io::Result<usize> {
+        if true {
+            // TODO: Create a thiserror or io::Error for non-usize pos.
+            // let pos = usize::try_from(pos).expect("pos should be usize");
+            let n = self.view(|view| {
+                let r = view;
+                r.read_at(pos, buf)
+            })??;
+            // dbg!(buf.split_at(n).0);
+            Ok(n)
+        } else {
+            match self.value.as_ref().location {
+                ValueLocation::ZeroLength => Ok(0),
+                Nonzero(NonzeroValueLocation {
+                    file_offset,
+                    length,
+                    ..
+                }) => {
+                    let available = length - pos;
+                    if available <= 0 {
+                        return Ok(0);
+                    }
+                    buf = buf
+                        .split_at_mut(min(buf.len() as u64, available) as usize)
+                        .0;
+                    let mut file_clone = self.file_clone().unwrap().lock().unwrap();
+                    let file = &mut file_clone.file;
+                    dbg!(file.seek(Start(file_offset + pos))?);
+                    dbg!(file.read(buf).map_err(Into::into))
+                }
+            }
+        }
     }
 }
 
@@ -718,20 +733,24 @@ impl<'a> Reader<'a> {
     ) -> Result<Arc<Mutex<FileClone>>> {
         let mut file = open_file_id(OpenOptions::new().read(true), self.handle.dir(), file_id)?;
         for extent in read_extents {
-            assert!(lock_file_segment(
+            if !lock_file_segment(
                 &file,
                 LockSharedNonblock,
                 Some(extent.len as i64),
                 Start(extent.offset),
-            )?);
+            )? {
+                abort();
+            }
         }
         let len = file.seek(std::io::SeekFrom::End(0))?;
-        Ok(Arc::new(Mutex::new(FileClone {
+        let mut file_clone = FileClone {
             file,
             tempdir: None,
             mmap: None,
             len,
-        })))
+        };
+        // file_clone.get_mmap()?;
+        Ok(Arc::new(Mutex::new(file_clone)))
     }
 }
 
@@ -919,6 +938,7 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
         warn!(%file_id, %offset, %length, "can't punch, file segment locked");
         return Ok(());
     }
+    debug!(?file, %offset, %length, "punching");
     punchfile(&file, offset, length).with_context(|| format!("length {}", length))?;
     // fcntl(file.as_raw_fd(), nix::fcntl::F_FULLFSYNC)?;
     // file.flush()?;

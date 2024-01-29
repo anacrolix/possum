@@ -3,8 +3,8 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::{Debug, Display};
 use std::hash::Hasher;
-use std::io::Read;
 use std::io::SeekFrom::Start;
+use std::io::{copy, Read};
 use std::io::{Seek, Write};
 use std::ops::Bound::Included;
 use std::ops::{RangeBounds, RangeInclusive};
@@ -203,7 +203,12 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
     let _ = raise_fd_limit();
     // Running in the same directory messes with the disk analysis at the end of the test.
     let tempdir = test_tempdir(opts.static_tempdir_name)?;
-    let handle = Arc::new(Handle::new(tempdir.path)?);
+    let mut handle = Handle::new(tempdir.path)?;
+    // handle.set_instance_limits(possum::handle::Limits {
+    //     max_value_length_sum: None,
+    //     disable_hole_punching: true,
+    // })?;
+    let handle = Arc::new(handle);
     let mut piece_data = vec![0; piece_size];
     // Hi alec
     rand::rngs::SmallRng::seed_from_u64(420).fill_bytes(&mut piece_data);
@@ -248,16 +253,31 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
         .collect::<Result<Vec<_>, _>>()?;
     let snapshot = reader.begin()?;
     let mut stored_hash = Hash::default();
+    // let starting_stored_hash = stored_hash.finish();
+    // debug!(%starting_stored_hash, "starting stored hash");
     let mut writer = handle.new_writer()?;
     let mut completed = writer.new_value().begin()?;
-    dbg!(&completed);
     for value in values {
-        snapshot.value(value).view(|bytes| {
-            stored_hash.write(bytes);
-            completed.write_all(bytes)
-        })??;
+        let mut snapshot_value = snapshot.value(value);
+        if false {
+            snapshot_value.view(|bytes| {
+                stored_hash.write(bytes);
+                completed.write_all(bytes)
+            })??;
+        } else {
+            assert_eq!(
+                std::io::copy(
+                    &mut snapshot_value.new_reader(),
+                    &mut HashWriter(&mut stored_hash)
+                )?,
+                snapshot_value.length()
+            );
+            assert_eq!(
+                std::io::copy(&mut snapshot_value.new_reader(), &mut completed,)?,
+                snapshot_value.length()
+            );
+        }
     }
-    dbg!(&completed);
     assert_eq!(stored_hash.finish(), piece_data_hash);
     let completed_key = format!("completed/{:x}", piece_data_hash).into_bytes();
     writer.stage_write(completed_key.clone(), completed)?;
@@ -265,7 +285,6 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
     let completed_value = handle
         .read_single(&completed_key)?
         .expect("completed item should exist");
-    dbg!(&completed_value);
     let completed_reader = completed_value.new_reader();
     let completed_hash = hash_reader(completed_reader)?;
     assert_eq!(completed_hash, piece_data_hash);
@@ -317,13 +336,11 @@ fn big_set_get() -> Result<()> {
         hash.write(&piece_data);
         hash.finish()
     };
-    dbg!(piece_data_hash);
     let completed_key = format!("completed/{:x}", piece_data_hash).into_bytes();
     handle.single_write_from(completed_key.clone(), &*piece_data)?;
     let completed_value = handle
         .read_single(&completed_key)?
         .expect("completed item should exist");
-    dbg!(&completed_value);
     let mut piece_data_actual_single_read = vec![0; piece_size * 2];
     let n = completed_value.read(&mut piece_data_actual_single_read)?;
     assert_eq!(n, piece_size);

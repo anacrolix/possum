@@ -12,6 +12,7 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    - run: git submodule update --init --recursive
     - name: Build
       run: cargo build
     - name: Run tests

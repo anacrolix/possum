@@ -5,7 +5,7 @@ use std::fmt::{Debug, Display};
 use std::fs::OpenOptions;
 use std::hash::Hasher;
 use std::io::SeekFrom::Start;
-use std::io::{copy, Read};
+use std::io::{copy, ErrorKind, Read};
 use std::io::{Seek, Write};
 use std::ops::Bound::Included;
 use std::ops::{RangeBounds, RangeInclusive};
@@ -318,8 +318,11 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
         if entry.entry_type != ValuesFile {
             continue;
         }
-        values_file_total_len += possum::sys::path_disk_allocation(&entry.path)
-            .context(entry.path.display().to_string())?;
+        values_file_total_len += match possum::sys::path_disk_allocation(&entry.path) {
+            Ok(size) => size,
+            Err(err) if err.kind() == ErrorKind::NotFound => 0,
+            Err(err) => return Err(err).context(entry.path.display().to_string()),
+        };
     }
     if false {
         dbg!(values_file_total_len);

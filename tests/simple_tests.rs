@@ -318,7 +318,8 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
         if entry.entry_type != ValuesFile {
             continue;
         }
-        values_file_total_len += possum::sys::path_disk_allocation(&entry.path)?;
+        values_file_total_len += possum::sys::path_disk_allocation(&entry.path)
+            .context(entry.path.display().to_string())?;
     }
     if false {
         dbg!(values_file_total_len);

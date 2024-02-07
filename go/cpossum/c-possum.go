@@ -1,7 +1,11 @@
 package possumC
 
-// #cgo LDFLAGS: -lpossum
-// #include "possum.h"
+/*
+// Not sure how to statically just this library, so for now it's preferred to use CGO_LDFLAGS to do
+// your own thing.
+//#cgo LDFLAGS: -lpossum
+#include "possum.h"
+*/
 import "C"
 import (
 	"errors"

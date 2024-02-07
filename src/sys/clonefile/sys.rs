@@ -81,7 +81,7 @@ pub fn fclonefile_noflags(src_file: &File, dst_path: &Path) -> PubResult<()> {
             )}.map_err(anyhow::Error::from)?;
         } else if #[cfg(target_os = "linux")] {
             let dst_file = File::create(dst_path)?;
-            let src_fd = src_fd.as_raw_fd();
+            let src_fd = src_file.as_raw_fd();
             let dst_fd = dst_file.as_raw_fd();
             // Is this because the musl bindings are wrong?
             let request = libc::FICLONE.try_into().unwrap();

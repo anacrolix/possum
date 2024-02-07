@@ -10,7 +10,7 @@ use std::fs::File;
 use std::os::linux::fs::MetadataExt;
 use std::path::Path;
 
-use crate::CPathBuf;
+use crate::cpathbuf::CPathBuf;
 
 /// Recommended minimum hole size for sparse files for file descriptor.
 /// fpathconf(_PC_MIN_HOLE_SIZE);

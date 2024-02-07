@@ -1,3 +1,5 @@
+#![allow(clippy::unused_unit)]
+
 use crate::item::Item;
 pub use crate::tx::Transaction;
 use crate::tx::{PostCommitWork, ReadTransactionOwned};
@@ -20,8 +22,8 @@ use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRe
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{params, CachedStatement, Connection, Statement};
 use std::borrow::Borrow;
-use std::cmp::{max, min};
-use std::collections::{hash_map, BTreeSet, HashMap, HashSet};
+use std::cmp::min;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::fmt::{Debug, Display, Formatter};
 use std::fs::{read_dir, remove_dir, remove_file, File, OpenOptions};
@@ -171,7 +173,6 @@ impl ValueWriter {
 impl Write for ValueWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let file = &mut self.exclusive_file.inner;
-        dbg!(file.stream_position()?, &file, buf.len());
         file.write(buf)
     }
 
@@ -492,6 +493,7 @@ where
                     ..
                 }) => {
                     let available = length - pos;
+                    #[allow(clippy::absurd_extreme_comparisons)]
                     if available <= 0 {
                         return Ok(0);
                     }
@@ -587,8 +589,6 @@ where
         self.stmt.query_map([self.file_id], Value::from_row)
     }
 }
-
-type ReaderFiles = HashMap<FileId, u64>;
 
 #[derive(Ord, PartialOrd, Eq, PartialEq)]
 struct ReadExtent {
@@ -749,7 +749,7 @@ impl<'a> Reader<'a> {
             }
         }
         let len = file.seek(std::io::SeekFrom::End(0))?;
-        let mut file_clone = FileClone {
+        let file_clone = FileClone {
             file,
             tempdir: None,
             mmap: None,

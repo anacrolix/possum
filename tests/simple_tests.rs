@@ -5,7 +5,7 @@ use std::fmt::{Debug, Display};
 use std::fs::OpenOptions;
 use std::hash::Hasher;
 use std::io::SeekFrom::Start;
-use std::io::{copy, ErrorKind, Read};
+use std::io::{ErrorKind, Read};
 use std::io::{Seek, Write};
 use std::ops::Bound::Included;
 use std::ops::{RangeBounds, RangeInclusive};
@@ -223,7 +223,7 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
     let _ = raise_fd_limit();
     // Running in the same directory messes with the disk analysis at the end of the test.
     let tempdir = test_tempdir(opts.static_tempdir_name)?;
-    let mut handle = Handle::new(tempdir.path)?;
+    let handle = Handle::new(tempdir.path)?;
     // handle.set_instance_limits(possum::handle::Limits {
     //     max_value_length_sum: None,
     //     disable_hole_punching: true,
@@ -278,7 +278,7 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
     let mut writer = handle.new_writer()?;
     let mut completed = writer.new_value().begin()?;
     for value in values {
-        let mut snapshot_value = snapshot.value(value);
+        let snapshot_value = snapshot.value(value);
         if opts.view_snapshot_values {
             snapshot_value.view(|bytes| {
                 stored_hash.write(bytes);

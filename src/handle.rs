@@ -20,7 +20,7 @@ pub struct Handle {
     pub(crate) clones: Mutex<FileCloneCache>,
     pub(crate) instance_limits: Limits,
     deleted_values: Option<DeletedValuesSender>,
-    value_puncher: Option<std::thread::JoinHandle<()>>,
+    _value_puncher: Option<std::thread::JoinHandle<()>>,
 }
 
 /// 4 bytes stored in the database header https://sqlite.org/fileformat2.html#database_header.
@@ -80,7 +80,7 @@ impl Handle {
             debug!(?path, "opening existing file");
             match ExclusiveFile::open(path.clone()) {
                 Ok(ef) => return Ok(ef),
-                Err(err) => {
+                Err(_err) => {
                     debug!(?path, "open");
                 }
             }
@@ -112,7 +112,7 @@ impl Handle {
             clones: Default::default(),
             instance_limits: Default::default(),
             deleted_values: Some(deleted_values),
-            value_puncher: Some(std::thread::spawn(|| -> () {
+            _value_puncher: Some(std::thread::spawn(|| -> () {
                 if let Err(err) = Self::value_puncher(dir, receiver) {
                     error!("value puncher thread failed with {err:?}");
                 }

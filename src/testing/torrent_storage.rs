@@ -131,7 +131,7 @@ fn torrent_storage_inner_run(inner: &TorrentStorageInner) -> anyhow::Result<()> 
             })?;
         } else {
             for offset in chunk_offset_iter.clone() {
-                write_unverified_chunk(&handle, offset)?;
+                write_unverified_chunk(handle, offset)?;
             }
         }
         debug!("starting piece");

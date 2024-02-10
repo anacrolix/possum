@@ -82,7 +82,7 @@ pub(crate) fn device_io_control<I: ?Sized, O: ?Sized>(
     };
     let out_buffer = output.map(|o| o as *mut O as _);
     let overlapped = overlapped.map(|some| some as *mut _);
-    unsafe {
+    if let Err(err) = unsafe {
         DeviceIoControl(
             handle,
             control_code,
@@ -93,6 +93,12 @@ pub(crate) fn device_io_control<I: ?Sized, O: ?Sized>(
             lp_bytes_returned,
             overlapped,
         )
-    }?;
+    } {
+        // No need to flag this to the caller unless they are doing an operation that wouldn't
+        // otherwise try again with a new starting point.
+        if err.code() != ERROR_MORE_DATA.into() {
+            return Err(err.into());
+        }
+    }
     Ok(bytes_returned)
 }

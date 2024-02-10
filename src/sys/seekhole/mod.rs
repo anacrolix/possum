@@ -81,7 +81,7 @@ impl Iterator for Iter<'_> {
         let mut whence = first_whence;
         // This only runs twice. Once with each whence, starting with the one we didn't try last.
         loop {
-            match seek_hole_whence(self.file, self.offset as i64, whence) {
+            match seek_hole_whence(self.file, self.offset, whence) {
                 Ok(Some(offset)) if offset != self.offset => {
                     let region = Region {
                         region_type: !whence,
@@ -146,27 +146,35 @@ mod tests {
         if min_hole_size <= 1 {
             min_hole_size = 2;
         }
-        let mut temp_file = write_random_tempfile(min_hole_size)?;
-        let regions = file_regions(temp_file.as_file_mut())?;
+        let mut temp_file = write_random_tempfile(2 * min_hole_size)?;
+        let file_ref = temp_file.as_file_mut();
+        let regions = file_regions(file_ref)?;
         assert_eq!(
             regions,
             vec![Region {
                 region_type: Data,
                 start: 0,
-                end: min_hole_size
+                end: 2 * min_hole_size
             }]
         );
-        temp_file.as_file().set_sparse(true)?;
-        punchfile(temp_file.as_file(), 0, min_hole_size as i64)?;
-        temp_file.seek(Start(0))?;
-        let regions: Vec<_> = file_regions(temp_file.as_file_mut())?;
+        file_ref.set_sparse(true)?;
+        punchfile(file_ref, 0, min_hole_size as i64)?;
+        file_ref.seek(Start(0))?;
+        let regions: Vec<_> = file_regions(file_ref)?;
         assert_eq!(
             regions,
-            vec![Region {
-                region_type: Hole,
-                start: 0,
-                end: min_hole_size
-            }]
+            vec![
+                Region {
+                    region_type: Hole,
+                    start: 0,
+                    end: min_hole_size
+                },
+                Region {
+                    region_type: Data,
+                    start: min_hole_size,
+                    end: 2 * min_hole_size,
+                }
+            ]
         );
         Ok(())
     }

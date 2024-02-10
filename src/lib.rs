@@ -947,7 +947,7 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
 }
 
 pub fn check_hole(file: &mut File, offset: u64, length: u64) -> Result<()> {
-    match seek_hole_whence(file, offset as i64, seekhole::Data)? {
+    match seek_hole_whence(file, offset, seekhole::Data)? {
         // Data starts after the hole we just punched.
         Some(seek_offset) if seek_offset >= offset + length => Ok(()),
         // There's no data after the hole we just punched.

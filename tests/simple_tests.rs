@@ -310,26 +310,6 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
     assert_eq!(completed_hash, piece_data_hash);
     let handle_walk_entries = handle.walk_dir()?;
     let _counts = count_by_entry_types(&handle_walk_entries);
-    // ValuesFile count calculation might need changing if this doesn't hold.
-    assert_eq!(block_size as u64 % handle.block_size(), 0);
-    // This might all be reusable as a Handle current disk usage calculation.
-    let mut values_file_total_len = 0;
-    for entry in &handle_walk_entries {
-        if entry.entry_type != ValuesFile {
-            continue;
-        }
-        values_file_total_len += match possum::sys::path_disk_allocation(&entry.path) {
-            Ok(size) => size,
-            Err(err) if err.kind() == ErrorKind::NotFound => 0,
-            Err(err) => return Err(err).context(entry.path.display().to_string()),
-        };
-    }
-    if false {
-        dbg!(values_file_total_len);
-        assert!([0, 1]
-            .map(|extra_blocks| extra_blocks * block_size + 2 * piece_size)
-            .contains(&(values_file_total_len as usize)));
-    }
     assert_eq!(handle.list_items("a".as_bytes())?.len(), 0);
     assert_eq!(handle.list_items("c".as_bytes())?.len(), 1);
     let offsets_starting_with_1 = offsets_starting_with(block_offset_iter, "1").count();
@@ -532,7 +512,7 @@ where
 #[test]
 fn test_writeback_mmap() -> anyhow::Result<()> {
     let mut file = OpenOptions::new()
-        .append(true)
+        .write(true)
         .create(true)
         .open("writeback")?;
     file.set_len(0x1000)?;

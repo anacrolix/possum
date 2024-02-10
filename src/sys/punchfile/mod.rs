@@ -15,3 +15,21 @@ cfg_if! {
 }
 
 use super::*;
+
+#[cfg(test)]
+mod tests {
+    use self::test;
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn hole_punching() -> anyhow::Result<()> {
+        let mut temp_file = NamedTempFile::new()?;
+        let file = temp_file.as_file_mut();
+        file.set_sparse(true)?;
+        file.set_len(2)?;
+        punchfile(file, 0, 1)?;
+        check_hole(file, 0, 1)?;
+        Ok(())
+    }
+}

@@ -1,4 +1,9 @@
 use super::*;
+use std::convert::TryInto;
+use std::fs::File;
+use std::io;
+use std::io::SeekFrom;
+use std::io::SeekFrom::Start;
 
 pub enum FlockArg {
     LockShared,
@@ -12,17 +17,45 @@ pub enum FlockArg {
 use ::windows::Win32::System::Threading::CreateEventA;
 pub use FlockArg::*;
 
-pub fn try_lock_file(file: &mut File, arg: FlockArg) -> PubResult<bool> {
-    let lock_low = 1;
-    let lock_high = 0;
-    let event = unsafe { CreateEventA(None, false, false, PCSTR::null()) }?;
+impl FileLocking for File {
+    fn trim_exclusive_lock_left(&self, old: u64, new: u64) -> io::Result<bool> {
+        assert!(self.lock_segment(UnlockNonblock, None, old)?);
+        self.lock_segment(LockExclusiveNonblock, None, new)
+    }
+
+    fn lock_segment(&self, arg: FlockArg, len: Option<u64>, offset: u64) -> io::Result<bool> {
+        lock_file_segment(
+            self,
+            arg,
+            len.map(|len| len.try_into().unwrap()),
+            Start(offset),
+        )
+    }
+}
+
+pub fn lock_file_segment(
+    file: &File,
+    arg: FlockArg,
+    len: Option<i64>,
+    whence: SeekFrom,
+) -> io::Result<bool> {
+    // let event = unsafe { CreateEventA(None, false, false, PCSTR::null()) }?;
     // We lock and unlock an arbitrary 4 GiB, since Windows doesn't have whole-file locking.
     // Possibly we should use MAXDWORD or 0xffffffff instead.
     let handle = HANDLE(file.as_raw_handle() as isize);
+    let Start(offset) = whence else {
+        unimplemented!("{:?}", whence)
+    };
+    // The example suggests we might not need an event at all. We just need to point to an
+    // OVERLAPPED (which we're now using for the lock start offset).
     let mut overlapped = OVERLAPPED {
-        hEvent: event,
+        // hEvent: event,
         ..Default::default()
     };
+    let offset_parts = HighAndLow::from(offset);
+    dbg!(&offset_parts);
+    overlapped.Anonymous.Anonymous.Offset = offset_parts.low;
+    overlapped.Anonymous.Anonymous.OffsetHigh = offset_parts.high;
     let lpoverlapped = &mut overlapped as *mut _;
     // We need to map LOCKFILE_FAIL_IMMEDIATELY causing a FALSE return, and presumably an
     // ERROR_SUCCESS Windows error.
@@ -31,8 +64,22 @@ pub fn try_lock_file(file: &mut File, arg: FlockArg) -> PubResult<bool> {
         Err(err) if err.code().is_ok() || err.code() == ERROR_LOCK_VIOLATION.into() => Ok(false),
         Err(err) => Err(err.into()),
     };
+    let len = match len {
+        Some(len) => len.try_into().unwrap(),
+        None => MAX_LOCKFILE_OFFSET - offset,
+    };
+    let num_bytes_to_lock = HighAndLow::from(len);
+    dbg!(&num_bytes_to_lock);
     if matches!(arg, Unlock | UnlockNonblock) {
-        return convert(unsafe { UnlockFileEx(handle, 0, lock_low, lock_high, lpoverlapped) });
+        return convert(dbg!(unsafe {
+            UnlockFileEx(
+                handle,
+                0,
+                num_bytes_to_lock.low,
+                num_bytes_to_lock.high,
+                lpoverlapped,
+            )
+        }));
     }
     let mut dwflags = LOCK_FILE_FLAGS(0);
     if matches!(arg, LockExclusive | LockExclusiveNonblock) {
@@ -41,8 +88,33 @@ pub fn try_lock_file(file: &mut File, arg: FlockArg) -> PubResult<bool> {
     if matches!(arg, LockSharedNonblock | LockExclusiveNonblock) {
         dwflags |= LOCKFILE_FAIL_IMMEDIATELY;
     }
-    let result =
-        convert(unsafe { LockFileEx(handle, dwflags, 0, lock_low, lock_high, lpoverlapped) });
-    unsafe { CloseHandle(event) }.unwrap();
+    let result = convert(dbg!(unsafe {
+        LockFileEx(
+            handle,
+            dwflags,
+            0,
+            num_bytes_to_lock.low,
+            num_bytes_to_lock.high,
+            lpoverlapped,
+        )
+    }));
+    // unsafe { CloseHandle(event) }.unwrap();
     result
+}
+
+const MAX_LOCKFILE_OFFSET: u64 = u64::MAX;
+
+#[derive(Debug)]
+struct HighAndLow {
+    high: u32,
+    low: u32,
+}
+
+impl From<u64> for HighAndLow {
+    fn from(both: u64) -> Self {
+        Self {
+            high: (both >> 32) as u32,
+            low: both as u32,
+        }
+    }
 }

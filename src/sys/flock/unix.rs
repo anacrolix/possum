@@ -1,12 +1,8 @@
 use super::*;
 use std::io::SeekFrom;
 
-use nix::fcntl::FlockArg;
+pub use nix::fcntl::FlockArg;
 pub use nix::fcntl::FlockArg::*;
-
-pub fn try_lock_file(file: &mut File, arg: FlockArg) -> nix::Result<bool> {
-    lock_file_segment(file, arg, None, SeekFrom::Start(0))
-}
 
 fn seek_from_offset(seek_from: SeekFrom) -> i64 {
     use SeekFrom::*;
@@ -35,7 +31,7 @@ cfg_if! {
 }
 
 // #[instrument]
-pub fn lock_file_segment(
+pub(super) fn lock_file_segment(
     file: &File,
     arg: FlockArg,
     len: Option<i64>,
@@ -51,7 +47,7 @@ pub fn lock_file_segment(
     let l_type = match arg {
         LockShared | LockSharedNonblock => libc::F_RDLCK,
         LockExclusive | LockExclusiveNonblock => libc::F_WRLCK,
-        Unlock => libc::F_UNLCK,
+        Unlock | UnlockNonblock => libc::F_UNLCK,
         // Silly non-exhaustive enum.
         _ => unimplemented!(),
     };
@@ -64,10 +60,10 @@ pub fn lock_file_segment(
         l_type,
         l_whence: seek_from_whence(whence),
     };
-    use libc::{F_OFD_SETLK,F_OFD_SETLKW};
+    use libc::{F_OFD_SETLK, F_OFD_SETLKW};
     let arg = match arg {
         LockShared | LockExclusive => F_OFD_SETLKW,
-        LockSharedNonblock | LockExclusiveNonblock | Unlock => F_OFD_SETLK,
+        LockSharedNonblock | LockExclusiveNonblock | Unlock | UnlockNonblock => F_OFD_SETLK,
         _ => unimplemented!(),
     };
     // EWOULDBLOCK is an inherent impl const so can't be glob imported.
@@ -76,12 +72,27 @@ pub fn lock_file_segment(
     // my last one got stalled. https://github.com/nix-rust/nix/pull/2032#issuecomment-1931419587.
     // There doesn't seem to be a fcntl64 available for 32bit systems. Hopefully fcntl there still
     // takes a fcntl64 arg.
-    match Errno::result(unsafe {libc::fcntl(file.as_raw_fd(), arg, &flock_arg)}) {
+    match Errno::result(unsafe { libc::fcntl(file.as_raw_fd(), arg, &flock_arg) }) {
         Ok(_) => Ok(true),
         Err(errno) if errno == Errno::EWOULDBLOCK || errno == Errno::EAGAIN => Ok(false),
         Err(err) => {
             error!(?err, "fcntl");
             Err(err)
         }
+    }
+}
+
+impl FileLocking for File {
+    fn trim_exclusive_lock_left(&self, old_left: u64, new_left: u64) -> io::Result<bool> {
+        self.lock_segment(UnlockNonblock, Some(new_left - old_left), old_left)
+    }
+
+    fn lock_segment(&self, arg: FlockArg, len: Option<u64>, offset: u64) -> io::Result<bool> {
+        Ok(lock_file_segment(
+            self,
+            arg,
+            len.map(|some| some.try_into().unwrap()),
+            Start(offset),
+        )?)
     }
 }

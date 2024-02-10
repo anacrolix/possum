@@ -35,7 +35,7 @@ pub fn std_handle_to_windows(std: std::os::windows::io::RawHandle) -> HANDLE {
     HANDLE(std as isize)
 }
 
-pub fn file_disk_allocation(file: &File) -> anyhow::Result<u64> {
+pub fn file_disk_allocation(file: &File) -> io::Result<u64> {
     let handle = std_handle_to_windows(file.as_raw_handle());
     let mut stream_info: FILE_STREAM_INFO = Default::default();
     unsafe {
@@ -50,6 +50,6 @@ pub fn file_disk_allocation(file: &File) -> anyhow::Result<u64> {
     Ok(stream_info.StreamAllocationSize as u64)
 }
 
-pub fn path_disk_allocation(path: &Path) -> anyhow::Result<u64> {
+pub fn path_disk_allocation(path: &Path) -> io::Result<u64> {
     file_disk_allocation(&File::open(path)?)
 }

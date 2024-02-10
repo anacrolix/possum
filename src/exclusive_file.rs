@@ -51,7 +51,7 @@ impl ExclusiveFile {
 
     pub(crate) fn from_file(mut file: File, id: FileId) -> anyhow::Result<Option<ExclusiveFile>> {
         let end = file.seek(End(0))?;
-        if !lock_file_segment(&mut file, LockExclusiveNonblock, None, Start(end))? {
+        if !file.lock_segment(LockExclusiveNonblock, None, end)? {
             return Ok(None);
         }
         Ok(Some(ExclusiveFile {
@@ -61,21 +61,17 @@ impl ExclusiveFile {
         }))
     }
 
-    pub(crate) fn committed(&mut self) -> io::Result<()> {
+    pub(crate) fn committed(&mut self) -> io::Result<bool> {
         let new_committed_offset = self.inner.stream_position()?;
-        // Unlocking should never block, at least according to the change in FlockArg in nix.
-        assert!(lock_file_segment(
-            &self.inner,
-            Unlock,
-            Some((new_committed_offset - self.last_committed_offset) as i64),
-            Start(self.last_committed_offset),
-        )?);
-        self.last_committed_offset = new_committed_offset;
-        if false {
-            self.inner.flush()
-        } else {
-            Ok(())
+        // Remove the exclusive lock on the part we just committed.
+        if !self
+            .inner
+            .trim_exclusive_lock_left(self.last_committed_offset, new_committed_offset)?
+        {
+            return Ok(false);
         }
+        self.last_committed_offset = new_committed_offset;
+        Ok(true)
     }
 
     /// The exclusive file offset that writing should occur at. Maybe it shouldn't need to be

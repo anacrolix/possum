@@ -739,12 +739,7 @@ impl<'a> Reader<'a> {
     ) -> Result<Arc<Mutex<FileClone>>> {
         let mut file = open_file_id(OpenOptions::new().read(true), self.handle.dir(), file_id)?;
         for extent in read_extents {
-            if !lock_file_segment(
-                &file,
-                LockSharedNonblock,
-                Some(extent.len as i64),
-                Start(extent.offset),
-            )? {
+            if !file.lock_segment(LockSharedNonblock, Some(extent.len), extent.offset)? {
                 abort();
             }
         }
@@ -933,12 +928,7 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
     }
     assert!(length > 0);
     assert_eq!(offset % block_size, 0);
-    if !lock_file_segment(
-        &file,
-        LockExclusiveNonblock,
-        Some(length),
-        Start(offset as u64),
-    )? {
+    if !file.lock_segment(LockExclusiveNonblock, Some(length as u64), offset as u64)? {
         // TODO: If we can't delete immediately, we should schedule to try again later. Maybe
         // spinning up a thread, or putting in a slow queue.
         warn!(%file_id, %offset, %length, "can't punch, file segment locked");

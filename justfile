@@ -1,3 +1,6 @@
+build-tests-windows:
+    cargo test --no-run --target x86_64-pc-windows-gnu
+
 test-windows:
     cargo test --target x86_64-pc-windows-gnu
 

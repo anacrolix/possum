@@ -39,9 +39,8 @@ pub fn lock_file_segment(
     len: Option<i64>,
     whence: SeekFrom,
 ) -> io::Result<bool> {
+    // I'm not sure if we need an event if we want to do blocking locks and unlocks.
     // let event = unsafe { CreateEventA(None, false, false, PCSTR::null()) }?;
-    // We lock and unlock an arbitrary 4 GiB, since Windows doesn't have whole-file locking.
-    // Possibly we should use MAXDWORD or 0xffffffff instead.
     let handle = HANDLE(file.as_raw_handle() as isize);
     let Start(offset) = whence else {
         unimplemented!("{:?}", whence)
@@ -53,7 +52,6 @@ pub fn lock_file_segment(
         ..Default::default()
     };
     let offset_parts = HighAndLow::from(offset);
-    dbg!(&offset_parts);
     overlapped.Anonymous.Anonymous.Offset = offset_parts.low;
     overlapped.Anonymous.Anonymous.OffsetHigh = offset_parts.high;
     let lpoverlapped = &mut overlapped as *mut _;
@@ -61,7 +59,17 @@ pub fn lock_file_segment(
     // ERROR_SUCCESS Windows error.
     let convert = |res: ::windows::core::Result<()>| match res {
         Ok(()) => Ok(true),
-        Err(err) if err.code().is_ok() || err.code() == ERROR_LOCK_VIOLATION.into() => Ok(false),
+        Err(err)
+            if err.code().is_ok()
+                || [
+                    ERROR_LOCK_VIOLATION.into(),
+                    ERROR_IO_PENDING.into(),
+                    // ERROR_ACCESS_DENIED.into(),
+                ]
+                .contains(&err.code()) =>
+        {
+            Ok(false)
+        }
         Err(err) => Err(err.into()),
     };
     let len = match len {
@@ -69,9 +77,8 @@ pub fn lock_file_segment(
         None => MAX_LOCKFILE_OFFSET - offset,
     };
     let num_bytes_to_lock = HighAndLow::from(len);
-    dbg!(&num_bytes_to_lock);
     if matches!(arg, Unlock | UnlockNonblock) {
-        return convert(dbg!(unsafe {
+        return convert(unsafe {
             UnlockFileEx(
                 handle,
                 0,
@@ -79,7 +86,7 @@ pub fn lock_file_segment(
                 num_bytes_to_lock.high,
                 lpoverlapped,
             )
-        }));
+        });
     }
     let mut dwflags = LOCK_FILE_FLAGS(0);
     if matches!(arg, LockExclusive | LockExclusiveNonblock) {

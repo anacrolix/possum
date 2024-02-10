@@ -1,6 +1,8 @@
 //! Syscall wrappers for hole punching, system configuration, hole-seeking ( ͡° ͜ʖ ͡°), file cloning
 //! etc.
 
+pub use RegionType::*;
+
 use super::*;
 
 cfg_if! {
@@ -30,8 +32,6 @@ impl std::ops::Not for RegionType {
     }
 }
 
-pub use RegionType::*;
-
 pub type RegionOffset = u64;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -47,44 +47,9 @@ impl Region {
     }
 }
 
-/// Mutable because the File offset may be changed.
-pub fn file_regions(file: &mut File) -> io::Result<Vec<Region>> {
-    let mut offsets = vec![];
-    {
-        let mut offset = 0;
-        let mut whence = Data;
-        loop {
-            let new_offset = match seek_hole_whence(file, offset as i64, whence)? {
-                Some(a) => a,
-                None => match whence {
-                    Hole => break,
-                    Data => file.seek(End(0))?,
-                },
-            };
-            offsets.push((new_offset, whence));
-            whence = !whence;
-            offset = new_offset;
-        }
-    }
-    offsets.sort_by_key(|tuple| tuple.0);
-    let mut last_offset = 0;
-    let mut last_type = Hole;
-    let mut output = vec![];
-    for (offset, region_type) in offsets {
-        let region = Region {
-            region_type: last_type,
-            start: last_offset,
-            end: offset,
-        };
-        last_type = region_type;
-        if region.length() == 0 {
-            continue;
-        }
-        last_offset = offset;
-        output.push(region);
-    }
-    assert_eq!(output, regions_iter_to_vec(file).unwrap());
-    Ok(output)
+pub fn file_regions(file: &mut File) -> anyhow::Result<Vec<Region>> {
+    let itered: Vec<_> = Iter::new(file).collect::<io::Result<Vec<_>>>()?;
+    Ok(itered)
 }
 
 pub struct Iter<'a> {
@@ -116,7 +81,6 @@ impl Iterator for Iter<'_> {
         let mut whence = first_whence;
         // This only runs twice. Once with each whence, starting with the one we didn't try last.
         loop {
-            // dbg!(self.offset, whence);
             match seek_hole_whence(self.file, self.offset as i64, whence) {
                 Ok(Some(offset)) if offset != self.offset => {
                     let region = Region {
@@ -175,13 +139,6 @@ mod tests {
     use crate::pathconf::path_min_hole_size;
     use crate::testing::write_random_tempfile;
 
-    fn get_regions(file: &mut File) -> anyhow::Result<Vec<Region>> {
-        let itered: Vec<_> = Iter::new(file).collect::<io::Result<Vec<_>>>()?;
-        // let vec = file_regions(file)?;
-        // assert_eq!(itered, vec);
-        Ok(itered)
-    }
-
     #[self::test]
     fn just_a_hole() -> anyhow::Result<()> {
         let os_temp_dir = temp_dir();
@@ -190,7 +147,7 @@ mod tests {
             min_hole_size = 2;
         }
         let mut temp_file = write_random_tempfile(min_hole_size)?;
-        let regions = get_regions(temp_file.as_file_mut())?;
+        let regions = file_regions(temp_file.as_file_mut())?;
         assert_eq!(
             regions,
             vec![Region {
@@ -199,9 +156,10 @@ mod tests {
                 end: min_hole_size
             }]
         );
+        temp_file.as_file().set_sparse(true)?;
         punchfile(temp_file.as_file(), 0, min_hole_size as i64)?;
         temp_file.seek(Start(0))?;
-        let regions: Vec<_> = get_regions(temp_file.as_file_mut())?;
+        let regions: Vec<_> = file_regions(temp_file.as_file_mut())?;
         assert_eq!(
             regions,
             vec![Region {

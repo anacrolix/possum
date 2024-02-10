@@ -18,8 +18,7 @@ pub fn seek_hole_whence(
             Length: i64::MAX - file_offset,
         }],
         &mut output,
-    )
-    .map_err(windows_error_to_io)?;
+    )?;
     match whence {
         Hole => match output[..] {
             [next_range, ..] => Ok(Some(
@@ -32,8 +31,4 @@ pub fn seek_hole_whence(
             [] => Ok(None),
         },
     }
-}
-
-fn windows_error_to_io(win_error: ::windows::core::Error) -> io::Error {
-    io::Error::from_raw_os_error(win_error.code().0)
 }

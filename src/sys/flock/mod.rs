@@ -37,7 +37,10 @@ mod tests {
     fn open_locked_file() -> anyhow::Result<()> {
         let file1_named = NamedTempFile::new()?;
         let file1_ref = file1_named.as_file();
+        let file_reopen = file1_named.reopen()?;
         assert!(file1_ref.lock_segment(LockExclusiveNonblock, None, 1)?);
+        // Trying to exclusively lock from another file handle fails immediately.
+        assert!(!file_reopen.lock_segment(LockExclusiveNonblock, None, 2)?);
         let file_reader = OpenOptions::new().read(true).open(file1_named.path())?;
         assert!(file_reader.lock_segment(LockSharedNonblock, Some(1), 0,)?);
         Ok(())

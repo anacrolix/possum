@@ -22,6 +22,15 @@ impl ExclusiveFile {
     fn new_open_options() -> OpenOptions {
         let mut ret = OpenOptions::new();
         ret.append(true);
+        // On Windows, we require GENERIC_READ or GENERIC_WRITE
+        // https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-lockfileex to
+        // create exclusive file locks. But .append(true) strips FILE_WRITE_DATA which makes us not
+        // FILE_GENERIC_WRITE
+        // https://learn.microsoft.com/en-us/windows/win32/fileio/file-security-and-access-rights. I
+        // think it's more important to ensure we're only appending than it is to prevent reads.
+
+        #[cfg(windows)]
+        ret.read(true);
         ret
     }
 
@@ -54,6 +63,7 @@ impl ExclusiveFile {
         if !file.lock_segment(LockExclusiveNonblock, None, end)? {
             return Ok(None);
         }
+        file.set_sparse(true)?;
         Ok(Some(ExclusiveFile {
             inner: file,
             id,

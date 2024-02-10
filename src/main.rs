@@ -10,6 +10,7 @@ use possum::sys::punchfile::punchfile;
 use possum::sys::seekhole::{file_regions, Region, RegionType};
 use possum::tx::ReadTransactionRef;
 use possum::{ceil_multiple, check_hole, Handle, NonzeroValueLocation, WalkEntry};
+use possum::sys::SparseFile;
 
 #[derive(clap::Subcommand)]
 enum Commands {
@@ -146,9 +147,11 @@ fn main() -> anyhow::Result<()> {
                             .map(|path| path == &values_file_entry.path)
                             .unwrap_or(true)
                         {
+                            // Read access might be required to query allocated ranges on Windows.
                             let mut file = std::fs::OpenOptions::new()
-                                .write(true)
+                                .write(true).read(true)
                                 .open(&values_file_entry.path)?;
+                            file.set_sparse(true)?;
                             // Make sure nobody could be writing to the file. It should be possible
                             // to punch holes before the last value despite this (just as greedy
                             // start hole punching occurs during regular key deletes).

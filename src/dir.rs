@@ -1,4 +1,5 @@
 use super::*;
+use crate::pathconf::path_min_hole_size;
 use std::borrow::Borrow;
 
 #[derive(Clone, Debug)]
@@ -22,9 +23,10 @@ impl Borrow<Path> for Dir {
 impl Dir {
     pub fn new(path_buf: PathBuf) -> Result<Self> {
         fs::create_dir_all(&path_buf)?;
+        let block_size = path_min_hole_size(&path_buf)?;
         Ok(Self {
             path_buf,
-            block_size: 4096,
+            block_size,
         })
     }
 

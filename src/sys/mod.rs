@@ -45,3 +45,7 @@ cfg_if! {
         pub use nix::libc::lseek;
     }
 }
+
+pub trait SparseFile {
+    fn set_sparse(&self, set_sparse: bool) -> io::Result<()>;
+}

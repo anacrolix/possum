@@ -126,11 +126,6 @@ impl Iterator for Iter<'_> {
     }
 }
 
-fn regions_iter_to_vec(file: &mut File) -> std::io::Result<Vec<Region>> {
-    let itered: Vec<_> = Iter::new(file).collect::<std::io::Result<Vec<_>>>()?;
-    Ok(itered)
-}
-
 #[cfg(test)]
 mod tests {
     use std::env::temp_dir;

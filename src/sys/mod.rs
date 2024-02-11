@@ -20,7 +20,6 @@ cfg_if! {
         use ::windows::Win32::Foundation::*;
         use std::os::windows::io::AsRawHandle;
         use ::windows::Win32::Storage::FileSystem::*;
-        use ::windows::core::*;
         use ::windows::Win32::System::IO::*;
     } else if #[cfg(unix)] {
         mod unix;

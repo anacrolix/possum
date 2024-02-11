@@ -14,7 +14,6 @@ pub enum FlockArg {
     UnlockNonblock,
 }
 
-use ::windows::Win32::System::Threading::CreateEventA;
 pub use FlockArg::*;
 
 impl FileLocking for File {

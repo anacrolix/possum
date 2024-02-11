@@ -4,11 +4,9 @@ cfg_if! {
     if #[cfg(unix)] {
         mod unix;
         pub use self::unix::*;
-        const REENTRANT_LOCKS: bool = true;
     } else if #[cfg(windows)] {
         mod windows;
         pub use self::windows::*;
-        const REENTRANT_LOCKS: bool = false;
     }
 }
 

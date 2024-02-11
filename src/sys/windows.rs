@@ -1,7 +1,6 @@
 //! Windows specific APIs
 
 use super::*;
-use memmap2::MmapAsRawDesc;
 use std::mem::{size_of, size_of_val};
 
 type AllocatedRanges = Vec<FILE_ALLOCATED_RANGE_BUFFER>;

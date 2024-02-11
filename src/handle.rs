@@ -29,8 +29,7 @@ type ManifestUserVersion = u32;
 impl Handle {
     /// Whether file cloning should be attempted.
     pub fn file_cloning_enabled(&self) -> bool {
-        // Ultimately this should depend on configuration, system, and filesystem capabilities.
-        false
+        self.dir.supports_file_cloning()
     }
 
     pub fn set_instance_limits(&mut self, limits: Limits) -> Result<()> {
@@ -250,9 +249,9 @@ impl Handle {
         Ok(deleted)
     }
 
-    pub fn clone_from_file(&mut self, key: Vec<u8>, file: &File) -> Result<u64> {
+    pub fn clone_from_file(&mut self, key: Vec<u8>, file: &mut File) -> Result<u64> {
         let mut writer = self.new_writer()?;
-        let mut value = writer.new_value().clone_file(file, 0)?;
+        let mut value = writer.new_value().clone_file(file)?;
         let n = value.value_length()?;
         writer.stage_write(key, value)?;
         writer.commit()?;

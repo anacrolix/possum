@@ -6,6 +6,7 @@ use std::borrow::Borrow;
 pub(crate) struct Dir {
     path_buf: PathBuf,
     block_size: u64,
+    supports_file_cloning: bool,
 }
 
 impl AsRef<Path> for Dir {
@@ -24,9 +25,12 @@ impl Dir {
     pub fn new(path_buf: PathBuf) -> Result<Self> {
         fs::create_dir_all(&path_buf)?;
         let block_size = path_min_hole_size(&path_buf)?;
+        let file = open_dir_as_file(&path_buf)?;
+        let supports_file_cloning = file.file_system_flags()?.supports_block_cloning();
         Ok(Self {
             path_buf,
             block_size,
+            supports_file_cloning,
         })
     }
 
@@ -36,5 +40,9 @@ impl Dir {
 
     pub fn block_size(&self) -> u64 {
         self.block_size
+    }
+
+    pub fn supports_file_cloning(&self) -> bool {
+        self.supports_file_cloning
     }
 }

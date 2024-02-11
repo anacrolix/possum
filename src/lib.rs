@@ -111,7 +111,19 @@ pub struct BeginWriteValue<'writer, 'handle> {
 }
 
 impl BeginWriteValue<'_, '_> {
-    pub fn clone_file(self, file: &File, _flags: u32) -> PubResult<ValueWriter> {
+    // TODO: On Linux and Windows, this should be possible without creating a new file. I'm not sure
+    // if it's worth it however, since cloned blocks have to be a of a minimum size and alignment.
+    // See also
+    // https://stackoverflow.com/questions/65505765/difference-of-ficlone-vs-ficlonerange-vs-copy-file-range-for-copy-on-write-supp
+    // for a discussion on efficient ways to copy values that could be supported.
+    pub fn clone_file(self, file: &mut File) -> PubResult<ValueWriter> {
+        if !self.batch.handle.file_cloning_enabled() {
+            let mut value_writer = self.begin()?;
+            // Need to rewind the file since we're cloning the whole thing.
+            file.seek(Start(0))?;
+            value_writer.copy_from(file)?;
+            return Ok(value_writer);
+        }
         let dst_path = loop {
             let dst_path = random_file_name_in_dir(self.batch.handle.dir.path());
             match fclonefile_noflags(file, &dst_path) {
@@ -120,8 +132,9 @@ impl BeginWriteValue<'_, '_> {
                 Ok(()) => break dst_path,
             }
         };
-        // Should we delete this file if we fail to open it exclusively? I think it is possible that someone else
-        // could open it before us. In that case we probably want to punch out the part we cloned and move on.
+        // Should we delete this file if we fail to open it exclusively? I think it is possible that
+        // someone else could open it before us. In that case we probably want to punch out the part
+        // we cloned and move on.
         let exclusive_file = ExclusiveFile::open(dst_path)?.unwrap();
         Ok(ValueWriter {
             exclusive_file,
@@ -150,7 +163,7 @@ impl ValueWriter {
         Ok(&mut self.exclusive_file.inner)
     }
 
-    pub fn copy_from(&mut self, mut value: impl Read) -> Result<u64> {
+    pub fn copy_from(&mut self, mut value: impl Read) -> PubResult<u64> {
         let value_file_offset = self.exclusive_file.next_write_offset()?;
         let value_length = match std::io::copy(&mut value, &mut self.exclusive_file.inner) {
             Ok(ok) => ok,

@@ -2,6 +2,7 @@
 
 use super::*;
 use std::mem::{size_of, size_of_val};
+use std::os::windows::fs::OpenOptionsExt;
 
 type AllocatedRanges = Vec<FILE_ALLOCATED_RANGE_BUFFER>;
 
@@ -102,7 +103,7 @@ pub(crate) fn device_io_control<I: ?Sized, O: ?Sized>(
     Ok(bytes_returned)
 }
 
-fn get_volume_information_by_handle(file: &File) -> io::Result<FileSystemFlags> {
+fn get_volume_information_by_handle(file: &File) -> io::Result<WindowsFileSystemFlags> {
     let mut flags: u32 = 0;
     let mut fs_name = [0; 16];
     unsafe {
@@ -115,12 +116,12 @@ fn get_volume_information_by_handle(file: &File) -> io::Result<FileSystemFlags> 
             Some(&mut fs_name),
         )
     }?;
-    Ok(FileSystemFlags(flags))
+    Ok(WindowsFileSystemFlags(flags))
 }
 
-pub struct FileSystemFlags(pub u32);
+pub struct WindowsFileSystemFlags(pub u32);
 
-impl FileSystemFlags {
+impl super::FileSystemFlags for WindowsFileSystemFlags {
     fn supports_sparse_files(&self) -> bool {
         self.0 & FILE_SUPPORTS_SPARSE_FILES != 0
     }
@@ -129,7 +130,7 @@ impl FileSystemFlags {
     }
 }
 
-impl Debug for FileSystemFlags {
+impl Debug for WindowsFileSystemFlags {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         fmt.debug_struct("FileSystemFlags")
             .field("supports_sparse_files", &self.supports_sparse_files())
@@ -145,21 +146,26 @@ impl Debug for FileSystemFlags {
     }
 }
 
+impl DirMeta for File {
+    fn file_system_flags(&self) -> io::Result<impl FileSystemFlags> {
+        get_volume_information_by_handle(self)
+    }
+}
+
+pub fn open_dir_as_file<P: AsRef<Path>>(path: P) -> io::Result<File> {
+    OpenOptions::new().read(true).custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0).open(path)
+}
+
 #[cfg(test)]
 mod tests {
     use self::test;
     use super::*;
     use crate::sys::windows::get_volume_information_by_handle;
-    use std::fs::OpenOptions;
-    use std::os::windows::fs::OpenOptionsExt;
 
     #[test]
     fn test_get_volume_information_by_handle_on_dir() -> anyhow::Result<()> {
         let tempdir = tempfile::tempdir()?;
-        let file = OpenOptions::new()
-            .read(true)
-            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
-            .open(tempdir.path())?;
+        let file = open_dir_as_file(tempdir.path())?;
         dbg!(get_volume_information_by_handle(&file))?;
         Ok(())
     }

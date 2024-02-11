@@ -145,7 +145,10 @@ fn clone_in_file() -> Result<()> {
     let mut handle = Handle::new(tempdir.path().to_owned())?;
     let mut file = write_random_tempfile(42069)?;
     let key = "hi\x00elon".as_bytes();
-    handle.clone_from_file(key.to_owned(), file.as_file())?;
+    assert_eq!(
+        handle.clone_from_file(key.to_owned(), file.as_file_mut())?,
+        42069
+    );
     file.seek(Start(0))?;
     compare_reads(
         handle

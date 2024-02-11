@@ -49,3 +49,12 @@ cfg_if! {
 pub trait SparseFile {
     fn set_sparse(&self, set_sparse: bool) -> io::Result<()>;
 }
+
+pub trait FileSystemFlags {
+    fn supports_sparse_files(&self) -> bool;
+    fn supports_block_cloning(&self) -> bool;
+}
+
+pub trait DirMeta {
+    fn file_system_flags(&self) -> io::Result<impl FileSystemFlags>;
+}

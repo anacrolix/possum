@@ -57,7 +57,7 @@ pub fn fclonefile_noflags(src_file: &File, dst_path: &Path) -> PubResult<()> {
         if #[cfg(windows)] {
             use std::ffi::c_void;
             let dst_file = File::create(dst_path)?;
-            let dst_handle = HANDLE(dst_file.as_raw_handle() as isize);
+            let dst_handle = std_handle_to_windows(dst_file.as_raw_handle());
             let src_metadata = src_file.metadata()?;
             let byte_count = src_metadata.len() as i64;
             let data = DUPLICATE_EXTENTS_DATA {

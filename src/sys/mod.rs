@@ -21,6 +21,7 @@ cfg_if! {
         use std::os::windows::io::AsRawHandle;
         use ::windows::Win32::Storage::FileSystem::*;
         use ::windows::Win32::System::IO::*;
+        use ::windows::Win32::System::SystemServices::*;
     } else if #[cfg(unix)] {
         mod unix;
         pub use unix::*;

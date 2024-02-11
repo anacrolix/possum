@@ -101,3 +101,66 @@ pub(crate) fn device_io_control<I: ?Sized, O: ?Sized>(
     }
     Ok(bytes_returned)
 }
+
+fn get_volume_information_by_handle(file: &File) -> io::Result<FileSystemFlags> {
+    let mut flags: u32 = 0;
+    let mut fs_name = [0; 16];
+    unsafe {
+        GetVolumeInformationByHandleW(
+            std_handle_to_windows(file.as_raw_handle()),
+            None,
+            None,
+            None,
+            Some(&mut flags as *mut _),
+            Some(&mut fs_name),
+        )
+    }?;
+    Ok(FileSystemFlags(flags))
+}
+
+pub struct FileSystemFlags(pub u32);
+
+impl FileSystemFlags {
+    fn supports_sparse_files(&self) -> bool {
+        self.0 & FILE_SUPPORTS_SPARSE_FILES != 0
+    }
+    fn supports_block_cloning(&self) -> bool {
+        self.0 & FILE_SUPPORTS_BLOCK_REFCOUNTING != 0
+    }
+}
+
+impl Debug for FileSystemFlags {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        fmt.debug_struct("FileSystemFlags")
+            .field("supports_sparse_files", &self.supports_sparse_files())
+            .field("supports_block_cloning", &self.supports_block_cloning())
+            .field(
+                "other_flags",
+                &format_args!(
+                    "0x{:08x}",
+                    self.0 & !(FILE_SUPPORTS_SPARSE_FILES | FILE_SUPPORTS_BLOCK_REFCOUNTING)
+                ),
+            )
+            .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use self::test;
+    use super::*;
+    use crate::sys::windows::get_volume_information_by_handle;
+    use std::fs::OpenOptions;
+    use std::os::windows::fs::OpenOptionsExt;
+
+    #[test]
+    fn test_get_volume_information_by_handle_on_dir() -> anyhow::Result<()> {
+        let tempdir = tempfile::tempdir()?;
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
+            .open(tempdir.path())?;
+        dbg!(get_volume_information_by_handle(&file))?;
+        Ok(())
+    }
+}

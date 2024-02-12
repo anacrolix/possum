@@ -153,7 +153,7 @@ mod tests {
             }]
         );
         file_ref.set_sparse(true)?;
-        punchfile(file_ref, 0, min_hole_size as i64)?;
+        punchfile(&file_ref, 0, min_hole_size as i64)?;
         file_ref.seek(Start(0))?;
         let regions: Vec<_> = file_regions(file_ref)?;
         assert_eq!(

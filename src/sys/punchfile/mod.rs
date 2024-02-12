@@ -1,5 +1,4 @@
-//! Syscall wrappers for hole punching, system configuration, hole-seeking ( ͡° ͜ʖ ͡°), file cloning
-//! etc.
+//! File hole punching support
 
 cfg_if! {
     if #[cfg(target_os = "linux")] {
@@ -28,7 +27,7 @@ mod tests {
         let file = temp_file.as_file_mut();
         file.set_sparse(true)?;
         file.set_len(2)?;
-        punchfile(file, 0, 1)?;
+        punchfile(&file, 0, 1)?;
         check_hole(file, 0, 1)?;
         Ok(())
     }

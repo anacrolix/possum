@@ -1,3 +1,6 @@
+// Applications should use fpathconf(_PC_MIN_HOLE_SIZE) or pathconf(_PC_MIN_HOLE_SIZE) to determine
+// if a file system supports SEEK_HOLE. See pathconf(2).
+
 use std::ffi::c_int;
 use std::io;
 use std::io::Error;
@@ -10,15 +13,16 @@ use super::*;
 
 type SeekWhence = c_int;
 
-/// Using i64 rather than off_t to enforce 64-bit offsets (the libc wrappers all use type aliases
-/// anyway).
+/// Using 64 bit integer type rather than off_t to enforce 64-bit offsets (the libc wrappers all use
+/// type aliases anyway). For SEEK_HOLE and SEEK_DATA, I don't think negative offset has any
+/// meaning, and Windows uses u64. So use u64 for consistency.
 pub fn seek_hole_whence(
     file: &mut File,
-    offset: i64,
+    offset: u64,
     whence: impl Into<SeekWhence>,
 ) -> io::Result<Option<RegionOffset>> {
     // lseek64?
-    match lseek(file.as_raw_fd(), offset, whence) {
+    match lseek(file.as_raw_fd(), offset as i64, whence) {
         Ok(offset) => Ok(Some(offset as RegionOffset)),
         Err(errno) => {
             if errno == ENXIO {

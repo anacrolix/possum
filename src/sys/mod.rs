@@ -50,6 +50,18 @@ pub trait SparseFile {
     fn set_sparse(&self, set_sparse: bool) -> io::Result<()>;
 }
 
+#[cfg(not(windows))]
+impl SparseFile for File {
+    fn set_sparse(&self, _set_sparse: bool) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+#[cfg(not(windows))]
+pub fn open_dir_as_file<P: AsRef<Path>>(path: P) -> io::Result<File> {
+    OpenOptions::new().read(true).open(path)
+}
+
 pub trait FileSystemFlags {
     fn supports_sparse_files(&self) -> bool;
     fn supports_block_cloning(&self) -> bool;
@@ -57,4 +69,26 @@ pub trait FileSystemFlags {
 
 pub trait DirMeta {
     fn file_system_flags(&self) -> io::Result<impl FileSystemFlags>;
+}
+
+struct SupportsEverythingFilesystemFlags {}
+impl FileSystemFlags for SupportsEverythingFilesystemFlags {
+    fn supports_sparse_files(&self) -> bool {
+        // AFAIK, all unix systems support sparse files on all filesystems.
+        true
+    }
+
+    fn supports_block_cloning(&self) -> bool {
+        // I don't know how to constraint this. AFAIK there's no way to check if a filesystem
+        // supports block cloning, and even if it does it depends on where you're copying to/from,
+        // sometimes even on the same filesystem.
+        true
+    }
+}
+
+#[cfg(not(windows))]
+impl DirMeta for File {
+    fn file_system_flags(&self) -> io::Result<impl FileSystemFlags> {
+        Ok(SupportsEverythingFilesystemFlags {})
+    }
 }

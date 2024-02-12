@@ -153,7 +153,10 @@ impl DirMeta for File {
 }
 
 pub fn open_dir_as_file<P: AsRef<Path>>(path: P) -> io::Result<File> {
-    OpenOptions::new().read(true).custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0).open(path)
+    OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0)
+        .open(path)
 }
 
 #[cfg(test)]

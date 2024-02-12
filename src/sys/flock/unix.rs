@@ -44,6 +44,7 @@ pub(super) fn lock_file_segment(
             return Ok(true);
         }
     }
+    #[allow(deprecated)]
     let l_type = match arg {
         LockShared | LockSharedNonblock => libc::F_RDLCK,
         LockExclusive | LockExclusiveNonblock => libc::F_WRLCK,
@@ -61,6 +62,7 @@ pub(super) fn lock_file_segment(
         l_whence: seek_from_whence(whence),
     };
     use libc::{F_OFD_SETLK, F_OFD_SETLKW};
+    #[allow(deprecated)]
     let arg = match arg {
         LockShared | LockExclusive => F_OFD_SETLKW,
         LockSharedNonblock | LockExclusiveNonblock | Unlock | UnlockNonblock => F_OFD_SETLK,
@@ -84,6 +86,7 @@ pub(super) fn lock_file_segment(
 
 impl FileLocking for File {
     fn trim_exclusive_lock_left(&self, old_left: u64, new_left: u64) -> io::Result<bool> {
+        #[allow(deprecated)]
         self.lock_segment(UnlockNonblock, Some(new_left - old_left), old_left)
     }
 

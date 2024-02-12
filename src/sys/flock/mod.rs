@@ -27,10 +27,6 @@ mod tests {
     use crate::test;
     use tempfile::NamedTempFile;
 
-    fn lock_entire_file_exclusive(file: &mut File) -> anyhow::Result<bool> {
-        try_lock_file(file, LockExclusiveNonblock).map_err(Into::into)
-    }
-
     #[test]
     fn open_locked_file() -> anyhow::Result<()> {
         let file1_named = NamedTempFile::new()?;

@@ -45,6 +45,7 @@ pub use test_log::test;
 use tracing::*;
 pub use walk::Entry as WalkEntry;
 use ErrorKind::InvalidInput;
+use sys::pathconf;
 
 mod c_api;
 mod cpathbuf;
@@ -53,7 +54,6 @@ mod exclusive_file;
 pub mod handle;
 mod item;
 mod owned_cell;
-mod pathconf;
 pub mod sys;
 #[cfg(feature = "testing")]
 pub mod testing;

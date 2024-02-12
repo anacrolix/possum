@@ -23,13 +23,14 @@ mod tests {
     use tempfile::NamedTempFile;
 
     #[test]
+    #[allow(clippy::identity_op)]
     fn hole_punching() -> anyhow::Result<()> {
         let mut temp_file = NamedTempFile::new()?;
         let file = temp_file.as_file_mut();
         file.set_sparse(true)?;
         let hole_alignment = fd_min_hole_size(file)?;
         file.set_len(2 * hole_alignment)?;
-        punchfile(&file, 0, 1 * hole_alignment)?;
+        punchfile(file, 0, 1 * hole_alignment)?;
         check_hole(file, 0, 1 * hole_alignment)?;
         Ok(())
     }

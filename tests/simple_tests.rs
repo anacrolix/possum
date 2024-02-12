@@ -312,7 +312,7 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
     let completed_hash = hash_reader(completed_reader)?;
     assert_eq!(completed_hash, piece_data_hash);
     let handle_walk_entries = handle.walk_dir()?;
-    let _counts = count_by_entry_types(&handle_walk_entries);
+    let _counts = count_by_entry_types(handle_walk_entries);
     assert_eq!(handle.list_items("a".as_bytes())?.len(), 0);
     assert_eq!(handle.list_items("c".as_bytes())?.len(), 1);
     let offsets_starting_with_1 = offsets_starting_with(block_offset_iter, "1").count();
@@ -387,7 +387,7 @@ fn cleanup_snapshots() -> Result<()> {
             .count()
     };
     let handle = Handle::new(tempdir.path.clone())?;
-    if !handle.file_cloning_enabled() {
+    if !handle.dir_supports_file_cloning() {
         return Ok(());
     }
     handle.cleanup_snapshots()?;

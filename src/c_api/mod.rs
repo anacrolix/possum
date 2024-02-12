@@ -17,7 +17,7 @@ use super::*;
 
 impl AsRef<[u8]> for PossumBuf {
     fn as_ref(&self) -> &[u8] {
-        let ptr = self.ptr as *const u8;
+        let ptr = self.ptr as _;
         unsafe { slice::from_raw_parts(ptr, self.size) }
     }
 }

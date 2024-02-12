@@ -3,7 +3,7 @@ use std::convert::TryInto;
 use std::io;
 use std::io::Error;
 
-pub fn punchfile(file: impl AsFd, offset: u64, length: u64) -> io::Result<()> {
+pub fn punchfile(file: &File, offset: u64, length: u64) -> io::Result<()> {
     // TODO: On solaris we want fcntl(F_FREESP);
     let fd = file.as_fd().as_raw_fd();
     let mode = libc::FALLOC_FL_KEEP_SIZE | libc::FALLOC_FL_PUNCH_HOLE;

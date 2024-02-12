@@ -117,7 +117,7 @@ impl BeginWriteValue<'_, '_> {
     // https://stackoverflow.com/questions/65505765/difference-of-ficlone-vs-ficlonerange-vs-copy-file-range-for-copy-on-write-supp
     // for a discussion on efficient ways to copy values that could be supported.
     pub fn clone_file(self, file: &mut File) -> PubResult<ValueWriter> {
-        if !self.batch.handle.file_cloning_enabled() {
+        if !self.batch.handle.dir_supports_file_cloning() {
             let mut value_writer = self.begin()?;
             // Need to rewind the file since we're cloning the whole thing.
             file.seek(Start(0))?;
@@ -128,7 +128,7 @@ impl BeginWriteValue<'_, '_> {
             let dst_path = random_file_name_in_dir(self.batch.handle.dir.path());
             match fclonefile_noflags(file, &dst_path) {
                 Err(err) if err.is_file_already_exists() => continue,
-                Err(err) => return Err(err.into()),
+                Err(err) => return Err(err),
                 Ok(()) => break dst_path,
             }
         };
@@ -699,7 +699,7 @@ impl<'a> Reader<'a> {
                 return Ok(ret.clone());
             }
         }
-        if self.handle.file_cloning_enabled() {
+        if self.handle.dir_supports_file_cloning() {
             let tempdir: &Arc<TempDir> = match tempdir {
                 Some(tempdir) => tempdir,
                 None => {
@@ -710,7 +710,7 @@ impl<'a> Reader<'a> {
                     tempdir.as_ref().unwrap()
                 }
             };
-            let src_path = file_path(src_dir, &file_id);
+            let src_path = file_path(src_dir, file_id);
             // TODO: In order for value files to support truncation, a shared or exclusive lock would
             // need to be taken before cloning. I don't think this is possible, we would have to wait
             // for anyone holding an exclusive lock to release it. Handles already cache these, plus
@@ -721,9 +721,9 @@ impl<'a> Reader<'a> {
                 assert!(try_lock_file(&mut src_file, flock::LockSharedNonblock)?);
             }
             let tempdir_path = tempdir.path();
-            let dst_path = file_path(tempdir_path, &file_id);
+            let dst_path = file_path(tempdir_path, file_id);
             clonefile(&src_path, &dst_path).context("cloning file")?;
-            let mut file = open_file_id(OpenOptions::new().read(true), tempdir_path, &file_id)
+            let mut file = open_file_id(OpenOptions::new().read(true), tempdir_path, file_id)
                 .context("opening value file")?;
             // This prevents the snapshot file from being cleaned up. There's probably a race between
             // here and when it was cloned above. I wonder if the snapshot dir can be locked, or if we

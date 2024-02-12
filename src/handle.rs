@@ -28,7 +28,7 @@ type ManifestUserVersion = u32;
 
 impl Handle {
     /// Whether file cloning should be attempted.
-    pub fn file_cloning_enabled(&self) -> bool {
+    pub fn dir_supports_file_cloning(&self) -> bool {
         self.dir.supports_file_cloning()
     }
 
@@ -134,8 +134,8 @@ impl Handle {
         // Make sure nobody is reading while we're doing this change, and that nobody else attempts
         // to start initializing the schema while we're doing it.
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if get_user_version(&*tx)? < Self::USER_VERSION {
-            init_manifest_schema(&*tx)?;
+        if get_user_version(&tx)? < Self::USER_VERSION {
+            init_manifest_schema(&tx)?;
             tx.pragma_update(None, "user_version", Self::USER_VERSION)?;
         }
         if false {

@@ -105,6 +105,7 @@ pub fn lock_file_segment(
         )
     }));
     // unsafe { CloseHandle(event) }.unwrap();
+    #[allow(clippy::let_and_return)]
     result
 }
 

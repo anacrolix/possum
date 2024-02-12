@@ -2,9 +2,9 @@ use super::*;
 
 pub mod clonefile;
 pub mod flock;
+pub mod pathconf;
 pub mod punchfile;
 pub mod seekhole;
-pub mod pathconf;
 
 pub use clonefile::*;
 pub use flock::*;

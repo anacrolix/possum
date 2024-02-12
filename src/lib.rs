@@ -38,6 +38,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 use std::{fs, io};
 use sys::flock;
+use sys::pathconf;
 use sys::*;
 use tempfile::TempDir;
 #[cfg(test)]
@@ -45,7 +46,6 @@ pub use test_log::test;
 use tracing::*;
 pub use walk::Entry as WalkEntry;
 use ErrorKind::InvalidInput;
-use sys::pathconf;
 
 mod c_api;
 mod cpathbuf;
@@ -948,7 +948,12 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
         return Ok(());
     }
     debug!(?file, %offset, %length, "punching");
-    punchfile(&file, offset, length).with_context(|| format!("length {}", length))?;
+    punchfile(
+        &file,
+        offset.try_into().unwrap(),
+        length.try_into().unwrap(),
+    )
+    .with_context(|| format!("length {}", length))?;
     // fcntl(file.as_raw_fd(), nix::fcntl::F_FULLFSYNC)?;
     // file.flush()?;
     if check_holes {

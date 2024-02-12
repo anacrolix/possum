@@ -1,12 +1,13 @@
 use super::*;
+use std::convert::TryInto;
 use std::io;
 
-pub fn punchfile(file: &File, offset: i64, length: i64) -> io::Result<()> {
+pub fn punchfile(file: &File, offset: u64, length: u64) -> io::Result<()> {
     let handle = std_handle_to_windows(file.as_raw_handle());
     // FILE_ZERO_DATA_INFORMATION_EX exists but it's for drivers.
     let input = FILE_ZERO_DATA_INFORMATION {
-        FileOffset: offset,
-        BeyondFinalZero: offset + length,
+        FileOffset: offset.try_into().unwrap(),
+        BeyondFinalZero: (offset + length).try_into().unwrap(),
     };
     let res = unsafe {
         DeviceIoControl(

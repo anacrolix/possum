@@ -16,8 +16,8 @@ use possum::{ceil_multiple, check_hole, Handle, NonzeroValueLocation, WalkEntry}
 enum Commands {
     PunchHole {
         file: String,
-        offset: i64,
-        length: i64,
+        offset: u64,
+        length: u64,
     },
     Database {
         dir: PathBuf,
@@ -184,11 +184,7 @@ fn main() -> anyhow::Result<()> {
                                     length,
                                     start % handle.block_size(),
                                 );
-                                possum::sys::punchfile::punchfile(
-                                    &file,
-                                    start as i64,
-                                    length as i64,
-                                )?;
+                                possum::sys::punchfile::punchfile(&file, start, length)?;
                                 check_hole(&mut file, start, length)?;
                             }
                         }

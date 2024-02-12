@@ -19,6 +19,7 @@ use super::*;
 mod tests {
     use self::test;
     use super::*;
+    use crate::sys::pathconf::fd_min_hole_size;
     use tempfile::NamedTempFile;
 
     #[test]
@@ -26,9 +27,10 @@ mod tests {
         let mut temp_file = NamedTempFile::new()?;
         let file = temp_file.as_file_mut();
         file.set_sparse(true)?;
-        file.set_len(2)?;
-        punchfile(&file, 0, 1)?;
-        check_hole(file, 0, 1)?;
+        let hole_alignment = fd_min_hole_size(file)?;
+        file.set_len(2 * hole_alignment)?;
+        punchfile(&file, 0, 1 * hole_alignment)?;
+        check_hole(file, 0, 1 * hole_alignment)?;
         Ok(())
     }
 }

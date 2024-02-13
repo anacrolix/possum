@@ -19,6 +19,9 @@ typedef struct Handle Handle;
 
 typedef struct PossumReader PossumReader;
 
+/**
+ * Represents a value obtained from a reader, before or after snapshot occurs.
+ */
 typedef struct PossumValue PossumValue;
 
 typedef struct ValueWriter ValueWriter;
@@ -91,14 +94,19 @@ PossumError possum_reader_new(const Handle *handle, PossumReader **reader);
 
 PossumError possum_reader_add(PossumReader *reader, PossumBuf key, const PossumValue **value);
 
+/**
+ * Takes a snapshot so the reader values can be used.
+ */
 PossumError possum_reader_begin(PossumReader *reader);
 
 /**
  * Consumes the reader, invalidating all values produced from it.
  */
-PossumError possum_reader_end(PossumReader *reader);
+void possum_reader_end(PossumReader *reader);
 
 PossumError possum_value_read_at(const PossumValue *value, PossumBuf *buf, PossumOffset offset);
+
+void possum_value_stat(const PossumValue *value, PossumStat *out_stat);
 
 PossumError possum_reader_list_items(const PossumReader *reader,
                                      PossumBuf prefix,

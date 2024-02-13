@@ -95,8 +95,14 @@ func (r Reader) Begin() error {
 	return possumC.ReaderBegin(r.pc)
 }
 
-func (r Reader) End() error {
-	return possumC.ReaderEnd(r.pc)
+func (r Reader) End() {
+	possumC.ReaderEnd(r.pc)
+}
+
+func (r Reader) Close() error {
+	// This probably isn't safe to call multiple times.
+	r.End()
+	return nil
 }
 
 func (r Reader) ListItems(prefix string) ([]Item, error) {
@@ -104,11 +110,16 @@ func (r Reader) ListItems(prefix string) ([]Item, error) {
 }
 
 type Value struct {
-	c possumC.Value
+	c   possumC.Value
+	key string
 }
 
 func (v Value) ReadAt(p []byte, off int64) (n int, err error) {
 	return possumC.ValueReadAt(v.c, p, off)
+}
+
+func (v Value) Stat() FileInfo {
+	return FileInfo{possumC.ValueStat(v.c), v.key}
 }
 
 type FileInfo struct {

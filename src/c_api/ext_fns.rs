@@ -223,6 +223,7 @@ pub extern "C" fn possum_reader_add(
     NoError
 }
 
+/// Takes a snapshot so the reader values can be used.
 #[no_mangle]
 pub extern "C" fn possum_reader_begin(reader: *mut PossumReader) -> PossumError {
     let reader = unsafe { &mut *reader };
@@ -245,9 +246,8 @@ pub extern "C" fn possum_reader_begin(reader: *mut PossumReader) -> PossumError 
 
 /// Consumes the reader, invalidating all values produced from it.
 #[no_mangle]
-pub extern "C" fn possum_reader_end(reader: *mut PossumReader) -> PossumError {
+pub extern "C" fn possum_reader_end(reader: *mut PossumReader) {
     drop(unsafe { Box::from_raw(reader) });
-    NoError
 }
 
 #[no_mangle]
@@ -268,6 +268,16 @@ pub extern "C" fn possum_value_read_at(
         }
     }
     NoError
+}
+
+#[no_mangle]
+pub extern "C" fn possum_value_stat(
+    value: *const PossumValue,
+    out_stat: *mut PossumStat,
+) {
+    let value = unsafe { &*value };
+    let out_stat = unsafe { &mut *out_stat };
+    *out_stat = value.into();
 }
 
 #[no_mangle]

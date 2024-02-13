@@ -1,4 +1,8 @@
-use crate::BatchWriter;
+mod value;
+
+pub(crate) use value::*;
+
+use crate::{BatchWriter, ValueWriter};
 use libc::size_t;
 use std::ffi::c_char;
 
@@ -49,3 +53,5 @@ pub(crate) struct PossumLimits {
     pub max_value_length_sum: u64,
     pub disable_hole_punching: bool,
 }
+
+pub(crate) type PossumValueWriter = ValueWriter;

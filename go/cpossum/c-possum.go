@@ -178,8 +178,8 @@ func ReaderBegin(r Reader) error {
 	return mapError(C.possum_reader_begin(r))
 }
 
-func ReaderEnd(r Reader) error {
-	return mapError(C.possum_reader_end(r))
+func ReaderEnd(r Reader) {
+	C.possum_reader_end(r)
 }
 
 func ReaderListItems(r Reader, prefix string) (items []Item, err error) {
@@ -202,6 +202,11 @@ func ValueReadAt(v Value, buf []byte, offset int64) (n int, err error) {
 	pin.Pin(pBuf.ptr)
 	err = mapError(C.possum_value_read_at(v, &pBuf, C.uint64_t(offset)))
 	n = int(pBuf.size)
+	return
+}
+
+func ValueStat(v Value) (ret Stat) {
+	C.possum_value_stat(v, &ret)
 	return
 }
 

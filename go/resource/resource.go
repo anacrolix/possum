@@ -7,6 +7,7 @@ import (
 	possum "github.com/anacrolix/possum/go"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 )
 
@@ -28,14 +29,33 @@ type instance struct {
 	handle *possum.Handle
 }
 
-func (i *instance) Get() (rc io.ReadCloser, err error) {
-	// TODO: Return a wrapper around a snapshot value, and link Close to closing the snapshot.
-	fi, err := i.Stat()
+func (i *instance) Get() (_ io.ReadCloser, err error) {
+	slog.Info("new instance Get")
+	possumReader, err := i.handle.NewReader()
 	if err != nil {
 		return
 	}
-	rc = io.NopCloser(io.NewSectionReader(i, 0, fi.Size()))
-	return
+	defer func() {
+		if err != nil {
+			possumReader.End()
+		}
+	}()
+	v, err := possumReader.Add(i.key)
+	if err != nil {
+		return
+	}
+	err = possumReader.Begin()
+	if err != nil {
+		return
+	}
+	retReader := io.NewSectionReader(v, 0, v.Stat().Size())
+	return struct {
+		io.Reader
+		io.Closer
+	}{
+		retReader,
+		possumReader,
+	}, nil
 }
 
 func (i *instance) Put(reader io.Reader) (err error) {

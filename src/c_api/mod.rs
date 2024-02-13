@@ -29,19 +29,12 @@ impl PossumBuf {
     }
 }
 
-enum PossumValue {
-    ReaderValue(Value),
-    SnapshotValue(SnapshotValue<Value>),
-}
-
 struct PossumReader {
     // Removed when converted to a snapshot. Specific to the C API so as to not need to expose
     // Snapshot, and to convert Values automatically when a snapshot starts.
     rust_reader: Option<Reader<'static>>,
     values: Vec<Pin<Box<PossumValue>>>,
 }
-
-type PossumValueWriter = ValueWriter;
 
 use crate::c_api::PossumError::{AnyhowError, IoError, SqliteError};
 

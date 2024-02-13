@@ -3,6 +3,7 @@ package possum
 import (
 	"github.com/anacrolix/generics"
 	possumC "github.com/anacrolix/possum/go/cpossum"
+	"io"
 	"io/fs"
 	"time"
 )
@@ -62,7 +63,12 @@ func (me Handle) SingleDelete(key string) (fi generics.Option[FileInfo], err err
 }
 
 func (me Handle) SingleReadAt(key string, off int64, p []byte) (n int, err error) {
-	return possumC.SingleReadAt(me.cHandle, key, p, uint64(off))
+	n, err = possumC.SingleReadAt(me.cHandle, key, p, uint64(off))
+	// See the very strict definition of io.ReaderAt.ReadAt.
+	if n == 0 && len(p) != 0 && err == nil {
+		err = io.EOF
+	}
+	return
 }
 
 func (me Handle) NewReader() (r Reader, err error) {

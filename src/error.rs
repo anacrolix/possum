@@ -12,6 +12,8 @@ pub enum Error {
     #[error("io error: {0:?}")]
     Io(#[from] std::io::Error),
     #[error("anyhow: {0:?}")]
+    // Having the #[from] here kinda sux because everything is stuffed into the anyhow variant
+    // automatically, even other instances of Error.
     Anyhow(#[from] anyhow::Error),
     #[error("unsupported filesystem")]
     UnsupportedFilesystem,
@@ -28,11 +30,46 @@ impl Error {
             _ => false,
         }
     }
+
+    pub fn root_cause(&self) -> &(dyn std::error::Error + 'static) {
+        match self {
+            NoSuchKey | UnsupportedFilesystem => self,
+            Sqlite(inner) => inner,
+            Anyhow(inner) => inner.root_cause(),
+            _ => unimplemented!(),
+        }
+    }
+
+    pub fn root_cause_is_unsupported_filesystem(&self) -> bool {
+        matches!(
+            self.root_cause().downcast_ref(),
+            Some(Self::UnsupportedFilesystem)
+        )
+    }
 }
 
 #[cfg(windows)]
 impl From<windows::core::Error> for Error {
     fn from(from: windows::core::Error) -> Self {
         anyhow::Error::from(from).into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Error, PubResult};
+    use anyhow::Context;
+
+    #[test]
+    fn test_downcast_double_contexted() {
+        let res = Err::<(), _>(Error::UnsupportedFilesystem);
+        let res: PubResult<_> = res.context("sup").map_err(Into::into);
+        let res: PubResult<()> = res.context("bro").map_err(Into::into);
+        let err: Error = res.unwrap_err();
+        assert!(matches!(
+            err.root_cause().downcast_ref::<Error>(),
+            Some(Error::UnsupportedFilesystem)
+        ));
+        assert!(err.root_cause_is_unsupported_filesystem());
     }
 }

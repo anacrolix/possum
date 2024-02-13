@@ -5,6 +5,7 @@ use std::io;
 use std::io::SeekFrom;
 use std::io::SeekFrom::Start;
 
+#[derive(Debug)]
 pub enum FlockArg {
     LockShared,
     LockExclusive,
@@ -76,8 +77,9 @@ pub fn lock_file_segment(
         None => MAX_LOCKFILE_OFFSET - offset,
     };
     let num_bytes_to_lock = HighAndLow::from(len);
+    dbg!(&arg, offset, len);
     if matches!(arg, Unlock | UnlockNonblock) {
-        return convert(unsafe {
+        return convert(dbg!(unsafe {
             UnlockFileEx(
                 handle,
                 0,
@@ -85,7 +87,7 @@ pub fn lock_file_segment(
                 num_bytes_to_lock.high,
                 lpoverlapped,
             )
-        });
+        }));
     }
     let mut dwflags = LOCK_FILE_FLAGS(0);
     if matches!(arg, LockExclusive | LockExclusiveNonblock) {

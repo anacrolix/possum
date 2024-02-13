@@ -14,6 +14,7 @@ use libc::ENOTSUP;
 use libc::EOPNOTSUPP;
 
 use crate::cpathbuf::CPathBuf;
+use crate::Error::UnsupportedFilesystem;
 use crate::PubResult;
 cfg_if! {
     if #[cfg(windows)] {

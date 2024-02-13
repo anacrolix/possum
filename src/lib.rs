@@ -118,15 +118,14 @@ impl BeginWriteValue<'_, '_> {
     // for a discussion on efficient ways to copy values that could be supported.
     pub fn clone_file(self, file: &mut File) -> PubResult<ValueWriter> {
         if !self.batch.handle.dir_supports_file_cloning() {
-            let mut value_writer = self.begin()?;
-            // Need to rewind the file since we're cloning the whole thing.
-            file.seek(Start(0))?;
-            value_writer.copy_from(file)?;
-            return Ok(value_writer);
+            return self.copy_file(file);
         }
         let dst_path = loop {
             let dst_path = random_file_name_in_dir(self.batch.handle.dir.path());
             match fclonefile_noflags(file, &dst_path) {
+                Err(err) if err.root_cause_is_unsupported_filesystem() => {
+                    return self.copy_file(file);
+                }
                 Err(err) if err.is_file_already_exists() => continue,
                 Err(err) => return Err(err),
                 Ok(()) => break dst_path,
@@ -140,6 +139,14 @@ impl BeginWriteValue<'_, '_> {
             exclusive_file,
             value_file_offset: 0,
         })
+    }
+
+    fn copy_file(self, file: &mut File) -> PubResult<ValueWriter> {
+        let mut value_writer = self.begin()?;
+        // Need to rewind the file since we're cloning the whole thing.
+        file.seek(Start(0))?;
+        value_writer.copy_from(file)?;
+        return Ok(value_writer);
     }
 
     pub fn begin(self) -> PubResult<ValueWriter> {
@@ -701,7 +708,7 @@ impl<'a> Reader<'a> {
         }
         if self.handle.dir_supports_file_cloning() {
             match self.clone_file(file_id, tempdir, cache, src_dir) {
-                Err(Error::UnsupportedFilesystem) => (),
+                Err(err) if err.root_cause_is_unsupported_filesystem() => (),
                 default => return default,
             }
         }

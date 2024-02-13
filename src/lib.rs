@@ -687,7 +687,7 @@ impl<'a> Reader<'a> {
         cache: &mut FileCloneCache,
         src_dir: &Path,
         read_extents: &BTreeSet<ReadExtent>,
-    ) -> Result<Arc<Mutex<FileClone>>> {
+    ) -> PubResult<Arc<Mutex<FileClone>>> {
         if let Some(ret) = cache.get(file_id) {
             let min_len = read_extents
                 .iter()
@@ -700,56 +700,68 @@ impl<'a> Reader<'a> {
             }
         }
         if self.handle.dir_supports_file_cloning() {
-            let tempdir: &Arc<TempDir> = match tempdir {
-                Some(tempdir) => tempdir,
-                None => {
-                    let mut builder = tempfile::Builder::new();
-                    builder.prefix(SNAPSHOT_DIR_NAME_PREFIX);
-                    let new = Arc::new(builder.tempdir_in(src_dir)?);
-                    *tempdir = Some(new);
-                    tempdir.as_ref().unwrap()
-                }
-            };
-            let src_path = file_path(src_dir, file_id);
-            // TODO: In order for value files to support truncation, a shared or exclusive lock would
-            // need to be taken before cloning. I don't think this is possible, we would have to wait
-            // for anyone holding an exclusive lock to release it. Handles already cache these, plus
-            // Writers could hold them for a long time while writing. Then we need a separate cloning
-            // lock. Also distinct Handles, even across processes can own each exclusive file.
-            if false {
-                let mut src_file = OpenOptions::new().read(true).open(&src_path)?;
-                assert!(try_lock_file(&mut src_file, flock::LockSharedNonblock)?);
+            match self.clone_file(file_id, tempdir, cache, src_dir) {
+                Err(Error::UnsupportedFilesystem) => (),
+                default => return default,
             }
-            let tempdir_path = tempdir.path();
-            let dst_path = file_path(tempdir_path, file_id);
-            clonefile(&src_path, &dst_path).context("cloning file")?;
-            let mut file = open_file_id(OpenOptions::new().read(true), tempdir_path, file_id)
-                .context("opening value file")?;
-            // This prevents the snapshot file from being cleaned up. There's probably a race between
-            // here and when it was cloned above. I wonder if the snapshot dir can be locked, or if we
-            // can retry the cloning until we are able to lock it.
-            let locked = try_lock_file(&mut file, LockSharedNonblock)?;
-            assert!(locked);
-            let len = file.seek(End(0))?;
-            let file_clone = Arc::new(Mutex::new(FileClone {
-                file,
-                tempdir: Some(tempdir.clone()),
-                mmap: None,
-                len,
-            }));
-
-            cache.insert(file_id.to_owned(), file_clone.clone());
-            Ok(file_clone)
-        } else {
-            self.get_file_for_read_by_segment_locking(file_id, read_extents)
         }
+        self.get_file_for_read_by_segment_locking(file_id, read_extents)
+    }
+
+    fn clone_file(
+        &self,
+        file_id: &FileId,
+        tempdir: &mut Option<Arc<TempDir>>,
+        cache: &mut FileCloneCache,
+        src_dir: &Path,
+    ) -> PubResult<Arc<Mutex<FileClone>>> {
+        let tempdir: &Arc<TempDir> = match tempdir {
+            Some(tempdir) => tempdir,
+            None => {
+                let mut builder = tempfile::Builder::new();
+                builder.prefix(SNAPSHOT_DIR_NAME_PREFIX);
+                let new = Arc::new(builder.tempdir_in(src_dir)?);
+                *tempdir = Some(new);
+                tempdir.as_ref().unwrap()
+            }
+        };
+        let src_path = file_path(src_dir, file_id);
+        // TODO: In order for value files to support truncation, a shared or exclusive lock would
+        // need to be taken before cloning. I don't think this is possible, we would have to wait
+        // for anyone holding an exclusive lock to release it. Handles already cache these, plus
+        // Writers could hold them for a long time while writing. Then we need a separate cloning
+        // lock. Also distinct Handles, even across processes can own each exclusive file.
+        if false {
+            let mut src_file = OpenOptions::new().read(true).open(&src_path)?;
+            assert!(try_lock_file(&mut src_file, flock::LockSharedNonblock)?);
+        }
+        let tempdir_path = tempdir.path();
+        let dst_path = file_path(tempdir_path, file_id);
+        clonefile(&src_path, &dst_path).context("cloning file")?;
+        let mut file = open_file_id(OpenOptions::new().read(true), tempdir_path, file_id)
+            .context("opening value file")?;
+        // This prevents the snapshot file from being cleaned up. There's probably a race between
+        // here and when it was cloned above. I wonder if the snapshot dir can be locked, or if we
+        // can retry the cloning until we are able to lock it.
+        let locked = try_lock_file(&mut file, LockSharedNonblock)?;
+        assert!(locked);
+        let len = file.seek(End(0))?;
+        let file_clone = Arc::new(Mutex::new(FileClone {
+            file,
+            tempdir: Some(tempdir.clone()),
+            mmap: None,
+            len,
+        }));
+
+        cache.insert(file_id.to_owned(), file_clone.clone());
+        Ok(file_clone)
     }
 
     fn get_file_for_read_by_segment_locking(
         &self,
         file_id: &FileId,
         read_extents: &BTreeSet<ReadExtent>,
-    ) -> Result<Arc<Mutex<FileClone>>> {
+    ) -> PubResult<Arc<Mutex<FileClone>>> {
         let mut file = open_file_id(OpenOptions::new().read(true), self.handle.dir(), file_id)?;
         for extent in read_extents {
             if !file.lock_segment(LockSharedNonblock, Some(extent.len), extent.offset)? {

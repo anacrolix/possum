@@ -271,10 +271,7 @@ pub extern "C" fn possum_value_read_at(
 }
 
 #[no_mangle]
-pub extern "C" fn possum_value_stat(
-    value: *const PossumValue,
-    out_stat: *mut PossumStat,
-) {
+pub extern "C" fn possum_value_stat(value: *const PossumValue, out_stat: *mut PossumStat) {
     let value = unsafe { &*value };
     let out_stat = unsafe { &mut *out_stat };
     *out_stat = value.into();

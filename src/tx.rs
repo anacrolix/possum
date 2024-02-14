@@ -148,7 +148,7 @@ where
 impl<'h, T> PostCommitWork<'h, T> {
     pub fn complete(self) -> Result<T> {
         // This has to happen after exclusive files are flushed or there's a tendency for hole
-        // punches to not persist. It doesn't fix the problem but it significantly reduces it.
+        // punches to not persist. It doesn't fix the problem, but it significantly reduces it.
         if !self.handle.instance_limits.disable_hole_punching {
             self.handle.send_values_for_delete(self.deleted_values);
         }

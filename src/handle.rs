@@ -79,8 +79,8 @@ impl Handle {
             debug!(?path, "opening existing file");
             match ExclusiveFile::open(path.clone()) {
                 Ok(ef) => return Ok(ef),
-                Err(_err) => {
-                    debug!(?path, "open");
+                Err(err) => {
+                    debug!(?path, ?err, "open");
                 }
             }
         }

@@ -7,7 +7,6 @@ import (
 	possum "github.com/anacrolix/possum/go"
 	"io"
 	"io/fs"
-	"log/slog"
 	"os"
 )
 
@@ -30,7 +29,6 @@ type instance struct {
 }
 
 func (i *instance) Get() (_ io.ReadCloser, err error) {
-	slog.Info("new instance Get")
 	possumReader, err := i.handle.NewReader()
 	if err != nil {
 		return

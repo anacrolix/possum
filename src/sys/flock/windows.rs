@@ -77,7 +77,7 @@ pub fn lock_file_segment(
         None => MAX_LOCKFILE_OFFSET - offset,
     };
     let num_bytes_to_lock = HighAndLow::from(len);
-    dbg!(&arg, offset, len);
+    dbg!(file.as_raw_handle(), &arg, offset, len);
     if matches!(arg, Unlock | UnlockNonblock) {
         return convert(dbg!(unsafe {
             UnlockFileEx(

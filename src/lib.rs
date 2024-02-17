@@ -951,14 +951,12 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
         length = end_offset - offset;
     }
     debug!(target: "punching", "punching {} {} for {}", file_id, offset, length);
-    if length == 0 {
+    // If a punch is rounded up, and the end is rounded down, they cross each other by exactly a
+    // full block.
+    assert!(length >= -block_size);
+    if length <= 0 {
         return Ok(());
     }
-    if length < 0 {
-        dbg!(length);
-        return Ok(());
-    }
-    assert!(length > 0);
     assert_eq!(offset % block_size, 0);
     if !file.lock_segment(LockExclusiveNonblock, Some(length as u64), offset as u64)? {
         // TODO: If we can't delete immediately, we should schedule to try again later. Maybe

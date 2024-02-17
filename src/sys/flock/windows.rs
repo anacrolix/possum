@@ -77,9 +77,8 @@ pub fn lock_file_segment(
         None => MAX_LOCKFILE_OFFSET - offset,
     };
     let num_bytes_to_lock = HighAndLow::from(len);
-    dbg!(file.as_raw_handle(), &arg, offset, len);
     if matches!(arg, Unlock | UnlockNonblock) {
-        return convert(dbg!(unsafe {
+        let result = unsafe {
             UnlockFileEx(
                 handle,
                 0,
@@ -87,7 +86,9 @@ pub fn lock_file_segment(
                 num_bytes_to_lock.high,
                 lpoverlapped,
             )
-        }));
+        };
+        debug!(handle=?file.as_raw_handle(), arg=?&arg, offset, len, ?result, "UnlockFileEx");
+        return convert(result);
     }
     let mut dwflags = LOCK_FILE_FLAGS(0);
     if matches!(arg, LockExclusive | LockExclusiveNonblock) {
@@ -96,7 +97,7 @@ pub fn lock_file_segment(
     if matches!(arg, LockSharedNonblock | LockExclusiveNonblock) {
         dwflags |= LOCKFILE_FAIL_IMMEDIATELY;
     }
-    let result = convert(dbg!(unsafe {
+    let result = unsafe {
         LockFileEx(
             handle,
             dwflags,
@@ -105,10 +106,11 @@ pub fn lock_file_segment(
             num_bytes_to_lock.high,
             lpoverlapped,
         )
-    }));
+    };
+    debug!(handle=?file.as_raw_handle(), arg=?&arg, offset, len, ?result, "UnlockFileEx");
     // unsafe { CloseHandle(event) }.unwrap();
     #[allow(clippy::let_and_return)]
-    result
+    convert(result)
 }
 
 const MAX_LOCKFILE_OFFSET: u64 = u64::MAX;

@@ -73,6 +73,7 @@ pub trait DirMeta {
 }
 
 struct SupportsEverythingFilesystemFlags {}
+
 impl FileSystemFlags for SupportsEverythingFilesystemFlags {
     fn supports_sparse_files(&self) -> bool {
         // AFAIK, all unix systems support sparse files on all filesystems.
@@ -80,9 +81,9 @@ impl FileSystemFlags for SupportsEverythingFilesystemFlags {
     }
 
     fn supports_block_cloning(&self) -> bool {
-        // I don't know how to constraint this. AFAIK there's no way to check if a filesystem
-        // supports block cloning, and even if it does it depends on where you're copying to/from,
-        // sometimes even on the same filesystem.
+        // AFAIK there's no way to check if a filesystem supports block cloning on non-Windows
+        // platforms, and even then it depends on where you're copying to/from, sometimes even on
+        // the same filesystem.
         true
     }
 }

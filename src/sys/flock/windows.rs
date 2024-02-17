@@ -19,7 +19,9 @@ pub use FlockArg::*;
 
 impl FileLocking for File {
     fn trim_exclusive_lock_left(&self, old: u64, new: u64) -> io::Result<bool> {
-        assert!(self.lock_segment(UnlockNonblock, None, old)?);
+        if let Err(err) = self.lock_segment(UnlockNonblock, None, old) {
+            warn!(?err, offset = old, "error unlocking exclusive file lock");
+        }
         self.lock_segment(LockExclusiveNonblock, None, new)
     }
 

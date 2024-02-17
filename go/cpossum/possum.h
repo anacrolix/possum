@@ -65,6 +65,8 @@ void possum_drop(Handle *handle);
 
 PossumError possum_set_instance_limits(Handle *handle, const PossumLimits *limits);
 
+PossumError possum_cleanup_snapshots(const Handle *handle);
+
 size_t possum_single_write_buf(Handle *handle, PossumBuf key, PossumBuf value);
 
 PossumWriter *possum_new_writer(Handle *handle);

@@ -82,6 +82,10 @@ func (me Handle) SetInstanceLimits(limits Limits) error {
 	return possumC.SetInstanceLimits(me.cHandle, limits)
 }
 
+func (me Handle) CleanupSnapshots() error {
+	return possumC.CleanupSnapshots(me.cHandle)
+}
+
 type Reader struct {
 	pc possumC.Reader
 }

@@ -221,6 +221,10 @@ type Limits struct {
 	DisableHolePunching bool
 }
 
+func CleanupSnapshots(h *Handle) error {
+	return mapError(C.possum_cleanup_snapshots(h))
+}
+
 func SetInstanceLimits(h *Handle, limits Limits) error {
 	var cLimits C.PossumLimits
 	cLimits.max_value_length_sum = C.uint64_t(limits.MaxValueLengthSum.UnwrapOr(math.MaxUint64))

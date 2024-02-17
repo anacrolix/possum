@@ -58,6 +58,12 @@ pub extern "C" fn possum_set_instance_limits(
 }
 
 #[no_mangle]
+pub extern "C" fn possum_cleanup_snapshots(handle: *const Handle) -> PossumError {
+    let handle = unsafe { &*handle };
+    with_residual(|| handle.cleanup_snapshots())
+}
+
+#[no_mangle]
 pub extern "C" fn possum_single_write_buf(
     handle: *mut Handle,
     key: PossumBuf,

@@ -48,10 +48,6 @@ pub fn path_disk_allocation(path: &Path) -> io::Result<u64> {
     file_disk_allocation(&File::open(path)?)
 }
 
-pub(crate) fn windows_error_to_io(win_error: ::windows::core::Error) -> io::Error {
-    io::Error::from_raw_os_error(win_error.code().0)
-}
-
 // Do we need to require that I and O be slices? Does that mean we can do the bytes_returned element
 // calculations here rather than force the caller to do it?
 pub(crate) fn device_io_control<I: ?Sized, O: ?Sized>(

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/anacrolix/generics"
+	"io/fs"
 	"math"
 	"runtime"
 	"time"
@@ -29,7 +30,7 @@ type Error struct {
 const cErrorEnumNoSuchKey = C.NoSuchKey
 
 func (me Error) Is(err error) bool {
-	if err == NoSuchKey {
+	if err == NoSuchKey || err == fs.ErrNotExist {
 		return me.pec == cErrorEnumNoSuchKey
 	}
 	return false

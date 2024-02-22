@@ -7,3 +7,5 @@ For filesystems where cloning is not supported, it should be possible to "fall b
 Here's a list of support https://www.ctrl.blog/entry/file-cloning.html.
 
 Solaris will need this https://docs.oracle.com/cd/E88353_01/html/E37843/reflink-3c.html.
+
+Disk space usage in the face of file cloning could be done with fcntl F_LOG2PHYS on macOS, ioctl FIEMAP on Linux, and possibly FSCTL_GET_RETRIEVAL_POINTERS on Windows.

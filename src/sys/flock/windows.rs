@@ -1,9 +1,10 @@
-use super::*;
 use std::convert::TryInto;
 use std::fs::File;
 use std::io;
 use std::io::SeekFrom;
 use std::io::SeekFrom::Start;
+
+use super::*;
 
 #[derive(Debug)]
 pub enum FlockArg {

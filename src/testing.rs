@@ -1,8 +1,7 @@
 pub mod torrent_storage;
 
 use std::hash::Hasher;
-use std::io::Write;
-use std::io::{copy, SeekFrom};
+use std::io::{copy, SeekFrom, Write};
 
 use anyhow::{ensure, Result};
 use rand::Rng;

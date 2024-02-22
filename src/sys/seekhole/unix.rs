@@ -6,8 +6,7 @@ use std::io;
 use std::io::Error;
 use std::os::fd::RawFd;
 
-use libc::ENXIO;
-use libc::{SEEK_DATA, SEEK_HOLE};
+use libc::{ENXIO, SEEK_DATA, SEEK_HOLE};
 
 use super::*;
 

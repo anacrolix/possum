@@ -1,6 +1,4 @@
 #![allow(unused_imports)]
-use super::*;
-
 use std::ffi::CString;
 #[cfg(target_os = "linux")]
 use std::fs::File;
@@ -10,9 +8,9 @@ use std::io::{Error, ErrorKind};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-use libc::ENOTSUP;
-use libc::EOPNOTSUPP;
+use libc::{ENOTSUP, EOPNOTSUPP};
 
+use super::*;
 use crate::cpathbuf::CPathBuf;
 use crate::Error::UnsupportedFilesystem;
 use crate::PubResult;

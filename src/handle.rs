@@ -351,9 +351,9 @@ impl Handle {
     }
 }
 
-use crate::dir::Dir;
 use item::Item;
 
+use crate::dir::Dir;
 use crate::ownedtx::{OwnedReadTx, OwnedTxInner};
 use crate::tx::{ReadOnlyRusqliteTransaction, ReadTransaction};
 

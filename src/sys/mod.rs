@@ -6,12 +6,12 @@ pub mod pathconf;
 pub mod punchfile;
 pub mod seekhole;
 
+use std::fs::File;
+
 pub use clonefile::*;
 pub use flock::*;
 pub use punchfile::*;
 pub use seekhole::*;
-
-use std::fs::File;
 
 cfg_if! {
     if #[cfg(windows)] {

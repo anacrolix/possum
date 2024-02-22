@@ -23,9 +23,10 @@ pub fn try_lock_file(file: &mut File, arg: FlockArg) -> anyhow::Result<bool> {
 
 #[cfg(test)]
 mod tests {
+    use tempfile::NamedTempFile;
+
     use super::*;
     use crate::test;
-    use tempfile::NamedTempFile;
 
     #[test]
     fn open_locked_file() -> anyhow::Result<()> {

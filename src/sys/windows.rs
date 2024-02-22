@@ -1,8 +1,9 @@
 //! Windows specific APIs
 
-use super::*;
 use std::mem::{size_of, size_of_val};
 use std::os::windows::fs::OpenOptionsExt;
+
+use super::*;
 
 type AllocatedRanges = Vec<FILE_ALLOCATED_RANGE_BUFFER>;
 

@@ -1,9 +1,10 @@
 #![allow(dead_code)]
 
-use super::*;
 use std::convert::TryFrom;
 use std::ffi::{c_char, CString, NulError};
 use std::path::Path;
+
+use super::*;
 
 /// A PathBuf like implementation for use with C APIs that expect a nul-terminated C string. Should
 /// convert easily from common Rust path types, and have methods that pass to C.

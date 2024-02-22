@@ -17,10 +17,11 @@ use super::*;
 
 #[cfg(test)]
 mod tests {
+    use tempfile::NamedTempFile;
+
     use self::test;
     use super::*;
     use crate::sys::pathconf::fd_min_hole_size;
-    use tempfile::NamedTempFile;
 
     #[test]
     #[allow(clippy::identity_op)]

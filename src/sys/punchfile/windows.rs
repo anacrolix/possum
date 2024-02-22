@@ -1,6 +1,7 @@
-use super::*;
 use std::convert::TryInto;
 use std::io;
+
+use super::*;
 
 pub fn punchfile(file: &File, offset: u64, length: u64) -> io::Result<()> {
     let handle = std_handle_to_windows(file.as_raw_handle());

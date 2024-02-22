@@ -1,8 +1,9 @@
-use super::*;
 use std::io::SeekFrom;
 
 pub use nix::fcntl::FlockArg;
 pub use nix::fcntl::FlockArg::*;
+
+use super::*;
 
 fn seek_from_offset(seek_from: SeekFrom) -> i64 {
     use SeekFrom::*;

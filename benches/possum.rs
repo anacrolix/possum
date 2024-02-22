@@ -284,9 +284,9 @@ fn multiple_benchmarks(c: &mut Criterion) {
 
 mod clonefile;
 mod torrent_storage;
-use rusqlite::TransactionBehavior;
 use std::time::Duration;
 
+use rusqlite::TransactionBehavior;
 use tempfile::tempdir;
 criterion_group!(
     name = benches;

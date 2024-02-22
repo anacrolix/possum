@@ -1,5 +1,4 @@
-use std::fs::DirEntry as StdDirEntry;
-use std::fs::FileType;
+use std::fs::{DirEntry as StdDirEntry, FileType};
 
 use super::*;
 

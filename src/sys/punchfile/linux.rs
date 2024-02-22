@@ -1,7 +1,8 @@
-use super::*;
 use std::convert::TryInto;
 use std::io;
 use std::io::Error;
+
+use super::*;
 
 pub fn punchfile(file: &File, offset: u64, length: u64) -> io::Result<()> {
     // TODO: On solaris we want fcntl(F_FREESP);

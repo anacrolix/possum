@@ -1,1 +1,7 @@
+# Spotted in github.com/rnbguy/rope
+
+reorder_imports = true
+
+# unstable features
 group_imports = "StdExternalCrate"
+imports_granularity = "Module"

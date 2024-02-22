@@ -1,10 +1,11 @@
 mod value;
 
+use std::ffi::c_char;
+
+use libc::size_t;
 pub(crate) use value::*;
 
 use crate::{BatchWriter, ValueWriter};
-use libc::size_t;
-use std::ffi::c_char;
 
 pub(crate) type PossumOffset = u64;
 

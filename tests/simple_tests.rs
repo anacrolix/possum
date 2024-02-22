@@ -4,16 +4,14 @@ use std::error::Error;
 use std::fmt::{Debug, Display};
 use std::fs::OpenOptions;
 use std::hash::Hasher;
-use std::io::Read;
 use std::io::SeekFrom::Start;
-use std::io::{Seek, Write};
+use std::io::{Read, Seek, Write};
 use std::ops::Bound::Included;
 use std::ops::{RangeBounds, RangeInclusive};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::thread::sleep;
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use fdlimit::raise_fd_limit;

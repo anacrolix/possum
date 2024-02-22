@@ -57,8 +57,9 @@ impl From<windows::core::Error> for Error {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Error, PubResult};
     use anyhow::Context;
+
+    use crate::{Error, PubResult};
 
     #[test]
     fn test_downcast_double_contexted() {

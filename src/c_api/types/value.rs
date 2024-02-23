@@ -11,7 +11,7 @@ impl AsRef<Value> for PossumValue {
     fn as_ref(&self) -> &Value {
         match self {
             Self::ReaderValue(value) => value,
-            Self::SnapshotValue(sv) => *&sv,
+            Self::SnapshotValue(sv) => sv,
         }
     }
 }
@@ -22,7 +22,7 @@ impl Deref for PossumValue {
     fn deref(&self) -> &Self::Target {
         match self {
             Self::ReaderValue(value) => value,
-            Self::SnapshotValue(sv) => *&sv,
+            Self::SnapshotValue(sv) => sv,
         }
     }
 }

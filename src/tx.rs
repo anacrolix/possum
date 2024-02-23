@@ -260,14 +260,15 @@ impl<'h> Transaction<'h> {
     }
 
     pub fn rename_item(&mut self, from: &[u8], to: &[u8]) -> PubResult<Timestamp> {
-        let last_used = match self.tx.query_row(
+        let row_result = self.tx.query_row(
             "update keys set key=? where key=? returning last_used",
             [to, from],
             |row| {
                 let ts: Timestamp = row.get(0)?;
                 Ok(ts)
             },
-        ) {
+        );
+        let last_used = match row_result {
             Err(QueryReturnedNoRows) => Err(Error::NoSuchKey),
             Ok(ok) => Ok(ok),
             Err(err) => Err(err.into()),

@@ -151,7 +151,7 @@ impl BeginWriteValue<'_, '_> {
         // Need to rewind the file since we're cloning the whole thing.
         file.seek(Start(0))?;
         value_writer.copy_from(file)?;
-        return Ok(value_writer);
+        Ok(value_writer)
     }
 
     /// Assign an exclusive file for writing a value.

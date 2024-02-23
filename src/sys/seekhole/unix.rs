@@ -7,13 +7,12 @@ use std::io::Error;
 use std::os::fd::RawFd;
 
 use libc::{ENXIO, SEEK_DATA, SEEK_HOLE};
-use nix::errno::errno;
 
 use super::*;
 
 type SeekWhence = c_int;
 
-/// Using 64 bit integer type rather than off_t to enforce 64-bit offsets (the libc wrappers all use
+/// Using 64-bit integer type rather than off_t to enforce 64-bit offsets (the libc wrappers all use
 /// type aliases anyway). For SEEK_HOLE and SEEK_DATA, I don't think negative offset has any
 /// meaning, and Windows uses u64. So use u64 for consistency.
 pub fn seek_hole_whence(

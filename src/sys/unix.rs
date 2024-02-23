@@ -1,4 +1,5 @@
 use std::path::Path;
+pub use nix::errno::errno;
 
 pub fn path_disk_allocation(path: &Path) -> std::io::Result<u64> {
     let metadata = std::fs::metadata(path)?;

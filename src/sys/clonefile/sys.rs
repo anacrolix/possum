@@ -9,7 +9,6 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use libc::{ENOTSUP, EOPNOTSUPP};
-use nix::errno::errno;
 
 use super::*;
 use crate::cpathbuf::CPathBuf;

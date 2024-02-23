@@ -1,0 +1,5 @@
+README.adoc:
+	The canonical asciidoc formatted README. Bite me. I don't like Markdown anymore.
+
+README.md:
+	Created from README.adoc for crates.io.

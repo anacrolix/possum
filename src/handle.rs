@@ -12,6 +12,8 @@ pub struct Limits {
 
 type DeletedValuesSender = std::sync::mpsc::SyncSender<Vec<NonzeroValueLocation>>;
 
+/// Provides access to a storage directory. Manages manifest access, file cloning, file writers,
+/// configuration, value eviction etc.
 #[derive(Debug)]
 pub struct Handle {
     pub(crate) conn: Mutex<Connection>,
@@ -265,7 +267,7 @@ impl Handle {
     }
 
     /// Walks the underlying files in the possum directory.
-    pub fn walk_dir(&self) -> Result<Vec<WalkEntry>> {
+    pub fn walk_dir(&self) -> Result<Vec<walk::Entry>> {
         crate::walk::walk_dir(&self.dir)
     }
 

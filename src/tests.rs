@@ -82,15 +82,15 @@ fn test_replace_keys() -> Result<()> {
     let value_file = values_files[0];
     let mut file = File::open(&value_file.path)?;
     let mut allocated_space = 0;
-    for region in Iter::new(&mut file) {
+    for region in seekhole::Iter::new(&mut file) {
         let region = region?;
-        if matches!(region.region_type, RegionType::Data) {
+        if matches!(region.region_type, seekhole::RegionType::Data) {
             allocated_space += region.length();
         }
     }
     assert!(
         [2, 3]
-            .map(|num_blocks| num_blocks * block_size as RegionOffset)
+            .map(|num_blocks| num_blocks * block_size as seekhole::RegionOffset)
             .contains(&allocated_space),
         "block_size={}, allocated_space={}",
         block_size,

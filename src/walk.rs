@@ -1,3 +1,5 @@
+//! Directory spelunking
+
 use std::fs::{DirEntry as StdDirEntry, FileType};
 
 use super::*;

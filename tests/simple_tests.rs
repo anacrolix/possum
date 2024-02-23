@@ -25,6 +25,7 @@ use rand::{thread_rng, RngCore, SeedableRng};
 use tempfile::tempdir;
 use test_log::test;
 use tracing::*;
+use walk::Entry as WalkEntry;
 
 #[test]
 fn rename_key() -> Result<()> {
@@ -75,7 +76,7 @@ fn handle_relative_walk_entries_hashset(handle: &Handle) -> HashSet<WalkEntry> {
         .walk_dir()
         .expect("should be able to walk handle dir")
         .into_iter()
-        .map(|mut entry: possum::WalkEntry| {
+        .map(|mut entry: WalkEntry| {
             entry.path = entry
                 .path
                 .strip_prefix(handle.dir())

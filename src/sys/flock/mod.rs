@@ -15,10 +15,10 @@ pub trait FileLocking {
     /// this point).
     fn trim_exclusive_lock_left(&self, old_left: u64, new_left: u64) -> io::Result<bool>;
     fn lock_segment(&self, arg: FlockArg, len: Option<u64>, offset: u64) -> io::Result<bool>;
-}
-
-pub fn try_lock_file(file: &mut File, arg: FlockArg) -> anyhow::Result<bool> {
-    file.lock_segment(arg, None, 0).map_err(Into::into)
+    /// Locks a segment that spans the maximum possible range of offsets.
+    fn lock_max_segment(&self, arg: FlockArg) -> io::Result<bool> {
+        self.lock_segment(arg, None, 0)
+    }
 }
 
 #[cfg(test)]

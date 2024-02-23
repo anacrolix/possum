@@ -13,8 +13,15 @@ typedef enum {
   UnsupportedFilesystem,
 } PossumError;
 
+/**
+ * Manages uncommitted writes
+ */
 typedef struct BatchWriter BatchWriter;
 
+/**
+ * Provides access to a storage directory. Manages manifest access, file cloning, file writers,
+ * configuration, value eviction etc.
+ */
 typedef struct Handle Handle;
 
 typedef struct PossumReader PossumReader;

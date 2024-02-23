@@ -6,11 +6,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{anyhow, bail, Context};
 use itertools::Itertools;
 use log::info;
-use possum::sys::punchfile::punchfile;
 use possum::sys::seekhole::{file_regions, Region, RegionType};
-use possum::sys::SparseFile;
-use possum::tx::ReadTransactionRef;
-use possum::{ceil_multiple, check_hole, Handle, NonzeroValueLocation, WalkEntry};
+use possum::sys::{punchfile, FileLocking, SparseFile};
+use possum::{ceil_multiple, check_hole, walk, Handle, NonzeroValueLocation, ReadTransactionRef};
 
 #[derive(clap::Subcommand)]
 enum Commands {
@@ -156,10 +154,7 @@ fn main() -> anyhow::Result<()> {
                             // Make sure nobody could be writing to the file. It should be possible
                             // to punch holes before the last value despite this (just as greedy
                             // start hole punching occurs during regular key deletes).
-                            possum::sys::flock::try_lock_file(
-                                &mut file,
-                                possum::sys::flock::LockExclusiveNonblock,
-                            )?;
+                            file.lock_max_segment(possum::sys::LockExclusiveNonblock)?;
                             for FileRegion {
                                 mut start,
                                 mut length,
@@ -184,7 +179,7 @@ fn main() -> anyhow::Result<()> {
                                     length,
                                     start % handle.block_size(),
                                 );
-                                possum::sys::punchfile::punchfile(&file, start, length)?;
+                                possum::sys::punchfile(&file, start, length)?;
                                 check_hole(&mut file, start, length)?;
                             }
                         }
@@ -254,7 +249,7 @@ impl From<NonzeroValueLocation> for FileRegion {
 
 fn missing_holes(
     tx: ReadTransactionRef,
-    values_file_entry: &WalkEntry,
+    values_file_entry: &walk::Entry,
 ) -> anyhow::Result<Vec<FileRegion>> {
     let file_id = values_file_entry.file_id().unwrap();
     let mut file = File::open(&values_file_entry.path)?;
@@ -321,7 +316,7 @@ fn missing_holes_pure(
 
 fn print_missing_holes(
     tx: ReadTransactionRef,
-    values_file_entry: &WalkEntry,
+    values_file_entry: &walk::Entry,
     block_size: u64,
     fragments: bool,
 ) -> anyhow::Result<()> {

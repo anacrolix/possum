@@ -131,7 +131,6 @@ mod tests {
     use std::env::temp_dir;
 
     use super::*;
-    use crate::pathconf::path_min_hole_size;
     use crate::testing::write_random_tempfile;
 
     #[self::test]

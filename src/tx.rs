@@ -2,7 +2,7 @@ use super::*;
 
 /// This is more work to be done after the Handle conn mutex is released.
 #[must_use]
-pub struct PostCommitWork<'h, T> {
+pub(crate) struct PostCommitWork<'h, T> {
     handle: &'h Handle,
     deleted_values: Vec<NonzeroValueLocation>,
     altered_files: HashSet<FileId>,
@@ -162,7 +162,7 @@ impl<'h, T> PostCommitWork<'h, T> {
 
 // I can't work out how to have a reference to the Connection, and a transaction on it here at the
 // same time.
-pub struct Transaction<'h> {
+pub(crate) struct Transaction<'h> {
     tx: rusqlite::Transaction<'h>,
     handle: &'h Handle,
     deleted_values: Vec<NonzeroValueLocation>,
@@ -185,7 +185,7 @@ impl<'h> Transaction<'h> {
         }
     }
 
-    pub fn commit<T>(mut self, reward: T) -> Result<PostCommitWork<'h, T>> {
+    pub(crate) fn commit<T>(mut self, reward: T) -> Result<PostCommitWork<'h, T>> {
         self.apply_limits()?;
         self.tx.commit()?;
         Ok(PostCommitWork {

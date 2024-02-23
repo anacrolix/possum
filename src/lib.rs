@@ -31,25 +31,24 @@ use rand::Rng;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{params, CachedStatement, Connection, Statement};
-use sys::{flock, pathconf, *};
+use sys::*;
 use tempfile::TempDir;
 #[cfg(test)]
 pub use test_log::test;
 use tracing::*;
-pub use walk::Entry as WalkEntry;
 use ErrorKind::InvalidInput;
 
 use crate::item::Item;
-pub use crate::tx::Transaction;
-use crate::tx::{PostCommitWork, ReadTransactionOwned};
 use crate::walk::walk_dir;
 use crate::ValueLocation::{Nonzero, ZeroLength};
 
 mod c_api;
 mod cpathbuf;
+mod dir;
 mod error;
 mod exclusive_file;
-pub mod handle;
+mod file_id;
+pub(crate) mod handle;
 mod item;
 mod owned_cell;
 pub mod sys;
@@ -57,6 +56,9 @@ pub mod sys;
 pub mod testing;
 #[cfg(test)]
 mod tests;
+mod tx;
+pub use tx::*;
+mod ownedtx;
 pub mod walk;
 
 /// Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.
@@ -104,6 +106,8 @@ fn init_manifest_schema(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
     conn.execute_batch(MANIFEST_SCHEMA_SQL)
 }
 
+/// The start of a write, before an exclusive file has been allocated. This allows for bringing your
+/// own file, such as by rename, or file clone.
 pub struct BeginWriteValue<'writer, 'handle> {
     batch: &'writer mut BatchWriter<'handle>,
 }
@@ -114,6 +118,8 @@ impl BeginWriteValue<'_, '_> {
     // See also
     // https://stackoverflow.com/questions/65505765/difference-of-ficlone-vs-ficlonerange-vs-copy-file-range-for-copy-on-write-supp
     // for a discussion on efficient ways to copy values that could be supported.
+    /// Clone an entire file in. If cloning fails, this will fall back to copying the provided file.
+    /// Its file position may be altered.
     pub fn clone_file(self, file: &mut File) -> PubResult<ValueWriter> {
         if !self.batch.handle.dir_supports_file_cloning() {
             return self.copy_file(file);
@@ -139,6 +145,7 @@ impl BeginWriteValue<'_, '_> {
         })
     }
 
+    /// Assigns an exclusive file for writing, and copies the entire source file.
     fn copy_file(self, file: &mut File) -> PubResult<ValueWriter> {
         let mut value_writer = self.begin()?;
         // Need to rewind the file since we're cloning the whole thing.
@@ -147,6 +154,7 @@ impl BeginWriteValue<'_, '_> {
         return Ok(value_writer);
     }
 
+    /// Assign an exclusive file for writing a value.
     pub fn begin(self) -> PubResult<ValueWriter> {
         let mut exclusive_file = self.batch.get_exclusive_file()?;
         Ok(ValueWriter {
@@ -206,6 +214,7 @@ struct ValueRename {
     new_key: Vec<u8>,
 }
 
+/// Manages uncommitted writes
 #[derive(Debug)]
 pub struct BatchWriter<'a> {
     handle: &'a Handle,
@@ -229,6 +238,7 @@ impl FromSql for Timestamp {
     }
 }
 
+// This may only be public for external tests.
 pub const LAST_USED_RESOLUTION: Duration = Duration::from_millis(1);
 
 impl Deref for Timestamp {
@@ -356,6 +366,7 @@ pub struct Value {
     last_used: Timestamp,
 }
 
+/// Storage location info for a non-zero-length value.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NonzeroValueLocation {
     pub file_id: FileId,
@@ -363,6 +374,8 @@ pub struct NonzeroValueLocation {
     pub length: ValueLength,
 }
 
+/// Location data for a value. Includes the case where the value is empty and so doesn't require
+/// allocation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ValueLocation {
     ZeroLength,
@@ -590,8 +603,8 @@ where
     }
 }
 
-mod ownedtx;
-
+/// A value holding a statement temporary for starting an iterator over the Values of a value file.
+/// I couldn't seem to get the code to work without this.
 pub struct FileValues<'a, S> {
     stmt: S,
     file_id: &'a FileIdFancy,
@@ -737,8 +750,8 @@ impl<'a> Reader<'a> {
         // Writers could hold them for a long time while writing. Then we need a separate cloning
         // lock. Also distinct Handles, even across processes can own each exclusive file.
         if false {
-            let mut src_file = OpenOptions::new().read(true).open(&src_path)?;
-            assert!(try_lock_file(&mut src_file, flock::LockSharedNonblock)?);
+            let src_file = OpenOptions::new().read(true).open(&src_path)?;
+            assert!(src_file.lock_max_segment(LockSharedNonblock)?);
         }
         let tempdir_path = tempdir.path();
         let dst_path = file_path(tempdir_path, file_id);
@@ -748,7 +761,7 @@ impl<'a> Reader<'a> {
         // This prevents the snapshot file from being cleaned up. There's probably a race between
         // here and when it was cloned above. I wonder if the snapshot dir can be locked, or if we
         // can retry the cloning until we are able to lock it.
-        let locked = try_lock_file(&mut file, LockSharedNonblock)?;
+        let locked = file.lock_max_segment(LockSharedNonblock)?;
         assert!(locked);
         let len = file.seek(End(0))?;
         let file_clone = Arc::new(Mutex::new(FileClone {
@@ -794,6 +807,7 @@ where
     multiple * (value / multiple)
 }
 
+/// Divides value by multiple, always rounding up. Very common operation for allocators.
 pub fn ceil_multiple<T>(value: T, multiple: T) -> T
 where
     T: Integer + Copy,
@@ -836,10 +850,6 @@ fn valid_file_name(file_name: &str) -> bool {
     }
     file_name.starts_with(VALUES_FILE_NAME_PREFIX)
 }
-
-mod dir;
-mod file_id;
-pub mod tx;
 
 struct PunchValueConstraints {
     greedy_start: bool,
@@ -917,7 +927,8 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
         let end_offset = match next_offset {
             None => {
                 // Lock the file to see if we can expand to the end of the file.
-                let locked_file = try_lock_file(&mut file, flock::LockExclusiveNonblock)
+                let locked_file = file
+                    .lock_max_segment(LockExclusiveNonblock)
                     .context("locking value file")?;
                 // Get the file length after we have tried locking the file.
                 let file_end = file.seek(End(0))? as i64;
@@ -979,8 +990,9 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
     Ok(())
 }
 
+/// Checks that there's no data allocated in the region provided.
 pub fn check_hole(file: &mut File, offset: u64, length: u64) -> Result<()> {
-    match seek_hole_whence(file, offset, seekhole::Data)? {
+    match seekhole::seek_hole_whence(file, offset, seekhole::RegionType::Data)? {
         // Data starts after the hole we just punched.
         Some(seek_offset) if seek_offset >= offset + length => Ok(()),
         // There's no data after the hole we just punched.
@@ -1008,8 +1020,9 @@ fn delete_unused_snapshots(dir: &Path) -> Result<()> {
                         return Err(err)
                             .with_context(|| format!("opening snapshot value {:?}", &entry.path))
                     }
-                    Ok(mut file) => {
-                        if try_lock_file(&mut file, LockExclusiveNonblock)
+                    Ok(file) => {
+                        if file
+                            .lock_max_segment(LockExclusiveNonblock)
                             .context("locking snapshot value")?
                         {
                             let res = remove_file(&entry.path);

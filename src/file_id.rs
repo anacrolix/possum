@@ -13,6 +13,7 @@ impl FileIdFancy {
     }
 }
 
+/// Value file identifier
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct FileId(OsString);
 

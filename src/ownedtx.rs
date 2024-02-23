@@ -3,7 +3,7 @@ use crate::tx::ReadTransactionOwned;
 
 /// A Sqlite Transaction and the mutex guard on the Connection it came from.
 // Not in the handle module since it can be owned by types other than Handle.
-pub struct OwnedTx<'handle> {
+pub(crate) struct OwnedTx<'handle> {
     cell: OwnedTxInner<'handle, Transaction<'handle>>,
 }
 

@@ -5,8 +5,7 @@ use std::io::Read;
 
 use anyhow::Result;
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
-use possum::sys::flock;
-use possum::sys::flock::try_lock_file;
+use possum::sys::*;
 use possum::testing::test_tempdir;
 use possum::Handle;
 
@@ -181,17 +180,17 @@ pub fn multiple_benchmarks_fallible(c: &mut Criterion) -> Result<()> {
         });
     }
     {
-        let mut file = tempfile::tempfile().unwrap();
+        let file = tempfile::tempfile().unwrap();
         c.benchmark_group("flock")
             .bench_function("exclusive nonblock", |b| {
                 b.iter(|| -> () {
-                    assert!(try_lock_file(&mut file, flock::LockExclusiveNonblock).unwrap());
+                    assert!(file.lock_max_segment(LockExclusiveNonblock).unwrap());
                     // assert!(try_lock_file(&mut file, flock::UnlockNonblock).unwrap());
                 })
             })
             .bench_function("shared nonblock", |b| {
                 b.iter(|| -> () {
-                    assert!(try_lock_file(&mut file, flock::LockSharedNonblock).unwrap());
+                    assert!(file.lock_max_segment(LockSharedNonblock).unwrap());
                     // assert!(try_lock_file(&mut file, flock::UnlockNonblock).unwrap());
                 })
             });

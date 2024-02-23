@@ -1,17 +1,19 @@
+//! Exposes required lower-level OS primitives for sparse files, block cloning, and file locking.
+
 use super::*;
 
-pub mod clonefile;
-pub mod flock;
-pub mod pathconf;
-pub mod punchfile;
+mod clonefile;
+mod flock;
+mod pathconf;
+mod punchfile;
 pub mod seekhole;
 
 use std::fs::File;
 
 pub use clonefile::*;
 pub use flock::*;
+pub(crate) use pathconf::*;
 pub use punchfile::*;
-pub use seekhole::*;
 
 cfg_if! {
     if #[cfg(windows)] {
@@ -26,11 +28,9 @@ cfg_if! {
     } else if #[cfg(unix)] {
         mod unix;
         pub use unix::*;
-        pub use std::os::unix::prelude::OsStrExt;
-        pub use std::os::unix::ffi::OsStringExt;
-        pub use std::os::fd::AsRawFd;
-        pub use nix::errno::Errno;
-        pub use std::os::fd::AsFd;
+        pub(crate) use std::os::unix::prelude::OsStrExt;
+        pub(crate) use std::os::fd::AsRawFd;
+        pub(crate) use std::os::fd::AsFd;
     }
 }
 
@@ -41,9 +41,8 @@ cfg_if! {
         #[cfg(unix)]
         pub use nix::libc::lseek64 as lseek;
     } else {
-        pub use libc::off_t;
         #[cfg(unix)]
-        pub use nix::libc::lseek;
+         use nix::libc::lseek;
     }
 }
 
@@ -59,7 +58,7 @@ impl SparseFile for File {
 }
 
 #[cfg(not(windows))]
-pub fn open_dir_as_file<P: AsRef<Path>>(path: P) -> io::Result<File> {
+pub(crate) fn open_dir_as_file<P: AsRef<Path>>(path: P) -> io::Result<File> {
     OpenOptions::new().read(true).open(path)
 }
 

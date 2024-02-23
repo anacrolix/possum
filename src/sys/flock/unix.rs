@@ -8,8 +8,8 @@ use super::*;
 fn seek_from_offset(seek_from: SeekFrom) -> i64 {
     use SeekFrom::*;
     match seek_from {
-        Start(offset) => offset as off_t,
-        End(offset) | Current(offset) => offset as off_t,
+        Start(offset) => offset as i64,
+        End(offset) | Current(offset) => offset,
     }
 }
 

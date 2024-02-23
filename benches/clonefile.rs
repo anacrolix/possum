@@ -1,7 +1,7 @@
 use std::fs::remove_file;
 
 use criterion::{BenchmarkId, Criterion};
-use possum::sys::clonefile::clonefile;
+use possum::sys::clonefile;
 use possum::testing::test_tempdir;
 
 fn clonefile_benchmark_fallible(c: &mut Criterion) -> anyhow::Result<()> {

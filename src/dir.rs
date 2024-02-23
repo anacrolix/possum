@@ -1,7 +1,5 @@
 use std::borrow::Borrow;
 
-use pathconf::path_min_hole_size;
-
 use super::*;
 
 #[derive(Clone, Debug)]

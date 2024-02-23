@@ -9,6 +9,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
 use libc::{ENOTSUP, EOPNOTSUPP};
+use nix::errno::errno;
 
 use super::*;
 use crate::cpathbuf::CPathBuf;
@@ -22,7 +23,7 @@ cfg_if! {
 #[cfg(unix)]
 // Here and not in crate::Error because ENOTSUP has special meaning for clonefile.
 fn last_errno() -> crate::Error {
-    let errno = Errno::last_raw();
+    let errno = errno();
     // On Linux this is EOPNOTSUP, but on Linux it's also the same value as ENOTSUP.
     if errno == ENOTSUP || errno == EOPNOTSUPP {
         crate::Error::UnsupportedFilesystem

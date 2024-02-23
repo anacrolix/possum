@@ -7,6 +7,7 @@ use std::io::Error;
 use std::os::fd::RawFd;
 
 use libc::{ENXIO, SEEK_DATA, SEEK_HOLE};
+use nix::errno::errno;
 
 use super::*;
 
@@ -43,7 +44,8 @@ fn lseek(
     // lseek64?
     let new_offset = unsafe { super::lseek(fd, offset, whence.into()) };
     if new_offset == -1 {
-        return Err(Errno::last_raw());
+        // Wait for nix 0.28 to use Errno::last_raw
+        return Err(errno());
     }
     Ok(new_offset as RegionOffset)
 }

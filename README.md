@@ -8,7 +8,7 @@ Value reads and writes occur directly on files, allowing memory-mapping, zero-co
 
 ## Why?
 
-I couldn’t find cache implementations that supported storing directly on disk, and concurrent access from multiple processes without IPC, but also maintaining disk usage limits. They always seem to be in-memory with snapshots to disk, or single-process with the disk management (including all keys) maintained in memory too. There are plenty of single-process, and fewer concurrent key-value disk stores, but they have no regard for space limits and don’t do user-level caching well. So while in-memory key-value caches are well-supported, there is an unfilled niche for disk-caches, particularly one that can be shared by multiple applications. There are plenty of systems out there that have huge amounts of disk space that could be shared by package managers, HTTP proxies and reverse proxies, thumbnail generation, API caches and more where main memory latency isn’t needed.
+I couldn’t find a cache implementation that supported storing directly on disk, concurrent access from multiple processes without a dedicated process, and limiting disk space usage. Existing solutions seem to be in-memory with snapshots to disk (Redis), or single-process with the disk management (including all keys) maintained in memory too (Bitcask derivatives). There are plenty of single-process (this is commonly implemented within individual applications), and fewer concurrent key-value disk stores, but they have no regard for space limits and don’t do user-level caching well (pretty much any LSM-based database falls into this category, for example RocksDB, Badger, and Pebble). So while in-memory key-value caches are well-supported, there is an unfilled niche for disk-caches, particularly one that can be shared by multiple applications. There are plenty of systems out there that have huge amounts of disk space that could be shared by package managers, HTTP proxies and reverse proxies, thumbnail generation, API caches and more where main memory latency isn’t needed.
 
 ## Technical Details
 
@@ -24,7 +24,7 @@ Efficiently removing data, and creating read snapshots requires hole punching, a
 
 ## Supported systems
 
-macOS and Linux are supported. BSD should work. Solaris requires a small amount of work to complete the implementation. Windows is not supported: It has the necessary features, but [only ReFS implements block cloning](https://learn.microsoft.com/en-us/windows/win32/fileio/block-cloning).
+macOS, Linux and Windows are supported. BSD should work. Solaris requires a small amount of work to complete the implementation. On systems where block cloning is not supported (ext4 on Linux, and NTFS on Windows are notable examples), the implementation falls back to file region locking.
 
 ## anacrolix/squirrel
 

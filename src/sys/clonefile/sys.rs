@@ -91,6 +91,16 @@ pub fn fclonefile_noflags(src_file: &File, dst_path: &Path) -> PubResult<()> {
             if rv == -1 {
                 return Err(last_errno());
             }
+        } else if #[cfg(target_os = "freebsd")] {
+            // Looks like the syscall isn't ready yet.
+            // https://github.com/openzfs/zfs/pull/13392#issue-1221750354
+            let dst_file = File::create(dst_path)?;
+            let src_fd = src_file.as_raw_fd();
+            let dst_fd = dst_file.as_raw_fd();
+            let rv = libc::fclonefile(src_fd, dst_fd);
+            if rv == -1 {
+                return Err(last_errno());
+            }
         } else {
             // assert!(dst_path.is_absolute());
             let dst_buf = CPathBuf::try_from(dst_path).unwrap();

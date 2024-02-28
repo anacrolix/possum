@@ -7,7 +7,11 @@ cfg_if! {
     } else if #[cfg(windows)] {
         mod windows;
         pub use self::windows::*;
+    } else if #[cfg(target_os = "freebsd")] {
+        mod freebsd;
+        pub use freebsd::*;
     } else {
+        // Looks like FreeBSD has fspacectl()
         mod macos;
         pub use macos::*;
     }

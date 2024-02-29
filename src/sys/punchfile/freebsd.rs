@@ -1,5 +1,5 @@
-use std::{io, mem};
 use std::io::Error;
+use std::{io, mem};
 
 use super::*;
 

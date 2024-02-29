@@ -3,7 +3,7 @@ use std::borrow::Borrow;
 use super::*;
 
 #[derive(Clone, Debug)]
-pub(crate) struct Dir {
+pub struct Dir {
     path_buf: PathBuf,
     block_size: u64,
     supports_file_cloning: bool,

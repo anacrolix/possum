@@ -60,6 +60,7 @@ mod tx;
 pub use tx::*;
 mod ownedtx;
 pub mod walk;
+pub use dir::*;
 
 /// Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.
 pub type PubResult<T> = Result<T, Error>;

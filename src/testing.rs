@@ -14,6 +14,12 @@ pub type Hash = XxHash64;
 
 pub fn write_random_tempfile(len: u64) -> Result<NamedTempFile> {
     let mut file = NamedTempFile::new()?;
+    write_random(&mut file, len)?;
+    ensure!(file.as_file().seek(SeekFrom::End(0))? == len);
+    Ok(file)
+}
+
+pub fn write_random(mut file: impl Write, len: u64) -> Result<()> {
     let mut rng = rand::thread_rng();
     let mut buf = [0; 4096];
     let mut remaining_size = len;
@@ -24,8 +30,7 @@ pub fn write_random_tempfile(len: u64) -> Result<NamedTempFile> {
         file.write_all(buf1)?;
         remaining_size -= n1 as u64;
     }
-    ensure!(file.as_file().seek(SeekFrom::End(0))? == len);
-    Ok(file)
+    Ok(())
 }
 
 // Takes &mut because XxHash64 implements Copy and it's really easy to make a mistake.

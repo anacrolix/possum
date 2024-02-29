@@ -35,7 +35,7 @@ fn last_errno() -> crate::Error {
 
 pub fn clonefile(src_path: &Path, dst_path: &Path) -> PubResult<()> {
     cfg_if! {
-        if #[cfg(target_os = "darwin")] {
+        if #[cfg(target_os = "macos")] {
             let src_buf = CString::new(src_path.as_os_str().as_bytes()).unwrap();
             let dst_buf = CString::new(dst_path.as_os_str().as_bytes()).unwrap();
             let src = src_buf.as_ptr();

@@ -74,10 +74,10 @@ fn test_replace_keys() -> Result<()> {
     );
 
     let dir = handle.dir.clone();
-    let values_punched = Arc::clone(&handle.value_puncher_done);
+    let values_punched = handle.get_value_puncher_done();
     drop(handle);
     // Wait for it to recv, which should be a disconnect when the value_puncher hangs up.
-    values_punched.lock().unwrap().recv();
+    values_punched.wait();
 
     let entries = dir.walk_dir()?;
     let values_files: Vec<_> = entries

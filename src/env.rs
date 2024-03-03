@@ -8,10 +8,14 @@ pub(crate) fn emulate_freebsd() -> bool {
             use once_cell::sync::OnceCell;
             static CELL: OnceCell<bool> = OnceCell::new();
             *CELL.get_or_init(|| {
-                !matches!(
+                let emulate =                 !matches!(
                     std::env::var("POSSUM_EMULATE_FREEBSD"),
                     Err(std::env::VarError::NotPresent)
-                )
+                );
+                if emulate {
+                    super::error!("emulating freebsd");
+                }
+                emulate
             })
         }
     }

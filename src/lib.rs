@@ -816,6 +816,7 @@ impl<'a> Reader<'a> {
         if flocking() {
             // Possibly we want to block if we're flocking.
             assert!(file.flock(LockShared)?);
+            return Ok(());
         }
         for extent in read_extents {
             assert!(file.lock_segment(LockSharedNonblock, Some(extent.len), extent.offset)?);

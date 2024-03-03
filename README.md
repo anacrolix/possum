@@ -24,7 +24,13 @@ Efficiently removing data, and creating read snapshots requires hole punching, a
 
 ## Supported systems
 
-macOS, Linux and Windows are supported. FreeBSD doesn’t work yet, unfortunately file cloning and open file description locking is missing, but there are fallbacks that can be used. Solaris requires a small amount of work to complete the implementation. On systems where block cloning is not supported (ext4 on Linux, and NTFS on Windows are notable examples), the implementation falls back to file region locking (except for FreeBSD which will have to fall back to whole-file locking).
+macOS, Linux and Windows.
+
+FreeBSD 14+. Unfortunately file cloning and open file description locking are missing. The implementation falls back on flock(2) and has to separate write and read files.
+
+Solaris requires a small amount of work to complete the implementation.
+
+On filesystems where block cloning is not supported (ext4 on Linux, and NTFS on Windows are notable examples), the implementation falls back to file region locking unless that is also not available (FreeBSD).
 
 ## anacrolix/squirrel
 

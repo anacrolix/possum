@@ -8,6 +8,8 @@ use crate::FileId;
 
 #[derive(Debug)]
 enum LockLevel {
+    // On systems that don't implement flock, downgrades never occur.
+    #[allow(dead_code)]
     Shared,
     Exclusive,
 }

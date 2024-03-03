@@ -23,7 +23,7 @@ pub struct Handle {
     pub(crate) instance_limits: Limits,
     deleted_values: Option<DeletedValuesSender>,
     _value_puncher: Option<std::thread::JoinHandle<()>>,
-    pub(crate) value_puncher_done: Arc<Mutex<std::sync::mpsc::Receiver<()>>>,
+    value_puncher_done: ValuePuncherDone,
 }
 
 /// 4 bytes stored in the database header https://sqlite.org/fileformat2.html#database_header.
@@ -108,7 +108,7 @@ impl Handle {
         Self::init_sqlite_conn(&mut conn)?;
         let (deleted_values, receiver) = std::sync::mpsc::sync_channel(10);
         let (value_puncher_done_sender, value_puncher_done) = std::sync::mpsc::sync_channel(0);
-        let value_puncher_done = Arc::new(Mutex::new(value_puncher_done));
+        let value_puncher_done = ValuePuncherDone(Arc::new(Mutex::new(value_puncher_done)));
         let handle = Self {
             conn: Mutex::new(conn),
             exclusive_files: Default::default(),
@@ -350,7 +350,6 @@ impl Handle {
                 file_id,
                 file_offset,
                 length,
-                ..
             } = &v;
             let value_length = length;
             let msg = format!(
@@ -390,6 +389,11 @@ impl Handle {
             }
         }
     }
+
+    /// Returns something that can be used to test if the value puncher routine for this Handle has returned.
+    pub fn get_value_puncher_done(&self) -> ValuePuncherDone {
+        ValuePuncherDone(Arc::clone(&self.value_puncher_done.0))
+    }
 }
 
 use item::Item;
@@ -405,5 +409,17 @@ impl Drop for Handle {
         //     join_handle.thread().unpark();
         //     join_handle.join().unwrap()
         // }
+    }
+}
+
+#[derive(Debug)]
+pub struct ValuePuncherDone(Arc<Mutex<std::sync::mpsc::Receiver<()>>>);
+
+impl ValuePuncherDone {
+    pub fn wait(&self) {
+        assert!(matches!(
+            self.0.lock().unwrap().recv(),
+            Err(std::sync::mpsc::RecvError)
+        ))
     }
 }

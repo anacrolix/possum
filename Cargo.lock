@@ -772,6 +772,7 @@ dependencies = [
  "memmap2",
  "nix",
  "num",
+ "once_cell",
  "positioned-io",
  "possum-db",
  "rand",

@@ -7,11 +7,16 @@
 
 use super::*;
 
-/// _PC_MIN_HOLE_SIZE is 27 on Darwin.
-/// https://github.com/apple/darwin-xnu/blob/main/bsd/sys/unistd.h. It doesn't seem to be defined
-/// in the nix or libc crates for Darwin.
-#[cfg(target_os = "macos")]
-const _PC_MIN_HOLE_SIZE: i32 = 27;
+cfg_if! {
+    if #[cfg(target_os = "macos")] {
+        /// _PC_MIN_HOLE_SIZE is 27 on Darwin.
+        /// https://github.com/apple/darwin-xnu/blob/main/bsd/sys/unistd.h. It doesn't seem to be
+        /// defined in the nix or libc crates for Darwin.
+        const _PC_MIN_HOLE_SIZE: i32 = 27;
+    } else {
+        use libc::_PC_MIN_HOLE_SIZE;
+    }
+}
 
 /// Recommended minimum hole size for sparse files for file descriptor.
 /// fpathconf(_PC_MIN_HOLE_SIZE);

@@ -122,8 +122,8 @@ impl super::FileSystemFlags for WindowsFileSystemFlags {
     fn supports_sparse_files(&self) -> bool {
         self.0 & FILE_SUPPORTS_SPARSE_FILES != 0
     }
-    fn supports_block_cloning(&self) -> bool {
-        self.0 & FILE_SUPPORTS_BLOCK_REFCOUNTING != 0
+    fn supports_block_cloning(&self) -> Option<bool> {
+        Some(self.0 & FILE_SUPPORTS_BLOCK_REFCOUNTING != 0)
     }
 }
 

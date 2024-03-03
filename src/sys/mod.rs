@@ -15,6 +15,8 @@ pub use flock::*;
 pub(crate) use pathconf::*;
 pub use punchfile::*;
 
+use crate::env::emulate_freebsd;
+
 cfg_if! {
     if #[cfg(windows)] {
         mod windows;
@@ -25,12 +27,14 @@ cfg_if! {
         use ::windows::Win32::Storage::FileSystem::*;
         use ::windows::Win32::System::IO::*;
         use ::windows::Win32::System::SystemServices::*;
+        pub type NativeIoError = std::io::Error;
     } else if #[cfg(unix)] {
         mod unix;
         pub use unix::*;
         pub(crate) use std::os::unix::prelude::OsStrExt;
         pub(crate) use std::os::fd::AsRawFd;
         pub(crate) use std::os::fd::AsFd;
+        pub type NativeIoError = std::io::Error;
     }
 }
 
@@ -64,32 +68,37 @@ pub(crate) fn open_dir_as_file<P: AsRef<Path>>(path: P) -> io::Result<File> {
 
 pub trait FileSystemFlags {
     fn supports_sparse_files(&self) -> bool;
-    fn supports_block_cloning(&self) -> bool;
+    /// Returns Some if we know for certain, and None if there's no indication from the system.
+    fn supports_block_cloning(&self) -> Option<bool>;
 }
 
 pub trait DirMeta {
     fn file_system_flags(&self) -> io::Result<impl FileSystemFlags>;
 }
 
-struct SupportsEverythingFilesystemFlags {}
+struct UnixFilesystemFlags {}
 
-impl FileSystemFlags for SupportsEverythingFilesystemFlags {
+impl FileSystemFlags for UnixFilesystemFlags {
     fn supports_sparse_files(&self) -> bool {
         // AFAIK, all unix systems support sparse files on all filesystems.
         true
     }
 
-    fn supports_block_cloning(&self) -> bool {
+    fn supports_block_cloning(&self) -> Option<bool> {
         // AFAIK there's no way to check if a filesystem supports block cloning on non-Windows
         // platforms, and even then it depends on where you're copying to/from, sometimes even on
         // the same filesystem.
-        true
+        if emulate_freebsd() {
+            Some(false)
+        } else {
+            None
+        }
     }
 }
 
 #[cfg(not(windows))]
 impl DirMeta for File {
     fn file_system_flags(&self) -> io::Result<impl FileSystemFlags> {
-        Ok(SupportsEverythingFilesystemFlags {})
+        Ok(UnixFilesystemFlags {})
     }
 }

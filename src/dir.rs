@@ -26,7 +26,22 @@ impl Dir {
         fs::create_dir_all(&path_buf)?;
         let block_size = path_min_hole_size(&path_buf)?;
         let file = open_dir_as_file(&path_buf)?;
-        let supports_file_cloning = file.file_system_flags()?.supports_block_cloning();
+        let supports_file_cloning_flag = file.file_system_flags()?.supports_block_cloning();
+        let supports_file_cloning = match supports_file_cloning_flag {
+            Some(some) => some,
+            None => {
+                let src = tempfile::NamedTempFile::new_in(&path_buf)?;
+                let dst_path = random_file_name_in_dir(&path_buf, ".clone_test-");
+                assert!(!dst_path.exists());
+                let clone_res = clonefile(src.path(), &dst_path);
+                let _ = std::fs::remove_file(&dst_path);
+                match clone_res {
+                    Ok(()) => true,
+                    Err(err) if CloneFileError::is_unsupported(&err) => false,
+                    Err(err) => return Err(err).context("testing clonefile"),
+                }
+            }
+        };
         Ok(Self {
             path_buf,
             block_size,

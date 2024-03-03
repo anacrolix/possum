@@ -21,16 +21,28 @@ pub enum Error {
 
 use Error::*;
 
-impl Error {
+pub trait FileAlreadyExistsError {
+    fn is_file_already_exists(&self) -> bool;
+}
+
+impl FileAlreadyExistsError for std::io::Error {
+    fn is_file_already_exists(&self) -> bool {
+        self.kind() == ErrorKind::AlreadyExists
+    }
+}
+
+impl FileAlreadyExistsError for Error {
     // This isn't great, since such an error could already be wrapped up in anyhow, or come from
     // Sqlite for example.
-    pub(crate) fn is_file_already_exists(&self) -> bool {
+    fn is_file_already_exists(&self) -> bool {
         match self {
-            Io(err) => err.kind() == ErrorKind::AlreadyExists,
+            Io(err) => err.is_file_already_exists(),
             _ => false,
         }
     }
+}
 
+impl Error {
     pub fn root_cause(&self) -> &(dyn std::error::Error + 'static) {
         match self {
             NoSuchKey | UnsupportedFilesystem => self,

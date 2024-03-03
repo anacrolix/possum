@@ -24,7 +24,7 @@ fn seek_from_whence(seek_from: SeekFrom) -> libc::c_short {
 }
 
 cfg_if! {
-    if #[cfg(target_os = "macos")] {
+    if #[cfg(any(target_os = "macos", target_os = "freebsd"))] {
         use libc::flock as flock_struct;
     } else {
         use libc::flock64 as flock_struct;
@@ -53,20 +53,30 @@ pub(super) fn lock_file_segment(
         // Silly non-exhaustive enum.
         _ => unimplemented!(),
     };
+    let mut flock_arg: flock_struct = unsafe { std::mem::zeroed() };
+    flock_arg.l_start = seek_from_offset(whence);
+    flock_arg.l_len = len.unwrap_or(0);
     #[allow(clippy::useless_conversion)]
     let l_type = l_type.try_into().unwrap();
-    let flock_arg = flock_struct {
-        l_start: seek_from_offset(whence),
-        l_len: len.unwrap_or(0),
-        l_pid: 0,
-        l_type,
-        l_whence: seek_from_whence(whence),
-    };
-    use libc::{F_OFD_SETLK, F_OFD_SETLKW};
+    flock_arg.l_type = l_type;
+    flock_arg.l_whence = seek_from_whence(whence);
+    cfg_if! {
+        if #[cfg(target_os = "freebsd")] {
+            use libc::{F_SETLK as SetLock, F_SETLKW as SetLockWait};
+        } else {
+            use libc::*;
+            #[allow(non_snake_case)]
+            let (SetLock, SetLockWait) = if emulate_freebsd() {
+                (F_SETLK, F_SETLKW)
+            } else {
+                (F_OFD_SETLK, F_OFD_SETLKW)
+            };
+        }
+    }
     #[allow(deprecated)]
     let arg = match arg {
-        LockShared | LockExclusive => F_OFD_SETLKW,
-        LockSharedNonblock | LockExclusiveNonblock | Unlock | UnlockNonblock => F_OFD_SETLK,
+        LockShared | LockExclusive => SetLockWait,
+        LockSharedNonblock | LockExclusiveNonblock | Unlock | UnlockNonblock => SetLock,
         _ => unimplemented!(),
     };
     // EWOULDBLOCK is an inherent impl const so can't be glob imported.

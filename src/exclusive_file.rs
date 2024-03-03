@@ -43,7 +43,7 @@ impl ExclusiveFile {
 
     pub(crate) fn new(dir: impl AsRef<Path>) -> anyhow::Result<ExclusiveFile> {
         for _ in 0..10 {
-            let id = random_file_name().into();
+            let id = random_file_name(VALUES_FILE_NAME_PREFIX).into();
             let path = dir.as_ref().join(&id);
             debug!(?path, "opening new exclusive file");
             let file = Self::new_open_options().create(true).open(path);

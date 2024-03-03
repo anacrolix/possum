@@ -19,21 +19,42 @@ cfg_if! {
     }
 }
 
+pub trait CloneFileError {
+    fn is_unsupported(&self) -> bool;
+}
+
+impl CloneFileError for NativeIoError {
+    #[cfg(unix)]
+    fn is_unsupported(&self) -> bool {
+        self.raw_os_error()
+            .map(|errno| matches!(errno, EOPNOTSUPP))
+            .unwrap_or_default()
+    }
+    #[cfg(windows)]
+    fn is_unsupported(&self) -> bool {
+        // Where can I find a list of possible error codes? At least on Windows there is a file
+        // system flag that might avoid us needing to use this value.
+        false
+    }
+}
+
+#[allow(dead_code)]
 #[cfg(unix)]
 // Here and not in crate::Error because ENOTSUP has special meaning for clonefile.
-fn last_errno() -> crate::Error {
-    let errno = errno();
-    // On Linux this is EOPNOTSUP, but on Linux it's also the same value as ENOTSUP.
-    if errno == ENOTSUP || errno == EOPNOTSUPP {
-        crate::Error::UnsupportedFilesystem
-    } else {
-        io::Error::from_raw_os_error(errno).into()
-    }
+fn last_errno() -> NativeIoError {
+    io::Error::last_os_error()
+    // let errno = errno();
+    // // On Linux this is EOPNOTSUP, but on Linux it's also the same value as ENOTSUP.
+    // if errno == ENOTSUP || errno == EOPNOTSUPP {
+    //     crate::Error::UnsupportedFilesystem
+    // } else {
+    //     io::Error::from_raw_os_error(errno).into()
+    // }
 }
 
 // TODO: On Solaris we want to use reflink(3)
 
-pub fn clonefile(src_path: &Path, dst_path: &Path) -> PubResult<()> {
+pub fn clonefile(src_path: &Path, dst_path: &Path) -> Result<(), std::io::Error> {
     cfg_if! {
         if #[cfg(target_os = "macos")] {
             let src_buf = CString::new(src_path.as_os_str().as_bytes()).unwrap();
@@ -53,7 +74,8 @@ pub fn clonefile(src_path: &Path, dst_path: &Path) -> PubResult<()> {
 }
 
 // fclonefileat but the dst is probably supposed to be an absolute path.
-pub fn fclonefile_noflags(src_file: &File, dst_path: &Path) -> PubResult<()> {
+#[allow(unused_variables)]
+pub fn fclonefile_noflags(src_file: &File, dst_path: &Path) -> Result<(), NativeIoError> {
     cfg_if! {
         if #[cfg(windows)] {
             use std::ffi::c_void;
@@ -79,8 +101,10 @@ pub fn fclonefile_noflags(src_file: &File, dst_path: &Path) -> PubResult<()> {
                 0,
                 None,
                 None,
-            )}.map_err(anyhow::Error::from)?;
+            )}?;
+            Ok(())
         } else if #[cfg(target_os = "linux")] {
+            // Should this be exclusive create?
             let dst_file = File::create(dst_path)?;
             let src_fd = src_file.as_raw_fd();
             let dst_fd = dst_file.as_raw_fd();
@@ -91,16 +115,22 @@ pub fn fclonefile_noflags(src_file: &File, dst_path: &Path) -> PubResult<()> {
             if rv == -1 {
                 return Err(last_errno());
             }
+            Ok(())
         } else if #[cfg(target_os = "freebsd")] {
             // Looks like the syscall isn't ready yet.
             // https://github.com/openzfs/zfs/pull/13392#issue-1221750354
-            let dst_file = File::create(dst_path)?;
-            let src_fd = src_file.as_raw_fd();
-            let dst_fd = dst_file.as_raw_fd();
-            let rv = libc::fclonefile(src_fd, dst_fd);
-            if rv == -1 {
-                return Err(last_errno());
-            }
+            // Should this be exclusive create?
+
+            // let dst_file = File::create(dst_path)?;
+            // let src_fd = src_file.as_raw_fd();
+            // let dst_fd = dst_file.as_raw_fd();
+            // let rv = libc::fclonefile(src_fd, dst_fd);
+            // if rv == -1 {
+            //     return Err(last_errno());
+            // }
+
+            // Screen this sooner by claiming no clonefile support before it's even attempted.
+            unimplemented!()
         } else {
             // assert!(dst_path.is_absolute());
             let dst_buf = CPathBuf::try_from(dst_path).unwrap();
@@ -109,7 +139,7 @@ pub fn fclonefile_noflags(src_file: &File, dst_path: &Path) -> PubResult<()> {
             if val != 0 {
                 return Err(last_errno());
             }
+            Ok(())
         }
     }
-    Ok(())
 }

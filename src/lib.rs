@@ -19,7 +19,7 @@ use std::{fs, io, str};
 use anyhow::{bail, Context, Result};
 use cfg_if::cfg_if;
 use chrono::NaiveDateTime;
-pub use error::Error;
+pub use error::*;
 use exclusive_file::ExclusiveFile;
 use file_id::{FileId, FileIdFancy};
 pub use handle::Handle;
@@ -61,6 +61,7 @@ pub use tx::*;
 mod ownedtx;
 pub mod walk;
 pub use dir::*;
+pub mod env;
 
 /// Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.
 pub type PubResult<T> = Result<T, Error>;
@@ -126,13 +127,14 @@ impl BeginWriteValue<'_, '_> {
             return self.copy_file(file);
         }
         let dst_path = loop {
-            let dst_path = random_file_name_in_dir(self.batch.handle.dir.path());
+            let dst_path =
+                random_file_name_in_dir(self.batch.handle.dir.path(), VALUES_FILE_NAME_PREFIX);
             match fclonefile_noflags(file, &dst_path) {
-                Err(err) if err.root_cause_is_unsupported_filesystem() => {
+                Err(err) if CloneFileError::is_unsupported(&err) => {
                     return self.copy_file(file);
                 }
                 Err(err) if err.is_file_already_exists() => continue,
-                Err(err) => return Err(err),
+                Err(err) => return Err(err.into()),
                 Ok(()) => break dst_path,
             }
         };
@@ -507,7 +509,7 @@ where
     V: AsRef<Value>,
 {
     fn read_at(&self, pos: u64, mut buf: &mut [u8]) -> io::Result<usize> {
-        if true {
+        if false {
             // TODO: Create a thiserror or io::Error for non-usize pos.
             // let pos = usize::try_from(pos).expect("pos should be usize");
             let n = self.view(|view| {
@@ -534,8 +536,11 @@ where
                         .0;
                     let mut file_clone = self.file_clone().unwrap().lock().unwrap();
                     let file = &mut file_clone.file;
-                    dbg!(file.seek(Start(file_offset + pos))?);
-                    dbg!(file.read(buf).map_err(Into::into))
+                    let file_offset = file_offset+pos;
+                    // Getting lazy: Using positioned-io's ReadAt because it works on Windows.
+                    let res = file.read_at( file_offset, buf);
+                    debug!(?file, ?file_offset, len=?buf, ?res, "snapshot value read_at");
+                    res
                 }
             }
         }
@@ -579,12 +584,13 @@ where
                 length,
                 ..
             }) => {
-                let _value = self.value.as_ref();
                 buf = buf.split_at_mut(min(buf.len() as u64, length) as usize).0;
                 let mut file_clone = self.file_clone().unwrap().lock().unwrap();
                 let file = &mut file_clone.file;
                 file.seek(Start(file_offset))?;
-                file.read(buf).map_err(Into::into)
+                let res = file.read(buf);
+                debug!(?file, ?file_offset, len=?buf, ?res, "snapshot value read");
+                res.map_err(Into::into)
             }
         }
     }
@@ -824,8 +830,8 @@ fn file_path(dir: &Path, file_id: impl AsRef<FileId>) -> PathBuf {
     dir.join(file_id.as_ref())
 }
 
-fn random_file_name_in_dir(dir: &Path) -> PathBuf {
-    let base = random_file_name();
+fn random_file_name_in_dir(dir: &Path, prefix: &str) -> PathBuf {
+    let base = random_file_name(prefix);
     dir.join(base)
 }
 
@@ -833,8 +839,8 @@ const FILE_NAME_RAND_LENGTH: usize = 8;
 const VALUES_FILE_NAME_PREFIX: &str = "values-";
 const SNAPSHOT_DIR_NAME_PREFIX: &str = "snapshot-";
 
-fn random_file_name() -> OsString {
-    let mut begin = VALUES_FILE_NAME_PREFIX.as_bytes().to_vec();
+fn random_file_name(prefix: &str) -> OsString {
+    let mut begin = prefix.as_bytes().to_vec();
     begin.extend(
         rand::thread_rng()
             .sample_iter(rand::distributions::Alphanumeric)
@@ -945,7 +951,7 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
                     }
                     file_end
                 } else if cloning_lock_aware {
-                    // Round the punch region down the the beginning of the last block. We aren't sure
+                    // Round the punch region down the beginning of the last block. We aren't sure
                     // if someone is writing to the file.
                     floored_multiple(file_end, block_size)
                 } else {

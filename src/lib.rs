@@ -11,7 +11,6 @@ use std::io::{ErrorKind, Read, Seek, Write};
 use std::num::TryFromIntError;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::process::abort;
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 use std::{fs, io, str};
@@ -19,6 +18,7 @@ use std::{fs, io, str};
 use anyhow::{bail, Context, Result};
 use cfg_if::cfg_if;
 use chrono::NaiveDateTime;
+use env::flocking;
 pub use error::*;
 use exclusive_file::ExclusiveFile;
 use file_id::{FileId, FileIdFancy};
@@ -346,8 +346,12 @@ impl<'handle> BatchWriter<'handle> {
         let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
         for mut ef in self.exclusive_files.drain(..) {
             ef.committed().unwrap();
-            debug!("returning exclusive file {} to handle", ef.id);
-            assert!(handle_exclusive_files.insert(ef.id.clone(), ef).is_none());
+            // When we're flocking, we can't have writers and readers at the same time and still be
+            // able to punch values asynchronously.
+            if flocking() {
+                debug!("returning exclusive file {} to handle", ef.id);
+                assert!(handle_exclusive_files.insert(ef.id.clone(), ef).is_none());
+            }
         }
     }
 }
@@ -536,9 +540,9 @@ where
                         .0;
                     let mut file_clone = self.file_clone().unwrap().lock().unwrap();
                     let file = &mut file_clone.file;
-                    let file_offset = file_offset+pos;
+                    let file_offset = file_offset + pos;
                     // Getting lazy: Using positioned-io's ReadAt because it works on Windows.
-                    let res = file.read_at( file_offset, buf);
+                    let res = file.read_at(file_offset, buf);
                     debug!(?file, ?file_offset, len=?buf, ?res, "snapshot value read_at");
                     res
                 }
@@ -628,7 +632,7 @@ where
     }
 }
 
-#[derive(Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
 struct ReadExtent {
     pub offset: u64,
     pub len: u64,
@@ -782,17 +786,30 @@ impl<'a> Reader<'a> {
         Ok(file_clone)
     }
 
+    fn lock_read_extents<'b>(
+        file: &File,
+        read_extents: impl Iterator<Item = &'b ReadExtent>,
+    ) -> io::Result<()> {
+        // This might require a conditional var if it's used everywhere
+        #[cfg(not(windows))]
+        if flocking() {
+            // Possibly we want to block if we're flocking.
+            assert!(file.flock(LockShared)?);
+        }
+        for extent in read_extents {
+            assert!(file.lock_segment(LockSharedNonblock, Some(extent.len), extent.offset)?);
+        }
+        Ok(())
+    }
+
     fn get_file_for_read_by_segment_locking(
         &self,
         file_id: &FileId,
         read_extents: &BTreeSet<ReadExtent>,
     ) -> PubResult<Arc<Mutex<FileClone>>> {
         let mut file = open_file_id(OpenOptions::new().read(true), self.handle.dir(), file_id)?;
-        for extent in read_extents {
-            if !file.lock_segment(LockSharedNonblock, Some(extent.len), extent.offset)? {
-                abort();
-            }
-        }
+
+        Self::lock_read_extents(&file, read_extents.iter())?;
         let len = file.seek(std::io::SeekFrom::End(0))?;
         let file_clone = FileClone {
             file,

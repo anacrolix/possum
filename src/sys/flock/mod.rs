@@ -1,12 +1,20 @@
 use super::*;
 
 cfg_if! {
-    if #[cfg(unix)] {
-        mod unix;
-        pub use self::unix::*;
-    } else if #[cfg(windows)] {
+    if #[cfg(windows)] {
         mod windows;
         pub use self::windows::*;
+    } else if #[cfg(target_os = "freebsd")] {
+        mod freebsd;
+    } else {
+        mod ofd;
+    }
+}
+
+cfg_if! {
+    if #[cfg(unix)] {
+        mod flock;
+        pub use self::flock::*;
     }
 }
 

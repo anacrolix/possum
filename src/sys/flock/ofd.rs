@@ -1,8 +1,5 @@
 use std::io::SeekFrom;
 
-pub use nix::fcntl::FlockArg;
-pub use nix::fcntl::FlockArg::*;
-
 use super::*;
 
 fn seek_from_offset(seek_from: SeekFrom) -> i64 {
@@ -60,19 +57,7 @@ pub(super) fn lock_file_segment(
     let l_type = l_type.try_into().unwrap();
     flock_arg.l_type = l_type;
     flock_arg.l_whence = seek_from_whence(whence);
-    cfg_if! {
-        if #[cfg(target_os = "freebsd")] {
-            use libc::{F_SETLK as SetLock, F_SETLKW as SetLockWait};
-        } else {
-            use libc::*;
-            #[allow(non_snake_case)]
-            let (SetLock, SetLockWait) = if emulate_freebsd() {
-                (F_SETLK, F_SETLKW)
-            } else {
-                (F_OFD_SETLK, F_OFD_SETLKW)
-            };
-        }
-    }
+    use libc::{F_OFD_SETLK as SetLock, F_OFD_SETLKW as SetLockWait};
     #[allow(deprecated)]
     let arg = match arg {
         LockShared | LockExclusive => SetLockWait,
@@ -97,11 +82,17 @@ pub(super) fn lock_file_segment(
 
 impl FileLocking for File {
     fn trim_exclusive_lock_left(&self, old_left: u64, new_left: u64) -> io::Result<bool> {
-        #[allow(deprecated)]
+        if flocking() {
+            return Ok(true);
+        }
+        // #[allow(deprecated)]
         self.lock_segment(UnlockNonblock, Some(new_left - old_left), old_left)
     }
 
     fn lock_segment(&self, arg: FlockArg, len: Option<u64>, offset: u64) -> io::Result<bool> {
+        if flocking() {
+            return self.flock(arg);
+        }
         Ok(lock_file_segment(
             self,
             arg,

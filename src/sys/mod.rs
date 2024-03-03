@@ -15,7 +15,7 @@ pub use flock::*;
 pub(crate) use pathconf::*;
 pub use punchfile::*;
 
-use crate::env::emulate_freebsd;
+use crate::env::flocking;
 
 cfg_if! {
     if #[cfg(windows)] {
@@ -88,7 +88,7 @@ impl FileSystemFlags for UnixFilesystemFlags {
         // AFAIK there's no way to check if a filesystem supports block cloning on non-Windows
         // platforms, and even then it depends on where you're copying to/from, sometimes even on
         // the same filesystem.
-        if emulate_freebsd() {
+        if flocking() {
             Some(false)
         } else {
             None

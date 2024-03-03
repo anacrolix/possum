@@ -16,3 +16,7 @@ pub(crate) fn emulate_freebsd() -> bool {
         }
     }
 }
+
+pub(crate) fn flocking() -> bool {
+    emulate_freebsd()
+}

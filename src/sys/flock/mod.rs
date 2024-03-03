@@ -45,7 +45,11 @@ mod tests {
         // Trying to exclusively lock from another file handle fails immediately.
         assert!(!file_reopen.lock_segment(LockExclusiveNonblock, None, 2)?);
         let file_reader = OpenOptions::new().read(true).open(file1_named.path())?;
-        assert!(file_reader.lock_segment(LockSharedNonblock, Some(1), 0,)?);
+        // This won't work with flock, because the entire file is exclusively locked, not just a
+        // different segment.
+        if !flocking() {
+            assert!(file_reader.lock_segment(LockSharedNonblock, Some(1), 0, )?);
+        }
         Ok(())
     }
 }

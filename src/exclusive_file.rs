@@ -7,10 +7,18 @@ use super::*;
 use crate::FileId;
 
 #[derive(Debug)]
+enum LockLevel {
+    Shared,
+    Exclusive,
+}
+use LockLevel::*;
+
+#[derive(Debug)]
 pub(crate) struct ExclusiveFile {
     pub(crate) inner: File,
     pub(crate) id: FileId,
     last_committed_offset: u64,
+    lock_level: LockLevel,
 }
 
 impl ExclusiveFile {
@@ -68,6 +76,7 @@ impl ExclusiveFile {
             inner: file,
             id,
             last_committed_offset: end,
+            lock_level: Exclusive,
         }))
     }
 
@@ -89,6 +98,22 @@ impl ExclusiveFile {
     /// it in the future.
     pub(crate) fn next_write_offset(&mut self) -> io::Result<u64> {
         self.inner.stream_position()
+    }
+
+    pub(crate) fn downgrade_lock(&mut self) -> io::Result<bool> {
+        assert!(flocking());
+        assert!(matches!(self.lock_level, Exclusive));
+        cfg_if! {
+            if #[cfg(unix)] {
+                if !self.inner.flock(LockSharedNonblock)? {
+                    return Ok(false);
+                }
+                self.lock_level = Shared;
+                Ok(true)
+            } else {
+                unimplemented!()
+            }
+        }
     }
 }
 

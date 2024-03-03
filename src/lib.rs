@@ -321,6 +321,11 @@ impl<'handle> BatchWriter<'handle> {
     }
 
     fn commit_inner(mut self, before_write: impl Fn()) -> Result<WriteCommitResult> {
+        if flocking() {
+            for ef in &mut self.exclusive_files {
+                assert!(ef.downgrade_lock()?);
+            }
+        }
         let mut transaction: OwnedTx = self.handle.start_immediate_transaction()?;
         let mut write_commit_res = WriteCommitResult { count: 0 };
         for pw in self.pending_writes.drain(..) {
@@ -343,25 +348,29 @@ impl<'handle> BatchWriter<'handle> {
 
     /// Flush Writer's exclusive files and return them to the Handle pool.
     fn flush_exclusive_files(&mut self) {
-        let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
-        for mut ef in self.exclusive_files.drain(..) {
+        for ef in &mut self.exclusive_files {
             ef.committed().unwrap();
-            // When we're flocking, we can't have writers and readers at the same time and still be
-            // able to punch values asynchronously.
-            if flocking() {
-                debug!("returning exclusive file {} to handle", ef.id);
-                assert!(handle_exclusive_files.insert(ef.id.clone(), ef).is_none());
-            }
+        }
+        self.return_exclusive_files_to_handle()
+    }
+
+    fn return_exclusive_files_to_handle(&mut self) {
+        // When we're flocking, we can't have writers and readers at the same time and still be
+        // able to punch values asynchronously.
+        if flocking() {
+            return;
+        }
+        let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
+        for ef in self.exclusive_files.drain(..) {
+            debug!("returning exclusive file {} to handle", ef.id);
+            assert!(handle_exclusive_files.insert(ef.id.clone(), ef).is_none());
         }
     }
 }
 
 impl Drop for BatchWriter<'_> {
     fn drop(&mut self) {
-        let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
-        for ef in self.exclusive_files.drain(..) {
-            assert!(handle_exclusive_files.insert(ef.id.clone(), ef).is_none());
-        }
+        self.return_exclusive_files_to_handle()
     }
 }
 
@@ -543,7 +552,7 @@ where
                     let file_offset = file_offset + pos;
                     // Getting lazy: Using positioned-io's ReadAt because it works on Windows.
                     let res = file.read_at(file_offset, buf);
-                    debug!(?file, ?file_offset, len=?buf, ?res, "snapshot value read_at");
+                    debug!(?file, ?file_offset, len=buf.len(), ?res, "snapshot value read_at");
                     res
                 }
             }
@@ -593,7 +602,7 @@ where
                 let file = &mut file_clone.file;
                 file.seek(Start(file_offset))?;
                 let res = file.read(buf);
-                debug!(?file, ?file_offset, len=?buf, ?res, "snapshot value read");
+                debug!(?file, ?file_offset, len=buf.len(), ?res, "snapshot value read");
                 res.map_err(Into::into)
             }
         }

@@ -23,6 +23,7 @@ pub struct Handle {
     pub(crate) instance_limits: Limits,
     deleted_values: Option<DeletedValuesSender>,
     _value_puncher: Option<std::thread::JoinHandle<()>>,
+    pub(crate) value_puncher_done: Arc<Mutex<std::sync::mpsc::Receiver<()>>>,
 }
 
 /// 4 bytes stored in the database header https://sqlite.org/fileformat2.html#database_header.
@@ -106,6 +107,8 @@ impl Handle {
         let mut conn = Connection::open(dir.path().join(MANIFEST_DB_FILE_NAME))?;
         Self::init_sqlite_conn(&mut conn)?;
         let (deleted_values, receiver) = std::sync::mpsc::sync_channel(10);
+        let (value_puncher_done_sender, value_puncher_done) = std::sync::mpsc::sync_channel(0);
+        let value_puncher_done = Arc::new(Mutex::new(value_puncher_done));
         let handle = Self {
             conn: Mutex::new(conn),
             exclusive_files: Default::default(),
@@ -113,11 +116,15 @@ impl Handle {
             clones: Default::default(),
             instance_limits: Default::default(),
             deleted_values: Some(deleted_values),
-            _value_puncher: Some(std::thread::spawn(|| -> () {
+            // Don't wait on this, at least in the Drop handler, because it stays alive until it
+            // succeeds in punching everything.
+            _value_puncher: Some(std::thread::spawn(move || -> () {
+                let _value_puncher_done_sender = value_puncher_done_sender;
                 if let Err(err) = Self::value_puncher(dir, receiver) {
                     error!("value puncher thread failed with {err:?}");
                 }
             })),
+            value_puncher_done,
         };
         Ok(handle)
     }
@@ -289,15 +296,43 @@ impl Handle {
                 | OpenFlags::SQLITE_OPEN_NO_MUTEX
                 | OpenFlags::SQLITE_OPEN_URI,
         )?;
-        while let Ok(mut values) = values_receiver.recv() {
-            while let Ok(mut more_values) = values_receiver.try_recv() {
-                values.append(&mut more_values);
+        const RETRY_DURATION: Duration = Duration::from_secs(1);
+        let mut pending_values: Vec<_> = Default::default();
+        let mut values_receiver_opt = Some(values_receiver);
+        while values_receiver_opt.is_some() || !pending_values.is_empty() {
+            match &values_receiver_opt {
+                Some(values_receiver) => {
+                    let timeout = if pending_values.is_empty() {
+                        Duration::MAX
+                    } else {
+                        RETRY_DURATION
+                    };
+                    let recv_result = values_receiver.recv_timeout(timeout);
+                    use std::sync::mpsc::RecvTimeoutError;
+                    match recv_result {
+                        Ok(mut values) => {
+                            pending_values.append(&mut values);
+                            // Drain the channel
+                            while let Ok(more_values) = values_receiver.try_recv() {
+                                pending_values.extend(more_values);
+                            }
+                        }
+                        Err(RecvTimeoutError::Timeout) => {}
+                        Err(RecvTimeoutError::Disconnected) => {
+                            // Don't try receiving again.
+                            values_receiver_opt = None;
+                        }
+                    }
+                }
+                None => {
+                    std::thread::sleep(RETRY_DURATION);
+                }
             }
             let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
             let tx = ReadTransaction {
                 tx: ReadOnlyRusqliteTransaction { conn: tx },
             };
-            Self::punch_values(&dir, &values, &tx)?;
+            pending_values = Self::punch_values(&dir, pending_values, &tx)?;
         }
         Ok(())
     }
@@ -306,16 +341,17 @@ impl Handle {
     /// offsets above the targeted values, ongoing writes should not be affected.
     pub(crate) fn punch_values(
         dir: &Dir,
-        values: &[NonzeroValueLocation],
+        values: Vec<NonzeroValueLocation>,
         transaction: &ReadTransactionOwned,
-    ) -> PubResult<()> {
+    ) -> PubResult<Vec<NonzeroValueLocation>> {
+        let mut failed = Vec::with_capacity(values.len());
         for v in values {
             let NonzeroValueLocation {
                 file_id,
                 file_offset,
                 length,
                 ..
-            } = v;
+            } = &v;
             let value_length = length;
             let msg = format!(
                 "deleting value at {:?} {} {}",
@@ -323,7 +359,7 @@ impl Handle {
             );
             debug!("{}", msg);
             // self.handle.clones.lock().unwrap().remove(&file_id);
-            punch_value(PunchValueOptions {
+            if !punch_value(PunchValueOptions {
                 dir: dir.path(),
                 file_id,
                 offset: *file_offset,
@@ -332,9 +368,12 @@ impl Handle {
                 block_size: dir.block_size(),
                 constraints: Default::default(),
             })
-            .context(msg)?;
+            .context(msg)?
+            {
+                failed.push(v);
+            }
         }
-        Ok(())
+        Ok(failed)
     }
 
     pub(crate) fn send_values_for_delete(&self, values: Vec<NonzeroValueLocation>) {

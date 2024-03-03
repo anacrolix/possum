@@ -60,4 +60,9 @@ impl Dir {
     pub fn supports_file_cloning(&self) -> bool {
         self.supports_file_cloning
     }
+
+    /// Walks the underlying files in the possum directory.
+    pub fn walk_dir(&self) -> Result<Vec<walk::Entry>> {
+        crate::walk::walk_dir(self)
+    }
 }

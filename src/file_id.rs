@@ -14,7 +14,7 @@ impl FileIdFancy {
 }
 
 /// Value file identifier
-#[derive(Clone, Eq, PartialEq, Hash)]
+#[derive(Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct FileId(OsString);
 
 impl Deref for FileId {

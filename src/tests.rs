@@ -72,25 +72,33 @@ fn test_replace_keys() -> Result<()> {
         handle.read_single(&a).unwrap().unwrap().new_reader(),
         a_value.as_slice(),
     );
-    let entries = handle.walk_dir()?;
+
+    let dir = handle.dir.clone();
+    let values_punched = Arc::clone(&handle.value_puncher_done);
+    drop(handle);
+    // Wait for it to recv, which should be a disconnect when the value_puncher hangs up.
+    values_punched.lock().unwrap().recv();
+
+    let entries = dir.walk_dir()?;
     let values_files: Vec<_> = entries
         .iter()
         .filter(|entry| entry.entry_type == walk::EntryType::ValuesFile)
         .collect();
-    // Make sure there's only a single values file.
-    assert_eq!(values_files.len(), 1);
-    let value_file = values_files[0];
-    let mut file = File::open(&value_file.path)?;
+
     let mut allocated_space = 0;
-    for region in seekhole::Iter::new(&mut file) {
-        let region = region?;
-        if matches!(region.region_type, seekhole::RegionType::Data) {
-            allocated_space += region.length();
+    // There can be multiple value files if the value puncher is holding onto a file when another
+    // write occurs.
+    for value_file in values_files {
+        let mut file = File::open(&value_file.path)?;
+        for region in seekhole::Iter::new(&mut file) {
+            let region = region?;
+            if matches!(region.region_type, seekhole::RegionType::Data) {
+                allocated_space += region.length();
+            }
         }
     }
     assert!(
-        [2, 3]
-            .map(|num_blocks| num_blocks * block_size as seekhole::RegionOffset)
+        [2].map(|num_blocks| num_blocks * block_size as seekhole::RegionOffset)
             .contains(&allocated_space),
         "block_size={}, allocated_space={}",
         block_size,

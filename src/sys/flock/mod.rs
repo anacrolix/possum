@@ -48,7 +48,7 @@ mod tests {
         // This won't work with flock, because the entire file is exclusively locked, not just a
         // different segment.
         if !flocking() {
-            assert!(file_reader.lock_segment(LockSharedNonblock, Some(1), 0, )?);
+            assert!(file_reader.lock_segment(LockSharedNonblock, Some(1), 0,)?);
         }
         Ok(())
     }

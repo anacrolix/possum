@@ -383,7 +383,7 @@ pub struct Value {
 }
 
 /// Storage location info for a non-zero-length value.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Ord, PartialOrd, Eq)]
 pub struct NonzeroValueLocation {
     pub file_id: FileId,
     pub file_offset: u64,
@@ -552,7 +552,13 @@ where
                     let file_offset = file_offset + pos;
                     // Getting lazy: Using positioned-io's ReadAt because it works on Windows.
                     let res = file.read_at(file_offset, buf);
-                    debug!(?file, ?file_offset, len=buf.len(), ?res, "snapshot value read_at");
+                    debug!(
+                        ?file,
+                        ?file_offset,
+                        len = buf.len(),
+                        ?res,
+                        "snapshot value read_at"
+                    );
                     res
                 }
             }
@@ -602,7 +608,13 @@ where
                 let file = &mut file_clone.file;
                 file.seek(Start(file_offset))?;
                 let res = file.read(buf);
-                debug!(?file, ?file_offset, len=buf.len(), ?res, "snapshot value read");
+                debug!(
+                    ?file,
+                    ?file_offset,
+                    len = buf.len(),
+                    ?res,
+                    "snapshot value read"
+                );
                 res.map_err(Into::into)
             }
         }
@@ -915,7 +927,7 @@ struct PunchValueOptions<'a> {
 }
 
 // Can't do this as &mut self for dumb Rust reasons.
-fn punch_value(opts: PunchValueOptions) -> Result<()> {
+fn punch_value(opts: PunchValueOptions) -> Result<bool> {
     let PunchValueOptions {
         dir,
         file_id,
@@ -941,7 +953,7 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
     // Punching values probably requires write permission.
     let mut file = match OpenOptions::new().write(true).open(&file_path) {
         // The file could have already been deleted by a previous punch.
-        Err(err) if err.kind() == ErrorKind::NotFound && allow_remove => return Ok(()),
+        Err(err) if err.kind() == ErrorKind::NotFound && allow_remove => return Ok(true),
         Err(err) => return Err(err).context("opening value file"),
         Ok(ok) => ok,
     };
@@ -970,10 +982,10 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
                     // because there are no values in this file to clone.
                     if offset == 0 && allow_remove {
                         remove_file(file_path).context("removing value file")?;
-                        return Ok(());
+                        return Ok(true);
                     } else if allow_truncate {
                         file.set_len(offset as u64)?;
-                        return Ok(());
+                        return Ok(true);
                     }
                     file_end
                 } else if cloning_lock_aware {
@@ -997,14 +1009,14 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
     // full block.
     assert!(length >= -block_size);
     if length <= 0 {
-        return Ok(());
+        return Ok(true);
     }
     assert_eq!(offset % block_size, 0);
     if !file.lock_segment(LockExclusiveNonblock, Some(length as u64), offset as u64)? {
         // TODO: If we can't delete immediately, we should schedule to try again later. Maybe
         // spinning up a thread, or putting in a slow queue.
         warn!(%file_id, %offset, %length, "can't punch, file segment locked");
-        return Ok(());
+        return Ok(false);
     }
     debug!(?file, %offset, %length, "punching");
     punchfile(
@@ -1013,14 +1025,14 @@ fn punch_value(opts: PunchValueOptions) -> Result<()> {
         length.try_into().unwrap(),
     )
     .with_context(|| format!("length {}", length))?;
-    // fcntl(file.as_raw_fd(), nix::fcntl::F_FULLFSYNC)?;
+    // nix::fcntl::fcntl(file.as_raw_fd(), nix::fcntl::F_FULLFSYNC)?;
     // file.flush()?;
     if check_holes {
         if let Err(err) = check_hole(&mut file, offset as u64, length as u64) {
             warn!("checking hole: {}", err);
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 /// Checks that there's no data allocated in the region provided.

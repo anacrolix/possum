@@ -13,7 +13,7 @@ test-xfs:
     TMPDIR=xfsmnt cargo test
 
 sync-repo dest *args:
-    rsync ./ {{ dest }} -rit --filter ':- .gitignore' {{ args }}
+    rsync ./ {{ dest }} -rit --filter ':- .gitignore' -f '- .git/' {{ args }}
 
 flamegraph-macos bench_filter:
     CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph --root --bench possum -- --bench '{{ bench_filter }}'

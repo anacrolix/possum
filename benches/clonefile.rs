@@ -8,7 +8,9 @@ fn clonefile_benchmark_fallible(c: &mut Criterion) -> anyhow::Result<()> {
     let tempdir = test_tempdir("benchmark_clonefile")?;
     let possum_dir = possum::Dir::new(tempdir.path.clone())?;
     if !possum_dir.supports_file_cloning() {
-        anyhow::bail!("file cloning not supported on fs");
+        // How do you skip benchmarks in criterion?
+        // anyhow::bail!("file cloning not supported on fs");
+        return Ok(());
     }
     let mut group = c.benchmark_group("clonefile");
     for size_power in [12, 20, 28] {

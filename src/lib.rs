@@ -539,11 +539,10 @@ where
                     length,
                     ..
                 }) => {
-                    let available = length - pos;
-                    #[allow(clippy::absurd_extreme_comparisons)]
-                    if available <= 0 {
+                    if pos >= length {
                         return Ok(0);
                     }
+                    let available = length - pos;
                     buf = buf
                         .split_at_mut(min(buf.len() as u64, available) as usize)
                         .0;

@@ -64,10 +64,7 @@ func (me Handle) SingleDelete(key string) (fi generics.Option[FileInfo], err err
 
 func (me Handle) SingleReadAt(key string, off int64, p []byte) (n int, err error) {
 	n, err = possumC.SingleReadAt(me.cHandle, key, p, uint64(off))
-	// See the very strict definition of io.ReaderAt.ReadAt.
-	if n == 0 && len(p) != 0 && err == nil {
-		err = io.EOF
-	}
+	err = mapRustEofReadAt(len(p), n, err)
 	return
 }
 
@@ -119,7 +116,9 @@ type Value struct {
 }
 
 func (v Value) ReadAt(p []byte, off int64) (n int, err error) {
-	return possumC.ValueReadAt(v.c, p, off)
+	n, err = possumC.ValueReadAt(v.c, p, off)
+	err = mapRustEofReadAt(len(p), n, err)
+	return
 }
 
 func (v Value) Stat() FileInfo {
@@ -156,3 +155,11 @@ func (f FileInfo) Sys() any {
 }
 
 type Item = possumC.Item
+
+// See the very strict definition of io.ReaderAt.ReadAt.
+func mapRustEofReadAt(bufLen int, n int, err error) error {
+	if n == 0 && bufLen != 0 && err == nil {
+		return io.EOF
+	}
+	return err
+}

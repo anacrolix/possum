@@ -445,6 +445,18 @@ impl Handle {
     pub fn get_value_puncher_done(&self) -> ValuePuncherDone {
         ValuePuncherDone(Arc::clone(&self.value_puncher_done.0))
     }
+
+    pub fn move_prefix(&self, from: &[u8], to: &[u8]) -> Result<()> {
+        let mut tx = self.start_deferred_transaction()?;
+        let items = tx.read().list_items(from)?;
+        let mut to_vec = to.to_vec();
+        for item in items {
+            to_vec.truncate(to.len());
+            to_vec.extend_from_slice(item.key.strip_prefix(from).unwrap());
+            tx.rename_item(&item.key, &to_vec)?;
+        }
+        tx.commit(())?.complete()
+    }
 }
 
 use item::Item;

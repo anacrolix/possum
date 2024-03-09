@@ -256,3 +256,11 @@ func StageWrite(w Writer, key []byte, vw ValueWriter) error {
 func CommitWriter(w Writer) error {
 	return mapError(C.possum_writer_commit(w))
 }
+
+func WriterRename(w Writer, v Value, newKey []byte) {
+	C.possum_writer_rename(w, v, BufFromBytes(newKey))
+}
+
+func HandleMovePrefix(h *Handle, from, to []byte) error {
+	return mapError(C.possum_handle_move_prefix(h, BufFromBytes(from), BufFromBytes(to)))
+}

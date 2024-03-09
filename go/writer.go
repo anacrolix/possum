@@ -54,3 +54,7 @@ func (me *ValueWriter) NewFile(name string) (f *os.File, err error) {
 func (me Writer) Commit() error {
 	return possumC.CommitWriter(me.c)
 }
+
+func (me Writer) Rename(v Value, newKey []byte) {
+	possumC.WriterRename(me.c, v.c, newKey)
+}

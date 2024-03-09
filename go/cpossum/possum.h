@@ -82,6 +82,8 @@ PossumError possum_start_new_value(PossumWriter *writer, PossumValueWriter **val
 
 RawFileHandle possum_value_writer_fd(PossumValueWriter *value);
 
+PossumError possum_writer_rename(BatchWriter *writer, const PossumValue *value, PossumBuf new_key);
+
 bool possum_single_stat(const Handle *handle, PossumBuf key, PossumStat *out_stat);
 
 PossumError possum_list_items(const Handle *handle,
@@ -125,3 +127,5 @@ PossumError possum_reader_list_items(const PossumReader *reader,
 PossumError possum_writer_commit(PossumWriter *writer);
 
 PossumError possum_writer_stage(PossumWriter *writer, PossumBuf key, PossumValueWriter *value);
+
+PossumError possum_handle_move_prefix(Handle *handle, PossumBuf from, PossumBuf to);

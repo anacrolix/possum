@@ -103,6 +103,7 @@ where
             .query_row(params![file_id, min_offset], |row| row.get(0))
     }
 
+    // TODO: Make this iterate.
     pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
         let range_end = {
             let mut prefix = prefix.to_owned();
@@ -168,6 +169,21 @@ pub(crate) struct Transaction<'h> {
     deleted_values: Vec<NonzeroValueLocation>,
     altered_files: HashSet<FileId>,
 }
+
+// TODO: Implement this, so the .read method doesn't need to exist: writable transactions should
+// passthrough to read methods automatically.
+
+// impl<'h> Deref for Transaction<'h> {
+//     type Target = ReadTransaction<&'h rusqlite::Transaction<'h>>;
+//
+//     fn deref(&self) -> &Self::Target {
+//         unsafe {
+//             &ReadTransaction {
+//                 tx: ReadOnlyRusqliteTransaction { conn: &self.tx },
+//             }
+//         }
+//     }
+// }
 
 impl<'h> Transaction<'h> {
     pub fn read(&self) -> ReadTransaction<&rusqlite::Transaction> {
@@ -258,6 +274,8 @@ impl<'h> Transaction<'h> {
         }
     }
 
+    // I guess this doesn't handle destination collisions? It should give a unique constraint error
+    // from sqlite.
     pub fn rename_item(&mut self, from: &[u8], to: &[u8]) -> PubResult<Timestamp> {
         let row_result = self.tx.query_row(
             "update keys set key=? where key=? returning last_used",

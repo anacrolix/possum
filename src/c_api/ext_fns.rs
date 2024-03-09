@@ -111,6 +111,20 @@ pub extern "C" fn possum_value_writer_fd(value: *mut PossumValueWriter) -> RawFi
 }
 
 #[no_mangle]
+pub extern "C" fn possum_writer_rename(
+    writer: *mut BatchWriter,
+    value: *const PossumValue,
+    new_key: PossumBuf,
+) -> PossumError {
+    let writer = unsafe { &mut *writer };
+    let value: Value = unsafe { &*value }.deref().to_owned();
+    with_residual(|| {
+        writer.rename_value(value, new_key.as_ref().to_vec());
+        Ok(())
+    })
+}
+
+#[no_mangle]
 pub extern "C" fn possum_single_stat(
     handle: *const Handle,
     key: PossumBuf,
@@ -326,6 +340,20 @@ pub extern "C" fn possum_writer_stage(
     with_residual(|| {
         writer
             .stage_write(key.as_ref().to_vec(), *value)
+            .map_err(Into::into)
+    })
+}
+
+#[no_mangle]
+pub extern "C" fn possum_handle_move_prefix(
+    handle: *mut Handle,
+    from: PossumBuf,
+    to: PossumBuf,
+) -> PossumError {
+    let handle = unsafe { &mut *handle };
+    with_residual(|| {
+        handle
+            .move_prefix(from.as_ref(), to.as_ref())
             .map_err(Into::into)
     })
 }

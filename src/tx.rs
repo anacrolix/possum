@@ -147,7 +147,7 @@ where
 }
 
 impl<'h, T> PostCommitWork<'h, T> {
-    pub fn complete(self) -> Result<T> {
+    pub fn complete(self) -> T {
         // This has to happen after exclusive files are flushed or there's a tendency for hole
         // punches to not persist. It doesn't fix the problem, but it significantly reduces it.
         if !self.handle.instance_limits.disable_hole_punching {
@@ -157,7 +157,7 @@ impl<'h, T> PostCommitWork<'h, T> {
         for file_id in self.altered_files {
             self.handle.clones.lock().unwrap().remove(&file_id);
         }
-        Ok(self.reward)
+        self.reward
     }
 }
 

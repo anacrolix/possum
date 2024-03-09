@@ -154,7 +154,7 @@ fn torrent_storage_inner_run(inner: &TorrentStorageInner) -> anyhow::Result<()> 
             |offset| format!("verified/{piece_data_hash:016x}/{offset}").into_bytes();
         if opts.rename_values {
             for (offset, value) in values {
-                snapshot.value(value.clone()).view(|bytes| {
+                snapshot.value(value).view(|bytes| {
                     stored_hash.write(bytes);
                     compare_reads(bytes, io::repeat(byte).take(chunk_size as u64)).unwrap();
                     writer.rename_value(value, make_verified_key(offset))

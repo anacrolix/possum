@@ -304,7 +304,7 @@ impl Handle {
         // Maybe it's okay just to commit anyway, since we have a deferred transaction and sqlite
         // might know nothing has changed.
         if deleted.is_some() {
-            tx.commit(())?.complete()?;
+            tx.commit(())?.complete();
         }
         Ok(deleted)
     }
@@ -321,7 +321,7 @@ impl Handle {
     pub fn rename_item(&mut self, from: &[u8], to: &[u8]) -> PubResult<Timestamp> {
         let mut tx = self.start_immediate_transaction()?;
         let last_used = tx.rename_item(from, to)?;
-        Ok(tx.commit(last_used)?.complete()?)
+        Ok(tx.commit(last_used)?.complete())
     }
 
     /// Walks the underlying files in the possum directory.
@@ -455,7 +455,17 @@ impl Handle {
             to_vec.extend_from_slice(item.key.strip_prefix(from).unwrap());
             tx.rename_item(&item.key, &to_vec)?;
         }
-        tx.commit(())?.complete()
+        tx.commit(())?.complete();
+        Ok(())
+    }
+
+    pub fn delete_prefix(&self, prefix: &[u8]) -> PubResult<()> {
+        let mut tx = self.start_deferred_transaction()?;
+        for item in tx.read().list_items(prefix)? {
+            tx.delete_key(&item.key)?;
+        }
+        tx.commit(())?.complete();
+        Ok(())
     }
 }
 

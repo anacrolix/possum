@@ -18,7 +18,7 @@ impl<'a> Reader<'a> {
                     file_offset,
                     length,
                     file_id,
-                }) = value.location.clone()
+                }) = value.location
                 {
                     let file = self.reads.entry(file_id);
                     file.or_default().insert(ReadExtent {
@@ -39,7 +39,7 @@ impl<'a> Reader<'a> {
         self.owned_tx
             .commit(())
             .context("committing transaction")?
-            .complete()?;
+            .complete();
         Ok(Snapshot { file_clones })
     }
 

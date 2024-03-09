@@ -83,3 +83,7 @@ func (me Handle) CleanupSnapshots() error {
 func (me Handle) MovePrefix(from, to []byte) error {
 	return possumC.HandleMovePrefix(me.cHandle, from, to)
 }
+
+func (me Handle) DeletePrefix(prefix []byte) error {
+	return possumC.HandleDeletePrefix(me.cHandle, prefix)
+}

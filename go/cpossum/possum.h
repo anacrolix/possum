@@ -129,3 +129,5 @@ PossumError possum_single_delete(const Handle *handle, PossumBuf key, PossumStat
 PossumError possum_reader_new(const Handle *handle, PossumReader **reader);
 
 PossumError possum_handle_move_prefix(Handle *handle, PossumBuf from, PossumBuf to);
+
+PossumError possum_handle_delete_prefix(Handle *handle, PossumBuf prefix);

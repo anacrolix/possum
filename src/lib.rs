@@ -349,7 +349,7 @@ impl<'handle> BatchWriter<'handle> {
             .context("commit transaction")?;
 
         self.flush_exclusive_files();
-        work.complete()
+        Ok(work.complete())
     }
 
     /// Flush Writer's exclusive files and return them to the Handle pool.

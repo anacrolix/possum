@@ -264,3 +264,7 @@ func WriterRename(w Writer, v Value, newKey []byte) {
 func HandleMovePrefix(h *Handle, from, to []byte) error {
 	return mapError(C.possum_handle_move_prefix(h, BufFromBytes(from), BufFromBytes(to)))
 }
+
+func HandleDeletePrefix(h *Handle, prefix []byte) error {
+	return mapError(C.possum_handle_delete_prefix(h, BufFromBytes(prefix)))
+}

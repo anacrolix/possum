@@ -21,6 +21,10 @@ func (p Provider) NewInstance(s string) (resource.Instance, error) {
 	}, nil
 }
 
+func (p Provider) DeletePrefix(prefix string) error {
+	return p.Handle.DeletePrefix([]byte(prefix))
+}
+
 var _ resource.Provider = Provider{}
 
 type instance struct {

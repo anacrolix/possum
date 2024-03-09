@@ -173,3 +173,16 @@ pub extern "C" fn possum_handle_move_prefix(
             .map_err(Into::into)
     })
 }
+
+#[no_mangle]
+pub extern "C" fn possum_handle_delete_prefix(
+    handle: *mut Handle,
+    prefix: PossumBuf,
+) -> PossumError {
+    let handle = unsafe { &mut *handle };
+    with_residual(|| {
+        handle
+            .delete_prefix(prefix.as_ref())
+            .map_err(Into::into)
+    })
+}

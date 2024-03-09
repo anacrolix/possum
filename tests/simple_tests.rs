@@ -13,7 +13,7 @@ use std::str::FromStr;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use fdlimit::raise_fd_limit;
 use itertools::Itertools;
 use possum::testing::*;
@@ -444,15 +444,16 @@ fn read_and_writes_different_handles() -> Result<()> {
     let tempdir = test_tempdir("read_and_writes_different_handles")?;
     let dir = tempdir.path;
     let key = "incr".as_bytes();
-    std::thread::scope(|scope| {
-        let reader = scope.spawn(|| read_consecutive_integers(dir.clone(), key, &range));
+    // Create a single handle before creating them in threads to get a clean initialization.
+    let handle = Handle::new(dir.clone())?;
+    // I think this gets stuck if there's a panic in the writer.
+    ctx_thread::scope(|ctx| {
+        ctx.spawn(|ctx| read_consecutive_integers(ctx, dir.clone(), key, &range).unwrap());
         let range = range.clone();
-        let writer = scope.spawn(|| write_consecutive_integers(dir.clone(), key, range));
-        reader.join().unwrap()?;
-        writer.join().unwrap()?;
-        anyhow::Ok(())
-    })?;
-    let handle = Handle::new(dir)?;
+        // Writing doesn't wait, so we can just let it run out.
+        ctx.spawn(|_| write_consecutive_integers(dir.clone(), key, range).unwrap());
+    })
+    .unwrap();
     let keys: Vec<_> = handle
         .list_items("".as_bytes())?
         .into_iter()
@@ -478,7 +479,12 @@ where
     Ok(())
 }
 
-fn read_consecutive_integers<I>(dir: PathBuf, key: &[u8], range: &RangeInclusive<I>) -> Result<()>
+fn read_consecutive_integers<I>(
+    ctx: &ctx_thread::Context,
+    dir: PathBuf,
+    key: &[u8],
+    range: &RangeInclusive<I>,
+) -> Result<()>
 where
     I: FromStr + Debug + PartialOrd + Display,
     <I as FromStr>::Err: Error + Send + Sync + 'static,
@@ -487,10 +493,13 @@ where
     let Included(end_i) = range.end_bound() else {
         panic!("expected inclusive range: {:?}", range);
     };
-    sleep(RACE_SLEEP_DURATION);
     let mut last_i = None;
     loop {
         let Some(value) = handle.read_single(key)? else {
+            if !ctx.active() {
+                bail!("cancelled");
+            }
+            sleep(RACE_SLEEP_DURATION);
             continue;
         };
         let mut s = String::new();

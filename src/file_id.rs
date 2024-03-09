@@ -1,96 +1,66 @@
-use std::borrow::Borrow;
-
 use super::*;
 
-#[derive(Eq, PartialEq, Hash)]
-#[repr(transparent)]
-pub struct FileIdFancy(OsStr);
+// sqlite allows *signed* integers up to 8 bytes. But this constrains us to using only the positive
+// half unless we cast the sign back and forth. If we had that many files in a directory we're going
+// to run into bigger problems first.
+type FileIdInner = u32;
 
-impl FileIdFancy {
-    // Stolen from std::path::Path::new. What a world.
-    pub fn new<S: AsRef<OsStr> + ?Sized>(s: &S) -> &Self {
-        unsafe { &*(s.as_ref() as *const OsStr as *const Self) }
-    }
-}
-
-/// Value file identifier
-#[derive(Clone, Eq, PartialEq, Hash, Ord, PartialOrd)]
-pub struct FileId(OsString);
-
-impl Deref for FileId {
-    type Target = FileIdFancy;
-
-    fn deref(&self) -> &Self::Target {
-        FileIdFancy::new(&self.0)
-    }
-}
-
-impl From<OsString> for FileId {
-    fn from(value: OsString) -> Self {
-        Self(value)
-    }
-}
-
-impl AsRef<Path> for FileId {
-    fn as_ref(&self) -> &Path {
-        Path::new(&self.0)
-    }
-}
+/// Values file identifier
+#[derive(Clone, Eq, PartialEq, Hash, Ord, PartialOrd, Copy)]
+pub struct FileId(FileIdInner);
 
 impl Debug for FileId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(f)
+        Display::fmt(self, f)
     }
 }
 
-impl From<String> for FileId {
-    fn from(value: String) -> Self {
-        Self(value.into())
+impl Deref for FileId {
+    type Target = FileIdInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
-impl From<Vec<u8>> for FileId {
-    fn from(value: Vec<u8>) -> Self {
-        unsafe { OsString::from_encoded_bytes_unchecked(value) }.into()
+impl std::str::FromStr for FileId {
+    type Err = std::num::ParseIntError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        Ok(Self(FileIdInner::from_str_radix(dbg!(s), 16)?))
     }
 }
 
-impl FileIdFancy {
-    fn as_str(&self) -> &str {
-        self.0.to_str().unwrap()
-    }
-}
+impl TryFrom<&OsStr> for FileId {
+    type Error = anyhow::Error;
 
-impl rusqlite::ToSql for FileIdFancy {
-    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-        Ok(ToSqlOutput::Borrowed(ValueRef::Blob(
-            self.0.as_encoded_bytes(),
-        )))
+    fn try_from(value: &OsStr) -> std::result::Result<Self, Self::Error> {
+        let file_id_str = value
+            .to_str()
+            .ok_or(anyhow!("to_str"))?
+            .strip_prefix(VALUES_FILE_NAME_PREFIX)
+            .ok_or(anyhow!("missing values file name prefix"))?;
+        let file_id = file_id_str.parse()?;
+        Ok(file_id)
     }
 }
 
 impl FromSql for FileId {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
-        use rusqlite::types::ValueRef::*;
-        Ok(match value {
-            Null | Real(..) => Err(FromSqlError::InvalidType),
-            Text(text) => Ok(text.to_owned()),
-            Blob(blob) => Ok(blob.to_owned()),
-            Integer(int) => Ok(int.to_string().into_bytes()),
-        }?
-        .into())
+        let int = FileIdInner::column_result(value)?;
+        Ok(Self(int))
     }
 }
 
-impl Display for FileIdFancy {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(self.as_str(), f)
+impl ToSql for FileId {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        self.0.to_sql()
     }
 }
 
 impl Display for FileId {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        Display::fmt(self.as_str(), f)
+        f.write_str(self.values_file_path().to_str().unwrap())
     }
 }
 
@@ -100,8 +70,12 @@ impl AsRef<FileId> for FileId {
     }
 }
 
-impl Borrow<FileIdFancy> for FileId {
-    fn borrow(&self) -> &FileIdFancy {
-        self
+impl FileId {
+    pub fn values_file_path(&self) -> PathBuf {
+        format!("{}{:08x}", VALUES_FILE_NAME_PREFIX, self.0).into()
+    }
+
+    pub fn random() -> Self {
+        Self(rand::random())
     }
 }

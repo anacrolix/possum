@@ -1,11 +1,11 @@
 -- See manifest_blocks.sql for the original more complicated schema.
 
-create table if not exists keys (
+create table keys (
     key_id integer primary key,
     -- This is to support whatever the OS can use for paths. It was any for a while to support
     -- migrating to different value file naming schemes, but since this is intended for caches,
     -- maybe it's not worth the risk.
-    file_id blob,
+    file_id integer,
     file_offset integer,
     value_length integer not null,
     -- This is the most (concrete?) representation for the finest time granularity sqlite's internal
@@ -27,11 +27,11 @@ create index if not exists last_used_index on keys (
 );
 
 -- This is for next_value_offset. Does this duplicate the unique (file_id, file_offset) index on keys?
-CREATE INDEX if not exists file_id_then_offset on keys (file_id, file_offset);
+CREATE INDEX file_id_then_offset on keys (file_id, file_offset);
 -- This is for last_end_offset
-CREATE INDEX if not exists file_id_then_end_offset on keys (file_id, file_offset+value_length);
+CREATE INDEX file_id_then_end_offset on keys (file_id, file_offset+value_length);
 
-create table if not exists sums (
+create table sums (
     key text primary key,
     value integer not null
 ) strict, without rowid;

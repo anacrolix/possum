@@ -350,6 +350,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a81dae078cea95a014a339291cec439d2f232ebe854a9d672b796c6afafa9b7"
 
 [[package]]
+name = "ctx-thread"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a7e2bb9e63bf985ba9f9e57dbc0e4b961cb5aa716803117e5f8b00fece6a567"
+dependencies = [
+ "cfg-if",
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "either"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -778,6 +788,7 @@ dependencies = [
  "chrono",
  "clap",
  "criterion",
+ "ctx-thread",
  "env_logger 0.10.2",
  "fdlimit",
  "itertools 0.12.1",

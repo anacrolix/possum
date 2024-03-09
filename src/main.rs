@@ -210,7 +210,7 @@ fn main() -> anyhow::Result<()> {
         LastEndOffset { dir, file, offset } => {
             let handle = Handle::new(dir)?;
             let tx = handle.start_deferred_transaction_for_read()?;
-            let file_id = file.into();
+            let file_id = file.parse()?;
             let last_end = tx.query_last_end_offset(&file_id, offset)?;
             println!("{}", last_end);
             Ok(())

@@ -13,9 +13,9 @@ pub struct Entry {
 use EntryType::*;
 
 impl Entry {
-    pub fn file_id(&self) -> Option<&FileIdFancy> {
+    pub fn file_id(&self) -> Option<FileId> {
         match self.entry_type {
-            SnapshotValue | ValuesFile => self.path.file_name().map(FileIdFancy::new),
+            SnapshotValue | ValuesFile => self.path.file_name().expect("file name").try_into().ok(),
             _ => None,
         }
     }

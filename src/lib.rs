@@ -15,20 +15,20 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use std::time::Duration;
 use std::{fs, io, str};
 
-use anyhow::{bail, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use cfg_if::cfg_if;
 use chrono::NaiveDateTime;
 use env::flocking;
 pub use error::*;
 use exclusive_file::ExclusiveFile;
-use file_id::{FileId, FileIdFancy};
+use file_id::FileId;
 pub use handle::Handle;
 use memmap2::Mmap;
 use num::Integer;
 use ownedtx::OwnedTx;
 use positioned_io::ReadAt;
 use rand::Rng;
-use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef};
+use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSqlOutput, ValueRef, ToSql};
 use rusqlite::Error::QueryReturnedNoRows;
 use rusqlite::{params, CachedStatement, Connection, Statement};
 use sys::*;
@@ -127,8 +127,12 @@ impl BeginWriteValue<'_, '_> {
             return self.copy_file(file);
         }
         let dst_path = loop {
-            let dst_path =
-                random_file_name_in_dir(self.batch.handle.dir.path(), VALUES_FILE_NAME_PREFIX);
+            let dst_path = self
+                .batch
+                .handle
+                .dir
+                .path()
+                .join(FileId::random().values_file_path());
             match fclonefile_noflags(file, &dst_path) {
                 Err(err) if CloneFileError::is_unsupported(&err) => {
                     return self.copy_file(file);
@@ -294,7 +298,7 @@ impl<'handle> BatchWriter<'handle> {
             }
         };
         let exclusive_file = value.exclusive_file;
-        let value_file_id = exclusive_file.id.clone();
+        let value_file_id = exclusive_file.id;
         self.exclusive_files.push(exclusive_file);
         self.pending_writes.push(PendingWrite {
             key,
@@ -363,7 +367,7 @@ impl<'handle> BatchWriter<'handle> {
         let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
         for ef in self.exclusive_files.drain(..) {
             debug!("returning exclusive file {} to handle", ef.id);
-            assert!(handle_exclusive_files.insert(ef.id.clone(), ef).is_none());
+            assert!(handle_exclusive_files.insert(ef.id, ef).is_none());
         }
     }
 }
@@ -413,7 +417,7 @@ impl ValueLocation {
         }
     }
 
-    pub fn file_id(&self) -> Option<&FileIdFancy> {
+    pub fn file_id(&self) -> Option<&FileId> {
         match self {
             ZeroLength => None,
             Nonzero(NonzeroValueLocation { file_id, .. }) => Some(file_id),
@@ -636,9 +640,12 @@ where
 
 /// A value holding a statement temporary for starting an iterator over the Values of a value file.
 /// I couldn't seem to get the code to work without this.
-pub struct FileValues<'a, S> {
+pub struct FileValues<'a, S>
+where
+    S: Deref<Target = Statement<'a>> + DerefMut + 'a,
+{
     stmt: S,
-    file_id: &'a FileIdFancy,
+    file_id: FileId,
 }
 
 impl<'a, S> FileValues<'a, S>
@@ -711,7 +718,7 @@ impl<'a> Reader<'a> {
         let handle_clones = handle_clone_guard.deref_mut();
         for (file_id, extents) in reads {
             file_clones.insert(
-                file_id.clone(),
+                *file_id,
                 self.get_file_clone(
                     file_id,
                     &mut tempdir,
@@ -865,7 +872,7 @@ fn open_file_id(options: &OpenOptions, dir: &Path, file_id: &FileId) -> io::Resu
 }
 
 fn file_path(dir: &Path, file_id: impl AsRef<FileId>) -> PathBuf {
-    dir.join(file_id.as_ref())
+    dir.join(file_id.as_ref().values_file_path())
 }
 
 fn random_file_name_in_dir(dir: &Path, prefix: &str) -> PathBuf {
@@ -888,13 +895,6 @@ fn random_file_name(prefix: &str) -> OsString {
 }
 
 pub const MANIFEST_DB_FILE_NAME: &str = "manifest.db";
-
-fn valid_file_name(file_name: &str) -> bool {
-    if file_name.starts_with(MANIFEST_DB_FILE_NAME) {
-        return false;
-    }
-    file_name.starts_with(VALUES_FILE_NAME_PREFIX)
-}
 
 struct PunchValueConstraints {
     greedy_start: bool,

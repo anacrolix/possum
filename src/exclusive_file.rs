@@ -26,7 +26,7 @@ pub(crate) struct ExclusiveFile {
 impl ExclusiveFile {
     pub(crate) fn open(path: PathBuf) -> Result<Option<Self>> {
         let file = Self::new_open_options().open(&path)?;
-        Self::from_file(file, path.file_name().expect("file name").to_owned().into())
+        Self::from_file(file, path.file_name().context("file name")?.try_into()?)
     }
 
     fn new_open_options() -> OpenOptions {
@@ -53,8 +53,8 @@ impl ExclusiveFile {
 
     pub(crate) fn new(dir: impl AsRef<Path>) -> anyhow::Result<ExclusiveFile> {
         for _ in 0..10 {
-            let id = random_file_name(VALUES_FILE_NAME_PREFIX).into();
-            let path = dir.as_ref().join(&id);
+            let id = FileId::random();
+            let path = dir.as_ref().join(id.values_file_path());
             debug!(?path, "opening new exclusive file");
             let file = Self::new_open_options().create(true).open(path);
             let file = match file {
@@ -116,6 +116,16 @@ impl ExclusiveFile {
                 unimplemented!()
             }
         }
+    }
+
+    pub fn valid_file_name(file_name: &str) -> bool {
+        (|| {
+            file_name
+                .strip_prefix(VALUES_FILE_NAME_PREFIX)?
+                .parse()
+                .ok()
+        })()
+        .unwrap_or(false)
     }
 }
 

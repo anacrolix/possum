@@ -75,7 +75,7 @@ impl Handle {
             if !entry.file_type()?.is_file() {
                 continue;
             }
-            if !valid_file_name(entry.file_name().to_str().unwrap()) {
+            if !ExclusiveFile::valid_file_name(entry.file_name().to_str().unwrap()) {
                 continue;
             }
             let path = entry.path();
@@ -91,7 +91,7 @@ impl Handle {
     }
 
     // Expected manifest sqlite user version field value.
-    const USER_VERSION: u32 = 2;
+    const USER_VERSION: u32 = 3;
 
     pub fn new(dir: PathBuf) -> Result<Self> {
         let sqlite_version = rusqlite::version_number();
@@ -105,7 +105,7 @@ impl Handle {
         }
         let dir = Dir::new(dir)?;
         let mut conn = Connection::open(dir.path().join(MANIFEST_DB_FILE_NAME))?;
-        Self::init_sqlite_conn(&mut conn)?;
+        Self::init_sqlite_conn(&mut conn, &dir)?;
         let (deleted_values, receiver) = std::sync::mpsc::sync_channel(10);
         let (value_puncher_done_sender, value_puncher_done) = std::sync::mpsc::sync_channel(0);
         let value_puncher_done = ValuePuncherDone(Arc::new(Mutex::new(value_puncher_done)));
@@ -129,28 +129,79 @@ impl Handle {
         Ok(handle)
     }
 
-    fn init_sqlite_conn(conn: &mut Connection) -> rusqlite::Result<()> {
-        conn.pragma_update(None, "synchronous", "off")?;
+    fn retry_while_busy<T>(mut f: impl FnMut() -> rusqlite::Result<T>) -> rusqlite::Result<T> {
+        loop {
+            match f() {
+                Err(rusqlite::Error::SqliteFailure(err, _))
+                    if err.code == rusqlite::ErrorCode::DatabaseBusy =>
+                {
+                    std::thread::sleep(Duration::from_secs(1));
+                }
+                default => return default,
+            }
+        }
+    }
+
+    fn init_sqlite_conn(conn: &mut Connection, dir: &Dir) -> anyhow::Result<()> {
+        Self::retry_while_busy(|| conn.pragma_update(None, "synchronous", "off"))?;
+
         let get_user_version = |conn: &Connection| -> Result<ManifestUserVersion, _> {
             conn.pragma_query_value(None, "user_version", |row| row.get(0))
         };
         let user_version: ManifestUserVersion = get_user_version(conn)?;
-        if user_version == Self::USER_VERSION {
+        // I'm not sure about the greater than case. Should we return an error?
+        if user_version >= Self::USER_VERSION {
             return Ok(());
         }
-        // This is sticky and sync-safe.
+        // This initialization/upgrade process doesn't seem to be safe to perform when there's
+        // multiple connections to a database. To avoid issues upgrading databases, you might want
+        // to create a single synchronous handle to do the upgrade before creating new handles
+        // concurrently.
+
+        // If the journal mode is WAL, we seem to get database locking errors even when we think we
+        // have the lock.
+        conn.pragma_update(None, "journal_mode", "delete")?;
+        // After the next read/write, we should be the only ones working on the database. Since we
+        // can't use transactions there's no other choice.
+        conn.pragma_update(None, "locking_mode", "exclusive")?;
+        let user_version = get_user_version(conn)?;
+        if user_version < Self::USER_VERSION {
+            use rusqlite::config::DbConfig::SQLITE_DBCONFIG_RESET_DATABASE;
+            conn.set_db_config(SQLITE_DBCONFIG_RESET_DATABASE, true)?;
+            // This can't be done in a transaction, an exclusive one would have been nice.
+            conn.execute("vacuum", [])?;
+            conn.set_db_config(SQLITE_DBCONFIG_RESET_DATABASE, false)?;
+            Self::delete_all_values_files(dir)?;
+            // It might be possible special case doing this from user_version=0 (a brand new database).
+            init_manifest_schema(conn)?;
+            conn.pragma_update(None, "user_version", Self::USER_VERSION)?;
+        }
+        let mode: String =
+            conn.pragma_update_and_check(None, "locking_mode", "normal", |row| row.get(0))?;
+        assert_eq!(mode, "normal");
+        // This is sticky and sync-safe. Must access the database after setting the locking mode to
+        // make the change, so now is a good time to set the journal mode. I think if WAL is already
+        // set, this doesn't change the locking_mode.
         conn.pragma_update(None, "journal_mode", "wal")?;
-        // Make sure nobody is reading while we're doing this change, and that nobody else attempts
-        // to start initializing the schema while we're doing it.
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if get_user_version(&tx)? < Self::USER_VERSION {
-            init_manifest_schema(&tx)?;
-            tx.pragma_update(None, "user_version", Self::USER_VERSION)?;
+        Ok(())
+    }
+
+    /// Delete all values files, ensuring they're not in use first.
+    fn delete_all_values_files(dir: &Dir) -> anyhow::Result<()> {
+        for entry in dir.walk_dir()? {
+            let path = &entry.path;
+            if !matches!(entry.entry_type, EntryType::ValuesFile) {
+                continue;
+            }
+            let file = OpenOptions::new().write(true).open(path)?;
+            if !file.lock_max_segment(LockExclusiveNonblock)? {
+                warn!(?path, "file for deletion is locked. blocking");
+                assert!(file.lock_max_segment(LockExclusive)?);
+            }
+            debug!(?path, "deleting file");
+            remove_file(path)?;
         }
-        if false {
-            tx.pragma_update(None, "locking_mode", "exclusive")?;
-        }
-        tx.commit()
+        Ok(())
     }
 
     pub fn cleanup_snapshots(&self) -> PubResult<()> {
@@ -401,6 +452,7 @@ use item::Item;
 use crate::dir::Dir;
 use crate::ownedtx::{OwnedReadTx, OwnedTxInner};
 use crate::tx::{ReadOnlyRusqliteTransaction, ReadTransaction};
+use crate::walk::EntryType;
 
 impl Drop for Handle {
     fn drop(&mut self) {

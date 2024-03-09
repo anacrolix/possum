@@ -55,8 +55,8 @@ where
 {
     pub fn file_values(
         &'a self,
-        file_id: &'a FileIdFancy,
-    ) -> rusqlite::Result<FileValues<'a, CachedStatement<'a>>> {
+        file_id: FileId,
+    ) -> rusqlite::Result<FileValues<CachedStatement<'a>>> {
         let stmt = self.tx.prepare_cached(&format!(
             "select {} from keys where file_id=? order by file_offset",
             value_columns_sql()
@@ -80,7 +80,7 @@ where
                 from keys \
                 where file_id=? and file_offset+value_length <= ?",
             )?
-            .query_row(params![file_id.deref(), offset], |row| {
+            .query_row(params![file_id, offset], |row| {
                 // I don't know why, but this can return null for file_ids that have values but
                 // don't fit the other conditions.
                 let res: rusqlite::Result<Option<_>> = row.get(0);
@@ -100,7 +100,7 @@ where
                 from keys \
                 where file_id=? and file_offset >= ?",
             )?
-            .query_row(params![file_id.deref(), min_offset], |row| row.get(0))
+            .query_row(params![file_id, min_offset], |row| row.get(0))
     }
 
     pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
@@ -224,8 +224,7 @@ impl<'h> Transaction<'h> {
                 match existing_value.location {
                     Nonzero(a) => {
                         let b = value;
-                        if Some(a.file_offset) == b.file_offset()
-                            && Some(&*a.file_id) == b.file_id()
+                        if Some(a.file_offset) == b.file_offset() && Some(&a.file_id) == b.file_id()
                         {
                             assert_eq!(a.length, b.length());
                             // Renamed but the name is the same.
@@ -278,7 +277,7 @@ impl<'h> Transaction<'h> {
     }
 
     pub(crate) fn insert_key(&mut self, pw: PendingWrite) -> rusqlite::Result<()> {
-        let mut file_id = Some(pw.value_file_id.deref());
+        let mut file_id = Some(pw.value_file_id);
         let mut file_offset = Some(pw.value_file_offset);
         if pw.value_length == 0 {
             file_id = None;

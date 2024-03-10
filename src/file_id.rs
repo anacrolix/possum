@@ -27,7 +27,7 @@ impl std::str::FromStr for FileId {
     type Err = std::num::ParseIntError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        Ok(Self(FileIdInner::from_str_radix(dbg!(s), 16)?))
+        Ok(Self(FileIdInner::from_str_radix(s, 16)?))
     }
 }
 

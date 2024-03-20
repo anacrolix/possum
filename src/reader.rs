@@ -68,7 +68,7 @@ impl<'a> Reader<'a> {
     }
 
     pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
-        self.owned_tx.read().list_items(prefix)
+        self.owned_tx.list_items(prefix)
     }
 
     fn get_file_clone(

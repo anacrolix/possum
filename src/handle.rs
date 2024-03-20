@@ -448,7 +448,7 @@ impl Handle {
 
     pub fn move_prefix(&self, from: &[u8], to: &[u8]) -> Result<()> {
         let mut tx = self.start_deferred_transaction()?;
-        let items = tx.read().list_items(from)?;
+        let items = tx.list_items(from)?;
         let mut to_vec = to.to_vec();
         for item in items {
             to_vec.truncate(to.len());
@@ -461,7 +461,7 @@ impl Handle {
 
     pub fn delete_prefix(&self, prefix: &[u8]) -> PubResult<()> {
         let mut tx = self.start_deferred_transaction()?;
-        for item in tx.read().list_items(prefix)? {
+        for item in tx.list_items(prefix)? {
             tx.delete_key(&item.key)?;
         }
         tx.commit(())?.complete();

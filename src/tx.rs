@@ -170,28 +170,21 @@ pub(crate) struct Transaction<'h> {
     altered_files: HashSet<FileId>,
 }
 
-// TODO: Implement this, so the .read method doesn't need to exist: writable transactions should
-// passthrough to read methods automatically.
+// TODO: Try doing this with a read trait that just requires a rusqlite::Transaction be available.
 
-// impl<'h> Deref for Transaction<'h> {
-//     type Target = ReadTransaction<&'h rusqlite::Transaction<'h>>;
-//
-//     fn deref(&self) -> &Self::Target {
-//         unsafe {
-//             &ReadTransaction {
-//                 tx: ReadOnlyRusqliteTransaction { conn: &self.tx },
-//             }
-//         }
-//     }
-// }
+impl<'h> Deref for Transaction<'h> {
+    type Target = ReadTransaction<rusqlite::Transaction<'h>>;
 
-impl<'h> Transaction<'h> {
-    pub fn read(&self) -> ReadTransaction<&rusqlite::Transaction> {
-        ReadTransaction {
-            tx: ReadOnlyRusqliteTransaction { conn: &self.tx },
+    fn deref(&self) -> &Self::Target {
+        unsafe {
+            std::mem::transmute::<&rusqlite::Transaction, &ReadTransaction<rusqlite::Transaction>>(
+                &self.tx,
+            )
         }
     }
+}
 
+impl<'h> Transaction<'h> {
     pub fn new(tx: rusqlite::Transaction<'h>, handle: &'h Handle) -> Self {
         Self {
             tx,
@@ -353,7 +346,6 @@ impl<'h> Transaction<'h> {
         if let Some(max) = self.handle.instance_limits.max_value_length_sum {
             loop {
                 let actual = self
-                    .read()
                     .sum_value_length()
                     .context("reading value_length sum")?;
                 if actual <= max {

@@ -8,7 +8,7 @@ use itertools::Itertools;
 use log::info;
 use possum::sys::seekhole::{file_regions, Region, RegionType};
 use possum::sys::{punchfile, FileLocking, SparseFile};
-use possum::{ceil_multiple, check_hole, walk, Handle, NonzeroValueLocation, ReadTransactionRef};
+use possum::*;
 
 #[derive(clap::Subcommand)]
 enum Commands {
@@ -124,7 +124,7 @@ fn main() -> anyhow::Result<()> {
                             .unwrap_or(true)
                         {
                             print_missing_holes(
-                                tx.as_ref(),
+                                &tx,
                                 values_file_entry,
                                 handle.block_size(),
                                 fragments,
@@ -158,7 +158,7 @@ fn main() -> anyhow::Result<()> {
                             for FileRegion {
                                 mut start,
                                 mut length,
-                            } in missing_holes(tx.as_ref(), values_file_entry)?
+                            } in missing_holes(&tx, values_file_entry)?
                             {
                                 let delay = ceil_multiple(start, handle.block_size()) - start;
                                 // dbg!(start, length, delay);

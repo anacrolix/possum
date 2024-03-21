@@ -9,73 +9,68 @@ pub(crate) struct PostCommitWork<'h, T> {
     reward: T,
 }
 
-/// Checks outgoing stmts for readonly status
-#[repr(transparent)]
-pub(crate) struct ReadOnlyRusqliteTransaction<T> {
-    pub(crate) conn: T,
+/// Exposes a rusqlite Transaction to implement ReadTransaction.
+pub trait ReadOnlyTransactionAccessor {
+    fn readonly_transaction(&self) -> &rusqlite::Transaction;
 }
 
-impl<'t, T> ReadOnlyRusqliteTransaction<T>
-where
-    T: Borrow<rusqlite::Transaction<'t>>,
-{
-    pub fn prepare_cached<'a>(&'a self, sql: &str) -> rusqlite::Result<CachedStatement<'a>>
-    where
-        't: 'a,
-    {
-        let stmt = self.conn.borrow().prepare_cached(sql)?;
-        assert!(stmt.readonly());
-        Ok(stmt)
+/// Extends rusqlite objects with stuff needed for ReadTransaction.
+trait ReadOnlyRusqliteTransaction {
+    fn prepare_cached_readonly(&self, sql: &str) -> rusqlite::Result<CachedStatement>;
+}
+
+// This could just as easily be implemented for rusqlite::Connection too.
+impl ReadOnlyRusqliteTransaction for rusqlite::Transaction<'_> {
+    fn prepare_cached_readonly(&self, sql: &str) -> rusqlite::Result<CachedStatement> {
+        prepare_cached_readonly(self.borrow(), sql)
     }
 }
 
-impl ReadTransactionOwned<'_> {
-    pub fn as_ref(&self) -> ReadTransactionRef {
-        ReadTransactionRef {
-            tx: ReadOnlyRusqliteTransaction {
-                conn: &self.tx.conn,
-            },
-        }
+fn prepare_cached_readonly<'a>(
+    conn: &'a Connection,
+    sql: &str,
+) -> rusqlite::Result<CachedStatement<'a>> {
+    let stmt = conn.prepare_cached(sql)?;
+    assert!(stmt.readonly());
+    Ok(stmt)
+}
+
+pub type ReadTransactionRef<'a> = &'a ReadTransactionOwned<'a>;
+
+/// Helper type for wrapping rusqlite::Transaction to only provide ReadTransaction capabilities.
+pub struct ReadTransactionOwned<'a>(pub(crate) rusqlite::Transaction<'a>);
+
+impl ReadOnlyTransactionAccessor for ReadTransactionOwned<'_> {
+    fn readonly_transaction(&self) -> &rusqlite::Transaction {
+        &self.0
     }
 }
 
-pub type ReadTransactionRef<'a> = ReadTransaction<&'a rusqlite::Transaction<'a>>;
-
-pub type ReadTransactionOwned<'a> = ReadTransaction<rusqlite::Transaction<'a>>;
-
-/// Only provides methods that are known to be read only, and has a ReadOnly connection internally.
-#[repr(transparent)]
-pub struct ReadTransaction<T> {
-    pub(crate) tx: ReadOnlyRusqliteTransaction<T>,
-}
-
-impl<'a, T> ReadTransaction<T>
-where
-    T: Borrow<rusqlite::Transaction<'a>>,
-{
-    pub fn file_values(
-        &'a self,
-        file_id: FileId,
-    ) -> rusqlite::Result<FileValues<CachedStatement<'a>>> {
-        let stmt = self.tx.prepare_cached(&format!(
-            "select {} from keys where file_id=? order by file_offset",
-            value_columns_sql()
-        ))?;
+/// Extra methods for types exposing a rusqlite Transaction that's allowed to do read transaction
+/// stuff.
+pub trait ReadTransaction: ReadOnlyTransactionAccessor {
+    fn file_values(&self, file_id: FileId) -> rusqlite::Result<FileValues<CachedStatement>> {
+        let stmt = self
+            .readonly_transaction()
+            .prepare_cached_readonly(&format!(
+                "select {} from keys where file_id=? order by file_offset",
+                value_columns_sql()
+            ))?;
         let iter = FileValues { stmt, file_id };
         Ok(iter)
     }
 
-    pub fn sum_value_length(&self) -> rusqlite::Result<u64> {
-        self.tx
-            .prepare_cached("select value from sums where key='value_length'")?
+    fn sum_value_length(&self) -> rusqlite::Result<u64> {
+        self.readonly_transaction()
+            .prepare_cached_readonly("select value from sums where key='value_length'")?
             .query_row([], |row| row.get(0))
             .map_err(Into::into)
     }
 
     /// Returns the end offset of the last active value before offset in the same file.
-    pub fn query_last_end_offset(&self, file_id: &FileId, offset: u64) -> rusqlite::Result<u64> {
-        self.tx
-            .prepare_cached(
+    fn query_last_end_offset(&self, file_id: &FileId, offset: u64) -> rusqlite::Result<u64> {
+        self.readonly_transaction()
+            .prepare_cached_readonly(
                 "select max(file_offset+value_length) as last_offset \
                 from keys \
                 where file_id=? and file_offset+value_length <= ?",
@@ -89,13 +84,13 @@ where
     }
 
     /// Returns the next value offset with at least min_offset.
-    pub fn next_value_offset(
+    fn next_value_offset(
         &self,
         file_id: &FileId,
         min_offset: u64,
     ) -> rusqlite::Result<Option<u64>> {
-        self.tx
-            .prepare_cached(
+        self.readonly_transaction()
+            .prepare_cached_readonly(
                 "select min(file_offset) \
                 from keys \
                 where file_id=? and file_offset >= ?",
@@ -104,7 +99,7 @@ where
     }
 
     // TODO: Make this iterate.
-    pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
+    fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
         let range_end = {
             let mut prefix = prefix.to_owned();
             if inc_big_endian_array(&mut prefix) {
@@ -114,14 +109,16 @@ where
             }
         };
         match range_end {
-            None => self.list_items_inner(
+            None => list_items_inner(
+                self.readonly_transaction(),
                 &format!(
                     "select {}, key from keys where key >= ?",
                     value_columns_sql()
                 ),
                 [prefix],
             ),
-            Some(range_end) => self.list_items_inner(
+            Some(range_end) => list_items_inner(
+                self.readonly_transaction(),
                 &format!(
                     "select {}, key from keys where key >= ? and key < ?",
                     value_columns_sql()
@@ -130,20 +127,23 @@ where
             ),
         }
     }
+}
 
-    fn list_items_inner(&self, sql: &str, params: impl rusqlite::Params) -> PubResult<Vec<Item>> {
-        self.tx
-            .prepare_cached(sql)
-            .unwrap()
-            .query_map(params, |row| {
-                Ok(Item {
-                    value: Value::from_row(row)?,
-                    key: row.get(VALUE_COLUMN_NAMES.len())?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(Into::into)
-    }
+fn list_items_inner(
+    tx: &rusqlite::Transaction,
+    sql: &str,
+    params: impl rusqlite::Params,
+) -> PubResult<Vec<Item>> {
+    tx.prepare_cached_readonly(sql)
+        .unwrap()
+        .query_map(params, |row| {
+            Ok(Item {
+                value: Value::from_row(row)?,
+                key: row.get(VALUE_COLUMN_NAMES.len())?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(Into::into)
 }
 
 impl<'h, T> PostCommitWork<'h, T> {
@@ -172,17 +172,13 @@ pub(crate) struct Transaction<'h> {
 
 // TODO: Try doing this with a read trait that just requires a rusqlite::Transaction be available.
 
-impl<'h> Deref for Transaction<'h> {
-    type Target = ReadTransaction<rusqlite::Transaction<'h>>;
-
-    fn deref(&self) -> &Self::Target {
-        unsafe {
-            std::mem::transmute::<&rusqlite::Transaction, &ReadTransaction<rusqlite::Transaction>>(
-                &self.tx,
-            )
-        }
+impl<'t> ReadOnlyTransactionAccessor for Transaction<'t> {
+    fn readonly_transaction(&self) -> &rusqlite::Transaction {
+        &self.tx
     }
 }
+
+impl<T> ReadTransaction for T where T: ReadOnlyTransactionAccessor {}
 
 impl<'h> Transaction<'h> {
     pub fn new(tx: rusqlite::Transaction<'h>, handle: &'h Handle) -> Self {

@@ -251,9 +251,7 @@ impl Handle {
     pub fn start_deferred_transaction_for_read(&self) -> rusqlite::Result<OwnedReadTx> {
         self.start_transaction(|conn, _handle| {
             let rtx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
-            Ok(ReadTransaction {
-                tx: ReadOnlyRusqliteTransaction { conn: rtx },
-            })
+            Ok(ReadTransactionOwned(rtx))
         })
     }
 
@@ -380,9 +378,7 @@ impl Handle {
                 }
             }
             let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
-            let tx = ReadTransaction {
-                tx: ReadOnlyRusqliteTransaction { conn: tx },
-            };
+            let tx = ReadTransactionOwned(tx);
             pending_values = Self::punch_values(&dir, pending_values, &tx)?;
         }
         Ok(())
@@ -473,7 +469,7 @@ use item::Item;
 
 use crate::dir::Dir;
 use crate::ownedtx::{OwnedReadTx, OwnedTxInner};
-use crate::tx::{ReadOnlyRusqliteTransaction, ReadTransaction};
+use crate::tx::ReadTransaction;
 use crate::walk::EntryType;
 
 impl Drop for Handle {

@@ -344,12 +344,11 @@ impl<'handle> BatchWriter<'handle> {
             transaction.rename_value(&vr.value, vr.new_key)?;
         }
         // TODO: On error here, rewind the exclusive to undo any writes that just occurred.
-        let work = transaction
-            .commit(write_commit_res)
-            .context("commit transaction")?;
+        let work = transaction.commit().context("commit transaction")?;
 
         self.flush_exclusive_files();
-        Ok(work.complete())
+        work.complete();
+        Ok(write_commit_res)
     }
 
     /// Flush Writer's exclusive files and return them to the Handle pool.

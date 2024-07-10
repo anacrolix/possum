@@ -2,11 +2,10 @@ use super::*;
 
 /// This is more work to be done after the Handle conn mutex is released.
 #[must_use]
-pub(crate) struct PostCommitWork<'h, T> {
+pub(crate) struct PostCommitWork<'h> {
     handle: &'h Handle,
     deleted_values: Vec<NonzeroValueLocation>,
     altered_files: HashSet<FileId>,
-    reward: T,
 }
 
 /// Exposes a rusqlite Transaction to implement ReadTransaction.
@@ -146,8 +145,8 @@ fn list_items_inner(
         .map_err(Into::into)
 }
 
-impl<'h, T> PostCommitWork<'h, T> {
-    pub fn complete(self) -> T {
+impl<'h> PostCommitWork<'h> {
+    pub fn complete(self) {
         // This has to happen after exclusive files are flushed or there's a tendency for hole
         // punches to not persist. It doesn't fix the problem, but it significantly reduces it.
         if !self.handle.instance_limits.disable_hole_punching {
@@ -157,7 +156,6 @@ impl<'h, T> PostCommitWork<'h, T> {
         for file_id in self.altered_files {
             self.handle.clones.lock().unwrap().remove(&file_id);
         }
-        self.reward
     }
 }
 
@@ -190,14 +188,13 @@ impl<'h> Transaction<'h> {
         }
     }
 
-    pub(crate) fn commit<T>(mut self, reward: T) -> Result<PostCommitWork<'h, T>> {
+    pub(crate) fn commit(mut self) -> Result<PostCommitWork<'h>> {
         self.apply_limits()?;
         self.tx.commit()?;
         Ok(PostCommitWork {
             handle: self.handle,
             deleted_values: self.deleted_values,
             altered_files: self.altered_files,
-            reward,
         })
     }
 

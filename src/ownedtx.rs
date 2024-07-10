@@ -31,8 +31,8 @@ impl DerefMut for OwnedTx<'_> {
 
 impl<'a> OwnedTx<'a> {
     // Except for this move dependent dance it shouldn't be necessary to wrap the OwnedCell.
-    pub fn commit<T>(self, reward: T) -> Result<PostCommitWork<'a, T>> {
-        self.cell.move_dependent(|tx| tx.commit(reward))
+    pub fn commit(self) -> Result<PostCommitWork<'a>> {
+        self.cell.move_dependent(|tx| tx.commit())
     }
 }
 

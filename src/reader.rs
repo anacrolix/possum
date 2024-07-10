@@ -37,7 +37,7 @@ impl<'a> Reader<'a> {
     pub fn begin(self) -> Result<Snapshot> {
         let file_clones = self.clone_files().context("cloning files")?;
         self.owned_tx
-            .commit(())
+            .commit()
             .context("committing transaction")?
             .complete();
         Ok(Snapshot { file_clones })

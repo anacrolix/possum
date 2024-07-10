@@ -13,8 +13,8 @@ cfg_if! {
 
 cfg_if! {
     if #[cfg(unix)] {
-        mod flock;
-        pub use self::flock::*;
+        mod unix;
+        pub use self::unix::*;
     }
 }
 

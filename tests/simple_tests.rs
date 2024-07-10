@@ -77,11 +77,12 @@ fn handle_relative_walk_entries_hashset(handle: &Handle) -> HashSet<WalkEntry> {
         .expect("should be able to walk handle dir")
         .into_iter()
         .map(|mut entry: WalkEntry| {
-            entry.path = entry
+            let suffix = entry
                 .path
                 .strip_prefix(handle.dir())
                 .expect("walk entry should have handle dir path prefix")
                 .to_owned();
+            suffix.clone_into(&mut entry.path);
             entry
         })
         .collect()
@@ -525,6 +526,8 @@ fn test_writeback_mmap() -> anyhow::Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
         .create(true)
+        // Don't truncate because we're about to it anyway.
+        .truncate(false)
         .open("writeback")?;
     file.set_len(0x1000)?;
     let read_file = OpenOptions::new().read(true).open("writeback")?;

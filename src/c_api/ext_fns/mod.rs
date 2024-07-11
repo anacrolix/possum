@@ -3,6 +3,8 @@ mod handle;
 use std::ffi::{c_char, CStr};
 use std::path::PathBuf;
 use std::ptr::null_mut;
+use std::rc::Rc;
+use std::sync::RwLock;
 
 use libc::size_t;
 use positioned_io::ReadAt;
@@ -13,7 +15,7 @@ use crate::c_api::PossumError::{NoError, NoSuchKey};
 use crate::Handle;
 
 #[no_mangle]
-pub extern "C" fn possum_new(path: *const c_char) -> *mut Handle {
+pub extern "C" fn possum_new(path: *const c_char) -> *mut PossumHandle {
     if let Err(err) = env_logger::try_init() {
         warn!("error initing env_logger: {}", err);
     }
@@ -33,7 +35,7 @@ pub extern "C" fn possum_new(path: *const c_char) -> *mut Handle {
             return null_mut();
         }
     };
-    Box::into_raw(Box::new(handle))
+    Box::into_raw(Box::new(Rc::new(RwLock::new(handle))))
 }
 
 #[no_mangle]
@@ -78,7 +80,8 @@ pub extern "C" fn possum_reader_add(
     value: *mut *const PossumValue,
 ) -> PossumError {
     let reader = unsafe { reader.as_mut() }.unwrap();
-    let rust_value = match reader.rust_reader.as_mut().unwrap().add(key.as_ref()) {
+    let mut_rust_reader = reader.rust_reader.as_mut().unwrap();
+    let rust_value = match mut_rust_reader.add(key.as_ref()) {
         Ok(None) => return NoSuchKey,
         Ok(Some(value)) => value,
         Err(err) => return err.into(),

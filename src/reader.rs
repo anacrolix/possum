@@ -9,9 +9,10 @@ pub struct Reader<T> {
     pub(crate) reads: Reads,
 }
 
-impl<'a, T> Reader<T>
+impl<'a, T, H> Reader<T>
 where
-    T: OwnedTxTrait<Tx = Transaction<'a>>,
+    T: OwnedTxTrait<Tx = Transaction<'a, H>>,
+    H: AsRef<Handle>,
 {
     pub fn add(&mut self, key: &[u8]) -> rusqlite::Result<Option<Value>> {
         let res = self.owned_tx.mut_transaction().touch_for_read(key);

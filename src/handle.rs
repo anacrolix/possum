@@ -216,25 +216,8 @@ impl Handle {
     }
 
     pub fn new_writer(&self) -> Result<BatchWriter<&Handle>> {
-        Ok(BatchWriter {
-            handle: self,
-            exclusive_files: Default::default(),
-            pending_writes: Default::default(),
-            value_renames: Default::default(),
-        })
+        Ok(BatchWriter::new(self))
     }
-
-    // fn start_transaction<'h, T, O>(
-    //     &'h self,
-    //     make_tx: impl FnOnce(&'h mut Connection, &'h Handle) -> rusqlite::Result<T>,
-    // ) -> rusqlite::Result<O>
-    // where
-    //     O: From<OwnedTxInner<'h, T>>,
-    // {
-    //     self.star
-    //     let guard = self.conn.lock().unwrap();
-    //     Ok(owned_cell::OwnedCell::try_make(guard, |conn| make_tx(conn, self))?.into())
-    // }
 
     pub(crate) fn start_immediate_transaction(&self) -> rusqlite::Result<OwnedTx> {
         self.start_writable_transaction_with_behaviour(TransactionBehavior::Immediate)
@@ -484,6 +467,7 @@ impl Handle {
 
 use item::Item;
 
+use crate::c_api::{PossumHandle, PossumHandleRc};
 use crate::dir::Dir;
 use crate::owned_cell::OwnedCell;
 use crate::ownedtx::{OwnedReadTx, OwnedTxInner};
@@ -531,16 +515,17 @@ impl<'h, T> StartTransaction<'h, T> for &'h Handle {
         make_tx: impl FnOnce(&'h mut Connection, Self::TxHandle) -> rusqlite::Result<T>,
     ) -> rusqlite::Result<Self::Owned> {
         let guard = self.conn.lock().unwrap();
-        owned_cell::OwnedCell::try_make_mut(guard, |conn| make_tx(conn, self))
+        OwnedCell::try_make_mut(guard, |conn| make_tx(conn, self))
     }
 }
 
-impl<'h, T> StartTransaction<'h, T> for Rc<RwLock<Handle>> {
+impl<'h, T> StartTransaction<'h, T> for PossumHandleRc {
     type Owned = OwnedCell<
         Self,
         OwnedCell<Rc<RwLockReadGuard<'h, Handle>>, OwnedCell<MutexGuard<'h, Connection>, T>>,
     >;
     type TxHandle = Rc<RwLockReadGuard<'h, Handle>>;
+    // type TxHandle = &'h Handle;
     fn start_transaction(
         self,
         make_tx: impl FnOnce(&'h mut Connection, Self::TxHandle) -> rusqlite::Result<T>,
@@ -563,5 +548,23 @@ pub trait WithHandle {
 impl WithHandle for &Handle {
     fn with_handle<R>(&self, f: impl FnOnce(&Handle) -> R) -> R {
         f(self)
+    }
+}
+
+impl WithHandle for PossumHandle {
+    fn with_handle<R>(&self, f: impl FnOnce(&Handle) -> R) -> R {
+        f(&self.read().unwrap())
+    }
+}
+
+impl AsRef<Handle> for Handle {
+    fn as_ref(&self) -> &Handle {
+        &self
+    }
+}
+
+impl AsRef<Handle> for Rc<RwLockReadGuard<'_, Handle>> {
+    fn as_ref(&self) -> &Handle {
+        self.deref()
     }
 }

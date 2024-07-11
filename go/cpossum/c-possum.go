@@ -58,7 +58,7 @@ func (me Stat) Size() int64 {
 	return int64(me.size)
 }
 
-type Handle = C.Handle
+type Handle = C.PossumHandle
 
 func NewHandle(dir string) *Handle {
 	cDir := C.CString(dir)

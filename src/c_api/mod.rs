@@ -9,7 +9,9 @@ use std::ffi::c_char;
 use std::mem::size_of;
 use std::pin::Pin;
 use std::ptr::copy_nonoverlapping;
+use std::rc::Rc;
 use std::slice;
+use std::sync::RwLockReadGuard;
 
 use libc::{calloc, malloc, size_t};
 
@@ -32,9 +34,14 @@ impl PossumBuf {
 struct PossumReader {
     // Removed when converted to a snapshot. Specific to the C API so as to not need to expose
     // Snapshot, and to convert Values automatically when a snapshot starts.
-    rust_reader: Option<Reader<OwnedTx<'static>>>,
+    rust_reader: Option<Reader<PossumReaderOwnedTransaction<'static>>>,
     values: Vec<Pin<Box<PossumValue>>>,
 }
+
+pub(crate) type PossumReaderOwnedTransaction<'a> = <PossumHandleRc as StartTransaction<
+    'a,
+    Transaction<'a, Rc<RwLockReadGuard<'a, Handle>>>,
+>>::Owned;
 
 use crate::c_api::PossumError::{AnyhowError, IoError, SqliteError};
 
@@ -140,6 +147,10 @@ fn with_residual(f: impl FnOnce() -> PubResult<()>) -> PossumError {
             err.into()
         }
     }
+}
+
+fn unwrap_possum_handle<'a>(handle: *const PossumHandle) -> &'a PossumHandle {
+    unsafe { handle.as_ref() }.unwrap()
 }
 
 impl From<PossumLimits> for handle::Limits {

@@ -14,7 +14,13 @@ use super::*;
 pub(crate) struct OwnedCell<O, D> {
     // The order here matters. dep must be dropped before owner.
     dep: D,
-    _owner: O,
+    owner: O,
+}
+
+impl<O, D> OwnedCell<O, D> {
+    pub fn owner(&self) -> &O {
+        &self.owner
+    }
 }
 
 impl<O, D> OwnedCell<O, D>
@@ -34,7 +40,7 @@ where
         // Deref knowing that when guard is moved, the deref will still be valid.
         let stable_deref: *mut O::Target = owner.deref_mut();
         Ok(Self {
-            _owner: owner,
+            owner,
             dep: make_dependent(unsafe { &mut *stable_deref })?,
         })
     }
@@ -58,7 +64,7 @@ where
         // Deref knowing that when guard is moved, the deref will still be valid.
         let stable_deref: *const O::Target = owner.deref();
         Ok(Self {
-            _owner: owner,
+            owner: owner,
             dep: make_dependent(unsafe { &*stable_deref })?,
         })
     }

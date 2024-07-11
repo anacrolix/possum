@@ -16,13 +16,7 @@ typedef enum {
 /**
  * Manages uncommitted writes
  */
-typedef struct BatchWriter BatchWriter;
-
-/**
- * Provides access to a storage directory. Manages manifest access, file cloning, file writers,
- * configuration, value eviction etc.
- */
-typedef struct Handle Handle;
+typedef struct BatchWriter_PossumHandle BatchWriter_PossumHandle;
 
 typedef struct PossumReader PossumReader;
 
@@ -31,9 +25,15 @@ typedef struct PossumReader PossumReader;
  */
 typedef struct PossumValue PossumValue;
 
+typedef struct Rc_RwLock_Handle Rc_RwLock_Handle;
+
 typedef struct ValueWriter ValueWriter;
 
-typedef BatchWriter PossumWriter;
+typedef Rc_RwLock_Handle PossumHandleRc;
+
+typedef PossumHandleRc PossumHandle;
+
+typedef BatchWriter_PossumHandle PossumWriter;
 
 typedef ValueWriter PossumValueWriter;
 
@@ -66,13 +66,13 @@ typedef struct {
   bool disable_hole_punching;
 } PossumLimits;
 
-Handle *possum_new(const char *path);
+PossumHandle *possum_new(const char *path);
 
 PossumError possum_start_new_value(PossumWriter *writer, PossumValueWriter **value);
 
 RawFileHandle possum_value_writer_fd(PossumValueWriter *value);
 
-PossumError possum_writer_rename(BatchWriter *writer, const PossumValue *value, PossumBuf new_key);
+PossumError possum_writer_rename(PossumWriter *writer, const PossumValue *value, PossumBuf new_key);
 
 PossumError possum_reader_add(PossumReader *reader, PossumBuf key, const PossumValue **value);
 
@@ -99,24 +99,24 @@ PossumError possum_writer_commit(PossumWriter *writer);
 
 PossumError possum_writer_stage(PossumWriter *writer, PossumBuf key, PossumValueWriter *value);
 
-void possum_drop(Handle *handle);
+void possum_drop(PossumHandle *handle);
 
-PossumError possum_set_instance_limits(Handle *handle, const PossumLimits *limits);
+PossumError possum_set_instance_limits(PossumHandle *handle, const PossumLimits *limits);
 
-PossumError possum_cleanup_snapshots(const Handle *handle);
+PossumError possum_cleanup_snapshots(const PossumHandle *handle);
 
-size_t possum_single_write_buf(Handle *handle, PossumBuf key, PossumBuf value);
+size_t possum_single_write_buf(PossumHandle *handle, PossumBuf key, PossumBuf value);
 
-PossumWriter *possum_new_writer(Handle *handle);
+PossumWriter *possum_new_writer(PossumHandle *handle);
 
-bool possum_single_stat(const Handle *handle, PossumBuf key, PossumStat *out_stat);
+bool possum_single_stat(const PossumHandle *handle, PossumBuf key, PossumStat *out_stat);
 
-PossumError possum_list_items(const Handle *handle,
+PossumError possum_list_items(const PossumHandle *handle,
                               PossumBuf prefix,
                               PossumItem **out_list,
                               size_t *out_list_len);
 
-PossumError possum_single_read_at(const Handle *handle,
+PossumError possum_single_read_at(const PossumHandle *handle,
                                   PossumBuf key,
                                   PossumBuf *buf,
                                   uint64_t offset);
@@ -124,10 +124,10 @@ PossumError possum_single_read_at(const Handle *handle,
 /**
  * stat is filled if non-null and a delete occurs. NoSuchKey is returned if the key does not exist.
  */
-PossumError possum_single_delete(const Handle *handle, PossumBuf key, PossumStat *stat);
+PossumError possum_single_delete(const PossumHandle *handle, PossumBuf key, PossumStat *stat);
 
-PossumError possum_reader_new(const Handle *handle, PossumReader **reader);
+PossumError possum_reader_new(const PossumHandle *handle, PossumReader **reader);
 
-PossumError possum_handle_move_prefix(Handle *handle, PossumBuf from, PossumBuf to);
+PossumError possum_handle_move_prefix(PossumHandle *handle, PossumBuf from, PossumBuf to);
 
-PossumError possum_handle_delete_prefix(Handle *handle, PossumBuf prefix);
+PossumError possum_handle_delete_prefix(PossumHandle *handle, PossumBuf prefix);

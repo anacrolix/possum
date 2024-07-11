@@ -12,7 +12,7 @@ use crate::{BatchWriter, Handle, ValueWriter};
 pub(crate) type PossumOffset = u64;
 
 pub type RawFileHandle = libc::intptr_t;
-pub type PossumWriter = BatchWriter<&'static Handle>;
+pub type PossumWriter = BatchWriter<PossumHandle>;
 
 #[repr(C)]
 #[derive(Debug)]
@@ -60,3 +60,5 @@ pub(crate) struct PossumLimits {
 pub(crate) type PossumValueWriter = ValueWriter;
 
 pub(crate) type PossumHandleRc = Rc<RwLock<Handle>>;
+
+pub(crate) type PossumHandle = PossumHandleRc;

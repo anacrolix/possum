@@ -2,8 +2,8 @@ use super::*;
 
 /// This is more work to be done after the Handle conn mutex is released.
 #[must_use]
-pub(crate) struct PostCommitWork<'h> {
-    handle: &'h Handle,
+pub(crate) struct PostCommitWork<H> {
+    handle: H,
     deleted_values: Vec<NonzeroValueLocation>,
     altered_files: HashSet<FileId>,
 }
@@ -145,32 +145,37 @@ fn list_items_inner(
         .map_err(Into::into)
 }
 
-impl<'h> PostCommitWork<'h> {
+impl<H> PostCommitWork<H>
+where
+    H: AsRef<Handle>,
+{
     pub fn complete(self) {
         // This has to happen after exclusive files are flushed or there's a tendency for hole
         // punches to not persist. It doesn't fix the problem, but it significantly reduces it.
-        if !self.handle.instance_limits.disable_hole_punching {
-            self.handle.send_values_for_delete(self.deleted_values);
+        if !self.handle.as_ref().instance_limits.disable_hole_punching {
+            self.handle
+                .as_ref()
+                .send_values_for_delete(self.deleted_values);
         }
         // Forget any references to clones of files that have changed.
         for file_id in self.altered_files {
-            self.handle.clones.lock().unwrap().remove(&file_id);
+            self.handle.as_ref().clones.lock().unwrap().remove(&file_id);
         }
     }
 }
 
 // I can't work out how to have a reference to the Connection, and a transaction on it here at the
 // same time.
-pub struct Transaction<'h> {
+pub struct Transaction<'h, H> {
     tx: rusqlite::Transaction<'h>,
-    handle: &'h Handle,
+    handle: H,
     deleted_values: Vec<NonzeroValueLocation>,
     altered_files: HashSet<FileId>,
 }
 
 // TODO: Try doing this with a read trait that just requires a rusqlite::Transaction be available.
 
-impl<'t> ReadOnlyTransactionAccessor for Transaction<'t> {
+impl<'t, H> ReadOnlyTransactionAccessor for Transaction<'t, H> {
     fn readonly_transaction(&self) -> &rusqlite::Transaction {
         &self.tx
     }
@@ -178,26 +183,7 @@ impl<'t> ReadOnlyTransactionAccessor for Transaction<'t> {
 
 impl<T> ReadTransaction for T where T: ReadOnlyTransactionAccessor {}
 
-impl<'h> Transaction<'h> {
-    pub fn new(tx: rusqlite::Transaction<'h>, handle: &'h Handle) -> Self {
-        Self {
-            tx,
-            handle,
-            deleted_values: vec![],
-            altered_files: Default::default(),
-        }
-    }
-
-    pub(crate) fn commit(mut self) -> Result<PostCommitWork<'h>> {
-        self.apply_limits()?;
-        self.tx.commit()?;
-        Ok(PostCommitWork {
-            handle: self.handle,
-            deleted_values: self.deleted_values,
-            altered_files: self.altered_files,
-        })
-    }
-
+impl<'h, H> Transaction<'h, H> {
     pub fn touch_for_read(&mut self, key: &[u8]) -> rusqlite::Result<Value> {
         self.tx
             .prepare_cached(&format!(
@@ -208,6 +194,51 @@ impl<'h> Transaction<'h> {
                 value_columns_sql()
             ))?
             .query_row([key], Value::from_row)
+    }
+}
+
+impl<'h, H> Transaction<'h, H>
+where
+    H: AsRef<Handle>,
+{
+    pub fn handle(&self) -> &Handle {
+        self.handle.as_ref()
+    }
+
+    pub(crate) fn commit(mut self) -> Result<PostCommitWork<H>> {
+        self.apply_limits()?;
+        self.tx.commit()?;
+        Ok(PostCommitWork {
+            handle: self.handle,
+            deleted_values: self.deleted_values,
+            altered_files: self.altered_files,
+        })
+    }
+
+    pub fn apply_limits(&mut self) -> Result<()> {
+        if self.tx.transaction_state(None)? != rusqlite::TransactionState::Write {
+            return Ok(());
+        }
+        if let Some(max) = self.handle.as_ref().instance_limits.max_value_length_sum {
+            loop {
+                let actual = self
+                    .sum_value_length()
+                    .context("reading value_length sum")?;
+                if actual <= max {
+                    break;
+                }
+                self.evict_values(actual - max)?;
+            }
+        }
+        Ok(())
+    }
+    pub fn new(tx: rusqlite::Transaction<'h>, handle: H) -> Self {
+        Self {
+            tx,
+            handle,
+            deleted_values: vec![],
+            altered_files: Default::default(),
+        }
     }
 
     // TODO: Add a test for renaming onto itself.
@@ -330,24 +361,6 @@ impl<'h> Transaction<'h> {
             }
             Err(err) => Err(err),
         }
-    }
-
-    pub fn apply_limits(&mut self) -> Result<()> {
-        if self.tx.transaction_state(None)? != rusqlite::TransactionState::Write {
-            return Ok(());
-        }
-        if let Some(max) = self.handle.instance_limits.max_value_length_sum {
-            loop {
-                let actual = self
-                    .sum_value_length()
-                    .context("reading value_length sum")?;
-                if actual <= max {
-                    break;
-                }
-                self.evict_values(actual - max)?;
-            }
-        }
-        Ok(())
     }
 
     pub fn evict_values(&mut self, target_bytes: u64) -> Result<()> {

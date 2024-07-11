@@ -1,42 +1,44 @@
 use libc::size_t;
 use positioned_io::ReadAt;
+use rusqlite::TransactionBehavior;
 
 use super::*;
 use crate::c_api::PossumError::NoError;
-use crate::Handle;
 
-// This drops the Handle Box. Instead, if this is hard to use correctly from C, it could drop a
-// top-level reference count for the box. i.e. If this one goes, there's no way to work with the
-// Handle, and when all other outstanding operations on the Handle complete, it will drop the Handle
-// for real.
+// This drops the PossumHandle Box. Instead, if this is hard to use correctly from C, it could drop
+// a top-level reference count for the box. i.e. If this one goes, there's no way to work with the
+// PossumHandle, and when all other outstanding operations on the PossumHandle complete, it will
+// drop the PossumHandle for real.
 #[no_mangle]
-pub extern "C" fn possum_drop(handle: *mut Handle) {
+pub extern "C" fn possum_drop(handle: *mut PossumHandle) {
     drop(unsafe { Box::from_raw(handle) })
 }
 
 #[no_mangle]
 pub extern "C" fn possum_set_instance_limits(
-    handle: *mut Handle,
+    handle: *mut PossumHandle,
     limits: *const PossumLimits,
 ) -> PossumError {
     let handle = unsafe { &mut *handle };
     let limits = unsafe { limits.read() };
     with_residual(|| {
         handle
+            .write()
+            .unwrap()
             .set_instance_limits(limits.into())
             .map_err(Into::into)
     })
 }
 
 #[no_mangle]
-pub extern "C" fn possum_cleanup_snapshots(handle: *const Handle) -> PossumError {
-    let handle = unsafe { &*handle };
-    with_residual(|| handle.cleanup_snapshots())
+pub extern "C" fn possum_cleanup_snapshots(handle: *const PossumHandle) -> PossumError {
+    let handle = unwrap_possum_handle(handle);
+    with_residual(|| handle.read().unwrap().cleanup_snapshots())
 }
 
 #[no_mangle]
 pub extern "C" fn possum_single_write_buf(
-    handle: *mut Handle,
+    handle: *mut PossumHandle,
     key: PossumBuf,
     value: PossumBuf,
 ) -> size_t {
@@ -44,7 +46,11 @@ pub extern "C" fn possum_single_write_buf(
     let value_slice = value.as_ref();
     const ERR_SENTINEL: usize = usize::MAX;
     let handle = unsafe { &*handle };
-    match handle.single_write_from(key_vec, value_slice) {
+    match handle
+        .read()
+        .unwrap()
+        .single_write_from(key_vec, value_slice)
+    {
         Err(_) => ERR_SENTINEL,
         Ok((n, _)) => {
             let n = n.try_into().unwrap();
@@ -55,18 +61,21 @@ pub extern "C" fn possum_single_write_buf(
 }
 
 #[no_mangle]
-pub extern "C" fn possum_new_writer(handle: *mut Handle) -> *mut PossumWriter {
-    let handle = unsafe { handle.as_ref() }.unwrap();
-    Box::into_raw(Box::new(handle.new_writer().unwrap()))
+pub extern "C" fn possum_new_writer(handle: *mut PossumHandle) -> *mut PossumWriter {
+    let handle = unwrap_possum_handle(handle);
+    let writer = BatchWriter::new(handle.clone());
+    Box::into_raw(Box::new(writer))
 }
 
 #[no_mangle]
 pub extern "C" fn possum_single_stat(
-    handle: *const Handle,
+    handle: *const PossumHandle,
     key: PossumBuf,
     out_stat: *mut PossumStat,
 ) -> bool {
     match unsafe { handle.as_ref() }
+        .unwrap()
+        .read()
         .unwrap()
         .read_single(key.as_ref())
         .unwrap()
@@ -82,12 +91,14 @@ pub extern "C" fn possum_single_stat(
 
 #[no_mangle]
 pub extern "C" fn possum_list_items(
-    handle: *const Handle,
+    handle: *const PossumHandle,
     prefix: PossumBuf,
     out_list: *mut *mut PossumItem,
     out_list_len: *mut size_t,
 ) -> PossumError {
     let items = match unsafe { handle.as_ref() }
+        .unwrap()
+        .read()
         .unwrap()
         .list_items(prefix.as_ref())
     {
@@ -100,13 +111,18 @@ pub extern "C" fn possum_list_items(
 
 #[no_mangle]
 pub extern "C" fn possum_single_read_at(
-    handle: *const Handle,
+    handle: *const PossumHandle,
     key: PossumBuf,
     buf: *mut PossumBuf,
     offset: u64,
 ) -> PossumError {
     let rust_key = key.as_ref();
-    let value = match unsafe { handle.as_ref() }.unwrap().read_single(rust_key) {
+    let value = match unsafe { handle.as_ref() }
+        .unwrap()
+        .read()
+        .unwrap()
+        .read_single(rust_key)
+    {
         Ok(Some(value)) => value,
         Ok(None) => return PossumError::NoSuchKey,
         Err(err) => return err.into(),
@@ -124,13 +140,13 @@ pub extern "C" fn possum_single_read_at(
 /// stat is filled if non-null and a delete occurs. NoSuchKey is returned if the key does not exist.
 #[no_mangle]
 pub extern "C" fn possum_single_delete(
-    handle: *const Handle,
+    handle: *const PossumHandle,
     key: PossumBuf,
     stat: *mut PossumStat,
 ) -> PossumError {
     with_residual(|| {
         let handle = unsafe { &*handle };
-        let value = match handle.single_delete(key.as_ref()) {
+        let value = match handle.read().unwrap().single_delete(key.as_ref()) {
             Ok(None) => return Err(crate::Error::NoSuchKey),
             Err(err) => return Err(err),
             Ok(Some(value)) => value,
@@ -144,14 +160,26 @@ pub extern "C" fn possum_single_delete(
 
 #[no_mangle]
 pub extern "C" fn possum_reader_new(
-    handle: *const Handle,
+    handle: *const PossumHandle,
     reader: *mut *mut PossumReader,
 ) -> PossumError {
-    let handle = unsafe { handle.as_ref() }.unwrap();
+    let handle = unwrap_possum_handle(handle).clone();
     let reader = unsafe { reader.as_mut() }.unwrap();
-    let rust_reader = match handle.read() {
+    let owned_tx_res = handle.start_transaction(
+        // This is copied from Handle::start_writable_transaction_with_behaviour and Handle::read
+        // until I make proper abstractions.
+        |conn, handle| {
+            let rtx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
+            Ok(Transaction::new(rtx, handle))
+        },
+    );
+    let owned_tx = match owned_tx_res {
         Ok(ok) => ok,
         Err(err) => return err.into(),
+    };
+    let rust_reader = Reader {
+        owned_tx,
+        reads: Default::default(),
     };
     *reader = Box::into_raw(Box::new(PossumReader {
         rust_reader: Some(rust_reader),
@@ -162,13 +190,15 @@ pub extern "C" fn possum_reader_new(
 
 #[no_mangle]
 pub extern "C" fn possum_handle_move_prefix(
-    handle: *mut Handle,
+    handle: *mut PossumHandle,
     from: PossumBuf,
     to: PossumBuf,
 ) -> PossumError {
     let handle = unsafe { &mut *handle };
     with_residual(|| {
         handle
+            .read()
+            .unwrap()
             .move_prefix(from.as_ref(), to.as_ref())
             .map_err(Into::into)
     })
@@ -176,9 +206,15 @@ pub extern "C" fn possum_handle_move_prefix(
 
 #[no_mangle]
 pub extern "C" fn possum_handle_delete_prefix(
-    handle: *mut Handle,
+    handle: *mut PossumHandle,
     prefix: PossumBuf,
 ) -> PossumError {
     let handle = unsafe { &mut *handle };
-    with_residual(|| handle.delete_prefix(prefix.as_ref()).map_err(Into::into))
+    with_residual(|| {
+        handle
+            .read()
+            .unwrap()
+            .delete_prefix(prefix.as_ref())
+            .map_err(Into::into)
+    })
 }

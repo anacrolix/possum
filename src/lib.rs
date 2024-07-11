@@ -245,6 +245,20 @@ where
     value_renames: Vec<ValueRename>,
 }
 
+impl<H> BatchWriter<H>
+where
+    H: WithHandle,
+{
+    pub fn new(handle: H) -> Self {
+        Self {
+            handle,
+            exclusive_files: Default::default(),
+            pending_writes: Default::default(),
+            value_renames: Default::default(),
+        }
+    }
+}
+
 pub type TimestampInner = NaiveDateTime;
 
 #[derive(Debug, PartialEq, Copy, Clone, PartialOrd)]

@@ -165,7 +165,7 @@ where
 }
 
 // I can't work out how to have a reference to the Connection, and a transaction on it here at the
-// same time.
+// same time. TODO: Make this private.
 pub struct Transaction<'h, H> {
     tx: rusqlite::Transaction<'h>,
     handle: H,

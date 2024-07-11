@@ -9,6 +9,8 @@ pub struct Reader<T> {
     pub(crate) reads: Reads,
 }
 
+// TODO: This is annoying.
+#[allow(private_bounds)]
 impl<'a, T, H> Reader<T>
 where
     T: OwnedTxTrait<Tx = Transaction<'a, H>>,

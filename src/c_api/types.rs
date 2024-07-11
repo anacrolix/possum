@@ -1,8 +1,7 @@
 mod value;
 
 use std::ffi::c_char;
-use std::rc::Rc;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
 use libc::size_t;
 pub(crate) use value::*;
@@ -58,7 +57,15 @@ pub(crate) struct PossumLimits {
 }
 
 pub(crate) type PossumValueWriter = ValueWriter;
+impl SafeForGo for ValueWriter {}
 
-pub(crate) type PossumHandleRc = Rc<RwLock<Handle>>;
+// This type is spelled out so we can switch between implementations for PossumHandle.
+pub(crate) type PossumHandleRc = Arc<RwLock<Handle>>;
 
 pub(crate) type PossumHandle = PossumHandleRc;
+impl SafeForGo for PossumHandle {}
+
+// Need to make these guarantees for handles used from Go over the C boundary. I don't actually know
+// if we need Send, it might be inferred sufficiently by Sync.
+#[allow(dead_code)]
+trait SafeForGo: Send + Sync {}

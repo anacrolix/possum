@@ -13,6 +13,8 @@ typedef enum {
   UnsupportedFilesystem,
 } PossumError;
 
+typedef struct Arc_RwLock_Handle Arc_RwLock_Handle;
+
 /**
  * Manages uncommitted writes
  */
@@ -25,11 +27,9 @@ typedef struct PossumReader PossumReader;
  */
 typedef struct PossumValue PossumValue;
 
-typedef struct Rc_RwLock_Handle Rc_RwLock_Handle;
-
 typedef struct ValueWriter ValueWriter;
 
-typedef Rc_RwLock_Handle PossumHandleRc;
+typedef Arc_RwLock_Handle PossumHandleRc;
 
 typedef PossumHandleRc PossumHandle;
 

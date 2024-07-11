@@ -3,7 +3,6 @@ mod handle;
 use std::ffi::{c_char, CStr};
 use std::path::PathBuf;
 use std::ptr::null_mut;
-use std::rc::Rc;
 use std::sync::RwLock;
 
 use libc::size_t;
@@ -35,7 +34,7 @@ pub extern "C" fn possum_new(path: *const c_char) -> *mut PossumHandle {
             return null_mut();
         }
     };
-    Box::into_raw(Box::new(Rc::new(RwLock::new(handle))))
+    Box::into_raw(Box::new(Arc::new(RwLock::new(handle))))
 }
 
 #[no_mangle]

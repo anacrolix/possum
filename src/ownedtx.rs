@@ -2,12 +2,13 @@ use std::rc::Rc;
 use std::sync::RwLockReadGuard;
 
 use super::*;
-use crate::c_api::{PossumHandle, PossumReaderOwnedTransaction};
-use crate::handle::StartTransaction;
+use crate::c_api::PossumReaderOwnedTransaction;
 use crate::tx::ReadTransactionOwned;
 
 /// A Sqlite Transaction and the mutex guard on the Connection it came from.
-// Not in the handle module since it can be owned by types other than Handle.
+///
+// Not in the handle module since it can be owned by types other than Handle. TODO: Make this
+// private.
 pub struct OwnedTx<'handle> {
     cell: OwnedTxInner<'handle, Transaction<'handle, &'handle Handle>>,
 }
@@ -36,7 +37,7 @@ impl DerefMut for OwnedTx<'_> {
 
 impl<'a> OwnedTx<'a> {
     // Except for this move dependent dance it shouldn't be necessary to wrap the OwnedCell.
-    pub fn commit(self) -> Result<PostCommitWork<&'a Handle>> {
+    pub(crate) fn commit(self) -> Result<PostCommitWork<&'a Handle>> {
         self.cell.move_dependent(|tx| tx.commit())
     }
 }

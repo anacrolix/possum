@@ -64,7 +64,7 @@ where
         // Deref knowing that when guard is moved, the deref will still be valid.
         let stable_deref: *const O::Target = owner.deref();
         Ok(Self {
-            owner: owner,
+            owner,
             dep: make_dependent(unsafe { &*stable_deref })?,
         })
     }

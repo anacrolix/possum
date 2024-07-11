@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use std::sync::{RwLock, RwLockReadGuard};
+use std::sync::RwLockReadGuard;
 
 use rusqlite::TransactionBehavior;
 
@@ -559,7 +559,7 @@ impl WithHandle for PossumHandle {
 
 impl AsRef<Handle> for Handle {
     fn as_ref(&self) -> &Handle {
-        &self
+        self
     }
 }
 

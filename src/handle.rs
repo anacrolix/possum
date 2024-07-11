@@ -272,10 +272,9 @@ impl Handle {
     }
 
     /// Begins a read transaction.
-    pub fn read(&self) -> rusqlite::Result<Reader> {
+    pub fn read(&self) -> rusqlite::Result<Reader<OwnedTx>> {
         let reader = Reader {
             owned_tx: self.start_deferred_transaction()?,
-            handle: self,
             reads: Default::default(),
         };
         Ok(reader)

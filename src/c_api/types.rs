@@ -1,11 +1,13 @@
 mod value;
 
 use std::ffi::c_char;
+use std::rc::Rc;
+use std::sync::RwLock;
 
 use libc::size_t;
 pub(crate) use value::*;
 
-use crate::{BatchWriter, ValueWriter};
+use crate::{BatchWriter, Handle, ValueWriter};
 
 pub(crate) type PossumOffset = u64;
 
@@ -56,3 +58,5 @@ pub(crate) struct PossumLimits {
 }
 
 pub(crate) type PossumValueWriter = ValueWriter;
+
+pub(crate) type PossumHandleRc = Rc<RwLock<Handle>>;

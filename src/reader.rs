@@ -1,17 +1,17 @@
+use crate::ownedtx::OwnedTxTrait;
 use super::*;
 
 // BTree possibly so we can merge extents in the future.
 type Reads = HashMap<FileId, BTreeSet<ReadExtent>>;
 
-pub struct Reader<'handle> {
-    pub(crate) owned_tx: OwnedTx<'handle>,
-    pub(crate) handle: &'handle Handle,
+pub struct Reader<T> {
+    pub(crate) owned_tx: T,
     pub(crate) reads: Reads,
 }
 
-impl<'a> Reader<'a> {
+impl<'a, T> Reader<T> where T: OwnedTxTrait<Tx=Transaction<'a>> {
     pub fn add(&mut self, key: &[u8]) -> rusqlite::Result<Option<Value>> {
-        let res = self.owned_tx.touch_for_read(key);
+        let res = self.owned_tx.mut_transaction().touch_for_read(key);
         match res {
             Ok(value) => {
                 if let Nonzero(NonzeroValueLocation {
@@ -36,15 +36,14 @@ impl<'a> Reader<'a> {
     /// Takes a snapshot and commits the read transaction.
     pub fn begin(self) -> Result<Snapshot> {
         let file_clones = self.clone_files().context("cloning files")?;
-        self.owned_tx
-            .commit()
+        self.owned_tx.end_tx(|tx|tx.commit())
             .context("committing transaction")?
             .complete();
         Ok(Snapshot { file_clones })
     }
 
     fn clone_files(&self) -> Result<FileCloneCache> {
-        let handle = self.handle;
+        let handle = self.owned_tx.as_handle();
         let reads = &self.reads;
         let mut tempdir = None;
         let mut file_clones: FileCloneCache = Default::default();
@@ -68,7 +67,7 @@ impl<'a> Reader<'a> {
     }
 
     pub fn list_items(&self, prefix: &[u8]) -> PubResult<Vec<Item>> {
-        self.owned_tx.list_items(prefix)
+        self.owned_tx.transaction().list_items(prefix)
     }
 
     fn get_file_clone(
@@ -90,7 +89,7 @@ impl<'a> Reader<'a> {
                 return Ok(ret.clone());
             }
         }
-        if self.handle.dir_supports_file_cloning() {
+        if self.owned_tx.as_handle().dir_supports_file_cloning() {
             match self.clone_file(file_id, tempdir, cache, src_dir) {
                 Err(err) if err.root_cause_is_unsupported_filesystem() => (),
                 default => return default,
@@ -170,7 +169,7 @@ impl<'a> Reader<'a> {
         file_id: &FileId,
         read_extents: &BTreeSet<ReadExtent>,
     ) -> PubResult<Arc<Mutex<FileClone>>> {
-        let mut file = open_file_id(OpenOptions::new().read(true), self.handle.dir(), file_id)?;
+        let mut file = open_file_id(OpenOptions::new().read(true), self.owned_tx.as_handle().dir(), file_id)?;
 
         Self::lock_read_extents(&file, read_extents.iter())?;
         let len = file.seek(std::io::SeekFrom::End(0))?;

@@ -3,7 +3,7 @@ use crate::tx::ReadTransactionOwned;
 
 /// A Sqlite Transaction and the mutex guard on the Connection it came from.
 // Not in the handle module since it can be owned by types other than Handle.
-pub(crate) struct OwnedTx<'handle> {
+pub struct OwnedTx<'handle> {
     cell: OwnedTxInner<'handle, Transaction<'handle>>,
 }
 
@@ -54,5 +54,49 @@ impl<'h> Deref for OwnedReadTx<'h> {
 
     fn deref(&self) -> &Self::Target {
         &self.cell
+    }
+}
+
+pub(crate) trait OwnedTxTrait {
+    type Tx;
+    fn end_tx<R>(self, take: impl FnOnce(Self::Tx)->R) -> R;
+    fn as_handle(&self) -> &Handle;
+    fn mut_transaction(&mut self) -> &mut Self::Tx;
+    fn transaction(&self) -> &Self::Tx;
+}
+
+// impl<'h, T> OwnedTxTrait for OwnedTxInner<'h, T> {
+//     type Tx = T;
+//
+//     fn end_tx<R>(self, take: impl FnOnce(Self::Tx)->R) ->R{
+//         self.move_dependent(take)
+//     }
+//
+//     fn as_handle(&self) -> &Handle {
+//         todo!()
+//     }
+//
+//     fn mut_transaction(&mut self) -> &mut Self::Tx {
+//         self.deref_mut()
+//     }
+// }
+
+impl<'h> OwnedTxTrait for OwnedTx<'h> {
+    type Tx = Transaction<'h>;
+
+    fn end_tx<R>(self, take: impl FnOnce(Self::Tx)->R)->R {
+        todo!()
+    }
+
+    fn as_handle(&self) -> &Handle {
+        todo!()
+    }
+
+    fn mut_transaction(&mut self) -> &mut Self::Tx {
+        todo!()
+    }
+
+    fn transaction(&self) -> &Self::Tx {
+        self.cell.deref()
     }
 }

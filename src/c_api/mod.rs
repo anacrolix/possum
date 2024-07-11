@@ -32,7 +32,7 @@ impl PossumBuf {
 struct PossumReader {
     // Removed when converted to a snapshot. Specific to the C API so as to not need to expose
     // Snapshot, and to convert Values automatically when a snapshot starts.
-    rust_reader: Option<Reader<'static>>,
+    rust_reader: Option<Reader<OwnedTx<'static>>>,
     values: Vec<Pin<Box<PossumValue>>>,
 }
 
@@ -98,6 +98,7 @@ fn items_list_to_c(
 }
 
 use PossumError::*;
+use crate::handle::StartTransaction;
 
 use crate::item::Item;
 

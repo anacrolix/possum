@@ -161,7 +161,7 @@ impl<'h> PostCommitWork<'h> {
 
 // I can't work out how to have a reference to the Connection, and a transaction on it here at the
 // same time.
-pub(crate) struct Transaction<'h> {
+pub struct Transaction<'h> {
     tx: rusqlite::Transaction<'h>,
     handle: &'h Handle,
     deleted_values: Vec<NonzeroValueLocation>,

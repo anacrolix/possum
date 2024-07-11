@@ -1,3 +1,6 @@
+use std::rc::Rc;
+use std::sync::{RwLock, RwLockReadGuard};
+
 use rusqlite::TransactionBehavior;
 
 use super::*;
@@ -221,16 +224,17 @@ impl Handle {
         })
     }
 
-    fn start_transaction<'h, T, O>(
-        &'h self,
-        make_tx: impl FnOnce(&'h mut Connection, &'h Handle) -> rusqlite::Result<T>,
-    ) -> rusqlite::Result<O>
-    where
-        O: From<OwnedTxInner<'h, T>>,
-    {
-        let guard = self.conn.lock().unwrap();
-        Ok(owned_cell::OwnedCell::try_make(guard, |conn| make_tx(conn, self))?.into())
-    }
+    // fn start_transaction<'h, T, O>(
+    //     &'h self,
+    //     make_tx: impl FnOnce(&'h mut Connection, &'h Handle) -> rusqlite::Result<T>,
+    // ) -> rusqlite::Result<O>
+    // where
+    //     O: From<OwnedTxInner<'h, T>>,
+    // {
+    //     self.star
+    //     let guard = self.conn.lock().unwrap();
+    //     Ok(owned_cell::OwnedCell::try_make(guard, |conn| make_tx(conn, self))?.into())
+    // }
 
     pub(crate) fn start_immediate_transaction(&self) -> rusqlite::Result<OwnedTx> {
         self.start_writable_transaction_with_behaviour(TransactionBehavior::Immediate)
@@ -240,19 +244,23 @@ impl Handle {
         &self,
         behaviour: TransactionBehavior,
     ) -> rusqlite::Result<OwnedTx> {
-        self.start_transaction(|conn, handle| {
-            let rtx = conn.transaction_with_behavior(behaviour)?;
-            Ok(Transaction::new(rtx, handle))
-        })
+        Ok(self
+            .start_transaction(|conn, handle| {
+                let rtx = conn.transaction_with_behavior(behaviour)?;
+                Ok(Transaction::new(rtx, handle))
+            })?
+            .into())
     }
 
     /// Starts a deferred transaction (the default). There is no guaranteed read-only transaction
     /// mode. There might be pragmas that can limit to read only statements.
     pub fn start_deferred_transaction_for_read(&self) -> rusqlite::Result<OwnedReadTx> {
-        self.start_transaction(|conn, _handle| {
-            let rtx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
-            Ok(ReadTransactionOwned(rtx))
-        })
+        Ok(self
+            .start_transaction(|conn, _handle| {
+                let rtx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
+                Ok(ReadTransactionOwned(rtx))
+            })?
+            .into())
     }
 
     /// Starts a deferred transaction (the default). This might upgrade to a write transaction if
@@ -272,6 +280,15 @@ impl Handle {
         };
         Ok(reader)
     }
+
+    // pub(crate) fn associated_read<'h, H>(handle: H) -> rusqlite::Result<Reader<'h, H>> where H: WithHandle {
+    //     let reader = Reader {
+    //         owned_tx: handle.as_ref().start_deferred_transaction()?,
+    //         handle,
+    //         reads: Default::default(),
+    //     };
+    //     Ok(reader)
+    // }
 
     pub fn read_single(&self, key: &[u8]) -> Result<Option<SnapshotValue<Value>>> {
         let mut reader = self.read()?;
@@ -469,6 +486,7 @@ impl Handle {
 use item::Item;
 
 use crate::dir::Dir;
+use crate::owned_cell::OwnedCell;
 use crate::ownedtx::{OwnedReadTx, OwnedTxInner};
 use crate::tx::ReadTransaction;
 use crate::walk::EntryType;
@@ -492,5 +510,49 @@ impl ValuePuncherDone {
             self.0.lock().unwrap().recv(),
             Err(std::sync::mpsc::RecvError)
         ))
+    }
+}
+
+// T is the transaction type. 'h is a lifetime on a handle.
+pub(crate) trait StartTransaction<'h, T> {
+    type Owned;
+    type TxHandle;
+    fn start_transaction(
+        self,
+        // This part allows returning different transaction wrappers.
+        make_tx: impl FnOnce(&'h mut Connection, Self::TxHandle) -> rusqlite::Result<T>,
+    ) -> rusqlite::Result<Self::Owned>;
+}
+
+impl<'h, T> StartTransaction<'h, T> for &'h Handle {
+    type Owned = OwnedTxInner<'h, T>;
+    type TxHandle = &'h Handle;
+    fn start_transaction(
+        self,
+        make_tx: impl FnOnce(&'h mut Connection, Self::TxHandle) -> rusqlite::Result<T>,
+    ) -> rusqlite::Result<Self::Owned> {
+        let guard = self.conn.lock().unwrap();
+        owned_cell::OwnedCell::try_make_mut(guard, |conn| make_tx(conn, self))
+    }
+}
+
+impl<'h, T> StartTransaction<'h, T> for Rc<RwLock<Handle>> {
+    type Owned = OwnedCell<
+        Self,
+        OwnedCell<Rc<RwLockReadGuard<'h, Handle>>, OwnedCell<MutexGuard<'h, Connection>, T>>,
+    >;
+    type TxHandle = Rc<RwLockReadGuard<'h, Handle>>;
+    fn start_transaction(
+        self,
+        make_tx: impl FnOnce(&'h mut Connection, Self::TxHandle) -> rusqlite::Result<T>,
+    ) -> rusqlite::Result<Self::Owned> {
+        OwnedCell::try_make(self, |handle_lock| {
+            let handle_guard = Rc::new(handle_lock.read().unwrap());
+            OwnedCell::try_make(handle_guard.clone(), |handle| {
+                OwnedCell::try_make_mut(handle.conn.lock().unwrap(), |conn| {
+                    make_tx(conn, handle_guard)
+                })
+            })
+        })
     }
 }

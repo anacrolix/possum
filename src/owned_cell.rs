@@ -17,7 +17,6 @@ pub(crate) struct OwnedCell<O, D> {
     _owner: O,
 }
 
-/// Allows for a dependent value that holds a reference to its owner in the same struct.
 impl<O, D> OwnedCell<O, D>
 where
     // There's no StableDerefMut, but if StableDeref exists that might be a sufficient marker.
@@ -25,7 +24,7 @@ where
 {
     /// Create the dependent value using an exclusive reference to the owner's deref type
     /// that's promised to outlive the dependent value.
-    pub(crate) fn try_make<'a, E>(
+    pub(crate) fn try_make_mut<'a, E>(
         mut owner: O,
         make_dependent: impl FnOnce(&'a mut O::Target) -> Result<D, E>,
     ) -> Result<Self, E>
@@ -39,7 +38,33 @@ where
             dep: make_dependent(unsafe { &mut *stable_deref })?,
         })
     }
+}
 
+/// Allows for a dependent value that holds a reference to its owner in the same struct.
+impl<O, D> OwnedCell<O, D>
+where
+    // There's no StableDerefMut, but if StableDeref exists that might be a sufficient marker.
+    O: StableDeref,
+{
+    /// Create the dependent value using an exclusive reference to the owner's deref type
+    /// that's promised to outlive the dependent value.
+    pub(crate) fn try_make<'a, E>(
+        owner: O,
+        make_dependent: impl FnOnce(&'a O::Target) -> Result<D, E>,
+    ) -> Result<Self, E>
+    where
+        O::Target: 'a,
+    {
+        // Deref knowing that when guard is moved, the deref will still be valid.
+        let stable_deref: *const O::Target = owner.deref();
+        Ok(Self {
+            _owner: owner,
+            dep: make_dependent(unsafe { &*stable_deref })?,
+        })
+    }
+}
+
+impl<O, D> OwnedCell<O, D> {
     /// Move the dependent type out, before destroying the owner.
     // Another way to do this might be to extract the dependent and owner together, with the dependents lifetime bound
     // to the owner in the return scope.

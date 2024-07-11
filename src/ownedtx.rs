@@ -7,7 +7,7 @@ pub(crate) struct OwnedTx<'handle> {
     cell: OwnedTxInner<'handle, Transaction<'handle>>,
 }
 
-pub type OwnedTxInner<'h, T> = owned_cell::OwnedCell<MutexGuard<'h, Connection>, T>;
+pub(crate) type OwnedTxInner<'h, T> = owned_cell::OwnedCell<MutexGuard<'h, Connection>, T>;
 
 impl<'a> From<OwnedTxInner<'a, Transaction<'a>>> for OwnedTx<'a> {
     fn from(cell: OwnedTxInner<'a, Transaction<'a>>) -> Self {

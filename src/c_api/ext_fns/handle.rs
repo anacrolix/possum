@@ -56,7 +56,7 @@ pub extern "C" fn possum_single_write_buf(
 
 #[no_mangle]
 pub extern "C" fn possum_new_writer(handle: *mut Handle) -> *mut PossumWriter {
-    let handle = unsafe { &*handle };
+    let handle = unsafe { handle.as_ref() }.unwrap();
     Box::into_raw(Box::new(handle.new_writer().unwrap()))
 }
 

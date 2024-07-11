@@ -1,89 +1,153 @@
 package possum
 
 import (
+	"errors"
 	"github.com/anacrolix/generics"
 	possumC "github.com/anacrolix/possum/go/cpossum"
+	"sync"
 )
 
 type Handle struct {
-	cHandle *possumC.Handle
+	mu      sync.RWMutex
+	cHandle Rc[*possumC.Handle]
+	closed  bool
 }
+
+var ErrHandleClosed = errors.New("possum Handle closed")
 
 type Limits = possumC.Limits
 
-func Open(dir string) (*Handle, error) {
+func Open(dir string) (handle *Handle, err error) {
 	cHandle := possumC.NewHandle(dir)
-	return &Handle{cHandle}, nil
+	generics.InitNew(&handle)
+	handle.cHandle.Init(cHandle, func(cHandle *possumC.Handle) {
+		possumC.DropHandle(cHandle)
+	})
+	return
 }
 
-func (me Handle) Close() error {
-	possumC.DropHandle(me.cHandle)
+func (me *Handle) Close() error {
+	me.mu.Lock()
+	defer me.mu.Unlock()
+	if me.closed {
+		return nil
+	}
+	me.cHandle.Drop()
+	me.closed = true
 	return nil
 }
 
-func (me Handle) SingleStat(key string) (fi FileInfo, ok bool) {
-	stat := possumC.SingleStat(me.cHandle, key)
-	if !stat.Ok {
+func (me *Handle) cloneRc() (rc *Rc[*possumC.Handle], err error) {
+	me.mu.RLock()
+	defer me.mu.RUnlock()
+	if me.closed {
+		err = ErrHandleClosed
 		return
 	}
-	return FileInfo{stat.Value, key}, true
+	rc = me.cHandle.Clone()
+	return
 }
 
-func (me Handle) PutBuf(key string, buf []byte) error {
-	written, err := possumC.WriteSingleBuf(me.cHandle, key, buf)
+// Runs the given function with a handle that won't be dropped during the function, or returns an
+// error if the handle is closed.
+func (me *Handle) withHandle(f func(handle *possumC.Handle) error) error {
+	rc, err := me.cloneRc()
 	if err != nil {
 		return err
 	}
-	if written != uint(len(buf)) {
-		panic("expected an error")
-	}
-	return err
+	defer rc.Drop()
+	return f(rc.Deref())
 }
 
-func (me Handle) ListKeys(prefix string) (keys []string, err error) {
-	items, err := possumC.HandleListItems(me.cHandle, prefix)
-	for _, item := range items {
-		keys = append(keys, item.Key)
-	}
+func (me *Handle) SingleStat(key string) (fi FileInfo, ok bool) {
+	_ = me.withHandle(func(handle *possumC.Handle) error {
+		stat := possumC.SingleStat(handle, key)
+		if !stat.Ok {
+			return nil
+		}
+		fi = FileInfo{stat.Value, key}
+		ok = true
+		return nil
+	})
 	return
 }
 
-func (me Handle) SingleDelete(key string) (fi generics.Option[FileInfo], err error) {
-	stat, err := possumC.SingleDelete(me.cHandle, key)
-	if err != nil {
+func (me *Handle) PutBuf(key string, buf []byte) error {
+	return me.withHandle(func(handle *possumC.Handle) error {
+		written, err := possumC.WriteSingleBuf(handle, key, buf)
+		if err != nil {
+			return err
+		}
+		if written != uint(len(buf)) {
+			panic("expected an error")
+		}
+		return err
+	})
+}
+
+func (me *Handle) ListKeys(prefix string) (keys []string, err error) {
+	err = me.withHandle(func(handle *possumC.Handle) error {
+		items, err := possumC.HandleListItems(handle, prefix)
+		for _, item := range items {
+			keys = append(keys, item.Key)
+		}
+		return err
+	})
+	return
+}
+
+func (me *Handle) SingleDelete(key string) (fi generics.Option[FileInfo], err error) {
+	err = me.withHandle(func(handle *possumC.Handle) (err error) {
+		stat, err := possumC.SingleDelete(handle, key)
+		if err != nil {
+			return
+		}
+		if !stat.Ok {
+			return
+		}
+		fi.Set(FileInfo{stat.Value, key})
 		return
-	}
-	if !stat.Ok {
+	})
+	return
+}
+
+func (me *Handle) SingleReadAt(key string, off int64, p []byte) (n int, err error) {
+	err = me.withHandle(func(handle *possumC.Handle) (err error) {
+		n, err = possumC.SingleReadAt(handle, key, p, uint64(off))
+		err = mapRustEofReadAt(len(p), n, err)
 		return
-	}
-	fi.Value = FileInfo{stat.Value, key}
-	fi.Ok = true
+	})
 	return
 }
 
-func (me Handle) SingleReadAt(key string, off int64, p []byte) (n int, err error) {
-	n, err = possumC.SingleReadAt(me.cHandle, key, p, uint64(off))
-	err = mapRustEofReadAt(len(p), n, err)
+func (me *Handle) NewReader() (r Reader, err error) {
+	err = me.withHandle(func(handle *possumC.Handle) (err error) {
+		r.pc, err = possumC.NewReader(handle)
+		return
+	})
 	return
 }
 
-func (me Handle) NewReader() (r Reader, err error) {
-	r.pc, err = possumC.NewReader(me.cHandle)
-	return
+func (me *Handle) SetInstanceLimits(limits Limits) error {
+	return me.withHandle(func(handle *possumC.Handle) error {
+		return possumC.SetInstanceLimits(handle, limits)
+	})
 }
 
-func (me Handle) SetInstanceLimits(limits Limits) error {
-	return possumC.SetInstanceLimits(me.cHandle, limits)
+func (me *Handle) CleanupSnapshots() error {
+	return me.withHandle(func(handle *possumC.Handle) error {
+		return possumC.CleanupSnapshots(handle)
+	})
 }
 
-func (me Handle) CleanupSnapshots() error {
-	return possumC.CleanupSnapshots(me.cHandle)
+func (me *Handle) MovePrefix(from, to []byte) error {
+	return me.withHandle(func(handle *possumC.Handle) error {
+		return possumC.HandleMovePrefix(handle, from, to)
+	})
 }
 
-func (me Handle) MovePrefix(from, to []byte) error {
-	return possumC.HandleMovePrefix(me.cHandle, from, to)
-}
-
-func (me Handle) DeletePrefix(prefix []byte) error {
-	return possumC.HandleDeletePrefix(me.cHandle, prefix)
+func (me *Handle) DeletePrefix(prefix []byte) error {
+	return me.withHandle(func(handle *possumC.Handle) error {
+		return possumC.HandleDeletePrefix(handle, prefix)
+	})
 }

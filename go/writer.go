@@ -6,11 +6,19 @@ import (
 )
 
 type Writer struct {
-	c possumC.Writer
+	c         possumC.Writer
+	handleRef *Rc[*possumC.Handle]
 }
 
-func (me Handle) NewWriter() Writer {
-	return Writer{possumC.NewWriter(me.cHandle)}
+func (me *Handle) NewWriter() *Writer {
+	rc, err := me.cloneRc()
+	if err != nil {
+		panic(err)
+	}
+	return &Writer{
+		c:         possumC.NewWriter(rc.Deref()),
+		handleRef: rc,
+	}
 }
 
 type ValueWriter struct {
@@ -18,7 +26,7 @@ type ValueWriter struct {
 	files []*os.File
 }
 
-func (me Writer) StartNewValue() (vw *ValueWriter, err error) {
+func (me *Writer) StartNewValue() (vw *ValueWriter, err error) {
 	c, err := possumC.StartNewValue(me.c)
 	if err != nil {
 		return
@@ -27,7 +35,7 @@ func (me Writer) StartNewValue() (vw *ValueWriter, err error) {
 	return
 }
 
-func (me Writer) Stage(key []byte, value *ValueWriter) error {
+func (me *Writer) Stage(key []byte, value *ValueWriter) error {
 	for _, f := range value.files {
 		f.Close()
 	}
@@ -51,10 +59,14 @@ func (me *ValueWriter) NewFile(name string) (f *os.File, err error) {
 	return
 }
 
-func (me Writer) Commit() error {
-	return possumC.CommitWriter(me.c)
+// This consumes the Writer.
+func (me *Writer) Commit() error {
+	err := possumC.CommitWriter(me.c)
+	me.c = nil
+	me.handleRef.Drop()
+	return err
 }
 
-func (me Writer) Rename(v Value, newKey []byte) {
+func (me *Writer) Rename(v Value, newKey []byte) {
 	possumC.WriterRename(me.c, v.c, newKey)
 }

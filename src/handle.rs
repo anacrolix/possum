@@ -215,7 +215,7 @@ impl Handle {
         self.dir.block_size()
     }
 
-    pub fn new_writer(&self) -> Result<BatchWriter> {
+    pub fn new_writer(&self) -> Result<BatchWriter<&Handle>> {
         Ok(BatchWriter {
             handle: self,
             exclusive_files: Default::default(),
@@ -553,5 +553,15 @@ impl<'h, T> StartTransaction<'h, T> for Rc<RwLock<Handle>> {
                 })
             })
         })
+    }
+}
+
+pub trait WithHandle {
+    fn with_handle<R>(&self, f: impl FnOnce(&Handle) -> R) -> R;
+}
+
+impl WithHandle for &Handle {
+    fn with_handle<R>(&self, f: impl FnOnce(&Handle) -> R) -> R {
+        f(self)
     }
 }

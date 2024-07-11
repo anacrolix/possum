@@ -1,5 +1,5 @@
-use crate::ownedtx::OwnedTxTrait;
 use super::*;
+use crate::ownedtx::OwnedTxTrait;
 
 // BTree possibly so we can merge extents in the future.
 type Reads = HashMap<FileId, BTreeSet<ReadExtent>>;
@@ -9,7 +9,10 @@ pub struct Reader<T> {
     pub(crate) reads: Reads,
 }
 
-impl<'a, T> Reader<T> where T: OwnedTxTrait<Tx=Transaction<'a>> {
+impl<'a, T> Reader<T>
+where
+    T: OwnedTxTrait<Tx = Transaction<'a>>,
+{
     pub fn add(&mut self, key: &[u8]) -> rusqlite::Result<Option<Value>> {
         let res = self.owned_tx.mut_transaction().touch_for_read(key);
         match res {
@@ -36,7 +39,8 @@ impl<'a, T> Reader<T> where T: OwnedTxTrait<Tx=Transaction<'a>> {
     /// Takes a snapshot and commits the read transaction.
     pub fn begin(self) -> Result<Snapshot> {
         let file_clones = self.clone_files().context("cloning files")?;
-        self.owned_tx.end_tx(|tx|tx.commit())
+        self.owned_tx
+            .end_tx(|tx| tx.commit())
             .context("committing transaction")?
             .complete();
         Ok(Snapshot { file_clones })
@@ -169,7 +173,11 @@ impl<'a, T> Reader<T> where T: OwnedTxTrait<Tx=Transaction<'a>> {
         file_id: &FileId,
         read_extents: &BTreeSet<ReadExtent>,
     ) -> PubResult<Arc<Mutex<FileClone>>> {
-        let mut file = open_file_id(OpenOptions::new().read(true), self.owned_tx.as_handle().dir(), file_id)?;
+        let mut file = open_file_id(
+            OpenOptions::new().read(true),
+            self.owned_tx.as_handle().dir(),
+            file_id,
+        )?;
 
         Self::lock_read_extents(&file, read_extents.iter())?;
         let len = file.seek(std::io::SeekFrom::End(0))?;

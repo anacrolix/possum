@@ -59,7 +59,7 @@ pub extern "C" fn possum_value_writer_fd(value: *mut PossumValueWriter) -> RawFi
 
 #[no_mangle]
 pub extern "C" fn possum_writer_rename(
-    writer: *mut BatchWriter,
+    writer: *mut PossumWriter,
     value: *const PossumValue,
     new_key: PossumBuf,
 ) -> PossumError {

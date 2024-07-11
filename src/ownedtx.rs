@@ -59,7 +59,7 @@ impl<'h> Deref for OwnedReadTx<'h> {
 
 pub(crate) trait OwnedTxTrait {
     type Tx;
-    fn end_tx<R>(self, take: impl FnOnce(Self::Tx)->R) -> R;
+    fn end_tx<R>(self, take: impl FnOnce(Self::Tx) -> R) -> R;
     fn as_handle(&self) -> &Handle;
     fn mut_transaction(&mut self) -> &mut Self::Tx;
     fn transaction(&self) -> &Self::Tx;
@@ -84,7 +84,7 @@ pub(crate) trait OwnedTxTrait {
 impl<'h> OwnedTxTrait for OwnedTx<'h> {
     type Tx = Transaction<'h>;
 
-    fn end_tx<R>(self, take: impl FnOnce(Self::Tx)->R)->R {
+    fn end_tx<R>(self, take: impl FnOnce(Self::Tx) -> R) -> R {
         todo!()
     }
 

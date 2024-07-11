@@ -98,8 +98,8 @@ fn items_list_to_c(
 }
 
 use PossumError::*;
-use crate::handle::StartTransaction;
 
+use crate::handle::StartTransaction;
 use crate::item::Item;
 
 impl From<Error> for PossumError {

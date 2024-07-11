@@ -12,7 +12,7 @@ use crate::{BatchWriter, Handle, ValueWriter};
 pub(crate) type PossumOffset = u64;
 
 pub type RawFileHandle = libc::intptr_t;
-pub type PossumWriter = BatchWriter<'static>;
+pub type PossumWriter = BatchWriter<&'static Handle>;
 
 #[repr(C)]
 #[derive(Debug)]

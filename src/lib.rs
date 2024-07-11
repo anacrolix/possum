@@ -65,6 +65,8 @@ pub mod env;
 mod reader;
 use reader::Reader;
 
+use crate::handle::WithHandle;
+
 /// Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.
 pub type PubResult<T> = Result<T, Error>;
 
@@ -112,11 +114,17 @@ fn init_manifest_schema(conn: &rusqlite::Connection) -> rusqlite::Result<()> {
 
 /// The start of a write, before an exclusive file has been allocated. This allows for bringing your
 /// own file, such as by rename, or file clone.
-pub struct BeginWriteValue<'writer, 'handle> {
-    batch: &'writer mut BatchWriter<'handle>,
+pub struct BeginWriteValue<'writer, H>
+where
+    H: WithHandle,
+{
+    batch: &'writer mut BatchWriter<H>,
 }
 
-impl BeginWriteValue<'_, '_> {
+impl<H> BeginWriteValue<'_, H>
+where
+    H: WithHandle,
+{
     // TODO: On Linux and Windows, this should be possible without creating a new file. I'm not sure
     // if it's worth it however, since cloned blocks have to be a of a minimum size and alignment.
     // See also
@@ -125,16 +133,18 @@ impl BeginWriteValue<'_, '_> {
     /// Clone an entire file in. If cloning fails, this will fall back to copying the provided file.
     /// Its file position may be altered.
     pub fn clone_file(self, file: &mut File) -> PubResult<ValueWriter> {
-        if !self.batch.handle.dir_supports_file_cloning() {
+        if !self
+            .batch
+            .handle
+            .with_handle(Handle::dir_supports_file_cloning)
+        {
             return self.copy_file(file);
         }
         let dst_path = loop {
             let dst_path = self
                 .batch
                 .handle
-                .dir
-                .path()
-                .join(FileId::random().values_file_path());
+                .with_handle(|handle| handle.dir.path().join(FileId::random().values_file_path()));
             match fclonefile_noflags(file, &dst_path) {
                 Err(err) if CloneFileError::is_unsupported(&err) => {
                     return self.copy_file(file);
@@ -225,8 +235,11 @@ struct ValueRename {
 
 /// Manages uncommitted writes
 #[derive(Debug)]
-pub struct BatchWriter<'a> {
-    handle: &'a Handle,
+pub struct BatchWriter<H>
+where
+    H: WithHandle,
+{
+    handle: H,
     exclusive_files: Vec<ExclusiveFile>,
     pending_writes: Vec<PendingWrite>,
     value_renames: Vec<ValueRename>,
@@ -275,13 +288,16 @@ fn value_columns_sql() -> &'static str {
     ONCE.get_or_init(|| VALUE_COLUMN_NAMES.join(", ")).as_str()
 }
 
-impl<'handle> BatchWriter<'handle> {
+impl<H> BatchWriter<H>
+where
+    H: WithHandle,
+{
     fn get_exclusive_file(&mut self) -> Result<ExclusiveFile> {
         if let Some(ef) = self.exclusive_files.pop() {
             debug!("reusing exclusive file from writer");
             return Ok(ef);
         }
-        self.handle.get_exclusive_file()
+        self.handle.with_handle(Handle::get_exclusive_file)
     }
 
     pub fn stage_write(&mut self, key: Vec<u8>, mut value: ValueWriter) -> anyhow::Result<()> {
@@ -311,7 +327,7 @@ impl<'handle> BatchWriter<'handle> {
         Ok(())
     }
 
-    pub fn new_value<'writer>(&'writer mut self) -> BeginWriteValue<'writer, 'handle> {
+    pub fn new_value(&mut self) -> BeginWriteValue<H> {
         BeginWriteValue { batch: self }
     }
 
@@ -332,22 +348,24 @@ impl<'handle> BatchWriter<'handle> {
                 assert!(ef.downgrade_lock()?);
             }
         }
-        let mut transaction: OwnedTx = self.handle.start_immediate_transaction()?;
-        let mut write_commit_res = WriteCommitResult { count: 0 };
-        for pw in self.pending_writes.drain(..) {
-            before_write();
-            transaction.delete_key(&pw.key)?;
-            transaction.insert_key(pw)?;
-            write_commit_res.count += 1;
-        }
-        for vr in self.value_renames.drain(..) {
-            transaction.rename_value(&vr.value, vr.new_key)?;
-        }
-        // TODO: On error here, rewind the exclusive to undo any writes that just occurred.
-        let work = transaction.commit().context("commit transaction")?;
-
+        let write_commit_res = self.handle.with_handle(|handle| {
+            let mut transaction: OwnedTx = handle.start_immediate_transaction()?;
+            let mut write_commit_res = WriteCommitResult { count: 0 };
+            for pw in self.pending_writes.drain(..) {
+                before_write();
+                transaction.delete_key(&pw.key)?;
+                transaction.insert_key(pw)?;
+                write_commit_res.count += 1;
+            }
+            for vr in self.value_renames.drain(..) {
+                transaction.rename_value(&vr.value, vr.new_key)?;
+            }
+            // TODO: On error here, rewind the exclusive to undo any writes that just occurred.
+            let work = transaction.commit().context("commit transaction")?;
+            work.complete();
+            anyhow::Ok(write_commit_res)
+        })?;
         self.flush_exclusive_files();
-        work.complete();
         Ok(write_commit_res)
     }
 
@@ -365,15 +383,20 @@ impl<'handle> BatchWriter<'handle> {
         if flocking() {
             return;
         }
-        let mut handle_exclusive_files = self.handle.exclusive_files.lock().unwrap();
-        for ef in self.exclusive_files.drain(..) {
-            debug!("returning exclusive file {} to handle", ef.id);
-            assert!(handle_exclusive_files.insert(ef.id, ef).is_none());
-        }
+        self.handle.with_handle(|handle| {
+            let mut handle_exclusive_files = handle.exclusive_files.lock().unwrap();
+            for ef in self.exclusive_files.drain(..) {
+                debug!("returning exclusive file {} to handle", ef.id);
+                assert!(handle_exclusive_files.insert(ef.id, ef).is_none());
+            }
+        })
     }
 }
 
-impl Drop for BatchWriter<'_> {
+impl<H> Drop for BatchWriter<H>
+where
+    H: WithHandle,
+{
     fn drop(&mut self) {
         self.return_exclusive_files_to_handle()
     }

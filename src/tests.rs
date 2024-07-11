@@ -55,6 +55,7 @@ fn test_inc_array() {
 /// the query that looked for the starting offset for hole punching would punch out the whole file
 /// thinking it was empty.
 #[test]
+#[cfg(not(miri))]
 fn test_replace_keys() -> Result<()> {
     let tempdir = test_tempdir("test_replace_keys")?;
     let handle = Handle::new(tempdir.path.clone())?;
@@ -109,6 +110,7 @@ fn test_replace_keys() -> Result<()> {
 
 /// Prove that file cloning doesn't occur too late if the value is replaced.
 #[test]
+#[cfg(not(miri))]
 fn punch_value_before_snapshot_cloned() -> anyhow::Result<()> {
     let tempdir = test_tempdir("punch_value_before_snapshot_cloned")?;
     let handle = Handle::new(tempdir.path.clone())?;
@@ -143,6 +145,7 @@ fn punch_value_before_snapshot_cloned() -> anyhow::Result<()> {
 }
 
 #[test]
+#[cfg(not(miri))]
 fn test_torrent_storage_benchmark() -> anyhow::Result<()> {
     use testing::torrent_storage::*;
     BENCHMARK_OPTS.build()?.run()

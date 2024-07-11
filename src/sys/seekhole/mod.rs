@@ -134,6 +134,7 @@ mod tests {
     use crate::testing::write_random_tempfile;
 
     #[self::test]
+    #[cfg(not(miri))]
     fn just_a_hole() -> anyhow::Result<()> {
         let os_temp_dir = temp_dir();
         let mut min_hole_size = path_min_hole_size(&os_temp_dir)?;

@@ -92,3 +92,46 @@ impl<O, D> DerefMut for OwnedCell<O, D> {
         &mut self.dep
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::convert::Infallible;
+
+    use super::{test, Mutex, OwnedCell};
+
+    struct Conn {
+        count: usize,
+    }
+
+    impl Conn {
+        fn transaction(&mut self) -> Result<MutTransaction, Infallible> {
+            Ok(MutTransaction { conn: self })
+        }
+        fn new() -> Self {
+            Self { count: 0 }
+        }
+    }
+
+    struct MutTransaction<'a> {
+        conn: &'a mut Conn,
+    }
+
+    impl<'a> MutTransaction<'a> {
+        fn inc(&mut self) {
+            self.conn.count += 1
+        }
+    }
+
+    /// Test the case where we mutate the owner from the dependent, and then try to access the
+    /// owner. Intended for use with miri.
+    #[test]
+    fn test_miri_readonly_transaction() -> anyhow::Result<()> {
+        let conn = Mutex::new(Conn::new());
+        let mut cell = OwnedCell::try_make_mut(conn.lock().unwrap(), |conn| conn.transaction())?;
+        // We need to access before the mutate or miri doesn't notice.
+        assert_eq!(0, cell.owner().count);
+        cell.inc();
+        assert_eq!(1, cell.owner().count);
+        Ok(())
+    }
+}

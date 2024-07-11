@@ -37,6 +37,7 @@ mod tests {
     use crate::test;
 
     #[test]
+    #[cfg(not(miri))]
     fn open_locked_file() -> anyhow::Result<()> {
         let file1_named = NamedTempFile::new()?;
         let file1_ref = file1_named.as_file();

@@ -29,6 +29,7 @@ mod tests {
 
     #[test]
     #[allow(clippy::identity_op)]
+    #[cfg(not(miri))]
     fn hole_punching() -> anyhow::Result<()> {
         let mut temp_file = NamedTempFile::new()?;
         let file = temp_file.as_file_mut();

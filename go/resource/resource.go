@@ -3,6 +3,7 @@
 package possumResource
 
 import (
+	"fmt"
 	"github.com/anacrolix/missinggo/v2/resource"
 	possum "github.com/anacrolix/possum/go"
 	"io"
@@ -61,7 +62,11 @@ func (i *instance) Get() (_ io.ReadCloser, err error) {
 }
 
 func (i *instance) Put(reader io.Reader) (err error) {
-	w := i.handle.NewWriter()
+	w, err := i.handle.NewWriter()
+	if err != nil {
+		err = fmt.Errorf("creating new possum writer: %w", err)
+		return
+	}
 	defer func() {
 		// TODO: There's no Writer.Drop.
 		commitErr := w.Commit()
@@ -100,7 +105,7 @@ func (i *instance) ReadAt(p []byte, off int64) (n int, err error) {
 	return i.handle.SingleReadAt(i.key, off, p)
 }
 
-func (i *instance) WriteAt(bytes []byte, i2 int64) (int, error) {
+func (i *instance) WriteAt([]byte, int64) (int, error) {
 	//TODO implement me
 	panic("implement me")
 }

@@ -10,15 +10,16 @@ type Writer struct {
 	handleRef *Rc[*possumC.Handle]
 }
 
-func (me *Handle) NewWriter() *Writer {
+func (me *Handle) NewWriter() (w *Writer, err error) {
 	rc, err := me.cloneRc()
 	if err != nil {
-		panic(err)
+		return
 	}
-	return &Writer{
+	w = &Writer{
 		c:         possumC.NewWriter(rc.Deref()),
 		handleRef: rc,
 	}
+	return
 }
 
 type ValueWriter struct {
@@ -59,7 +60,8 @@ func (me *ValueWriter) NewFile(name string) (f *os.File, err error) {
 	return
 }
 
-// This consumes the Writer.
+// This consumes the Writer. You must commit a Writer after it's created or it will leak a reference
+// to the Handle. There doesn't seem to be a way to abort it in the Go API.
 func (me *Writer) Commit() error {
 	err := possumC.CommitWriter(me.c)
 	me.c = nil

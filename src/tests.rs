@@ -3,6 +3,7 @@ use std::thread::*;
 use std::time::*;
 
 use anyhow::Result;
+use rusqlite::TransactionState;
 
 use self::test;
 use super::*;
@@ -149,4 +150,25 @@ fn punch_value_before_snapshot_cloned() -> anyhow::Result<()> {
 fn test_torrent_storage_benchmark() -> anyhow::Result<()> {
     use testing::torrent_storage::*;
     BENCHMARK_OPTS.build()?.run()
+}
+
+/// Show that update moves a transaction to write, even if nothing is changed. This was an
+/// investigation on how to optimize touch_for_read if last_used doesn't change.
+#[test]
+fn test_sqlite_update_same_value_txn_state() -> Result<()> {
+    let mut conn = rusqlite::Connection::open_in_memory()?;
+    conn.execute_batch(
+        r"
+        create table a(b);
+        --insert into a values (1);
+        ",
+    )?;
+    let tx = conn.transaction()?;
+    assert_eq!(tx.transaction_state(None)?, TransactionState::None);
+    let changed = tx.execute("update a set b=1", [])?;
+    // No rows were changed.
+    assert_eq!(changed, 0);
+    // But now we're a write transaction anyway.
+    assert_eq!(tx.transaction_state(None)?, TransactionState::Write);
+    Ok(())
 }

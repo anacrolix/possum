@@ -133,6 +133,14 @@ pub extern "C" fn possum_single_read_at(
         Err(err) => return err.into(),
         Ok(ok) => ok,
     };
+    // eprintln!(
+    //     "reading single {} bytes at {} from {}, read {}: {}",
+    //     read_buf.len(),
+    //     offset,
+    //     value.length(),
+    //     r_nbyte,
+    //     rust_key.escape_ascii(),
+    // );
     buf.size = r_nbyte;
     NoError
 }

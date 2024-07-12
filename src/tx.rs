@@ -185,15 +185,37 @@ impl<T> ReadTransaction for T where T: ReadOnlyTransactionAccessor {}
 
 impl<'h, H> Transaction<'h, H> {
     pub fn touch_for_read(&mut self, key: &[u8]) -> rusqlite::Result<Value> {
-        self.tx
-            .prepare_cached(&format!(
-                "update keys \
-                set last_used=cast(unixepoch('subsec')*1e3 as integer) \
-                where key=? \
-                returning {}",
+        // Avoid modifying the manifest. We had to take a write lock already to ensure our data
+        // isn't modified on us, but it still seems to be an improvement. (-67% on read times in
+        // fact).
+        let (file_id, file_offset, value_length, mut last_used, now) = self
+            .tx
+            .prepare_cached_readonly(&format!(
+                "select {}, cast(unixepoch('subsec')*1e3 as integer) \
+                from keys where key=?",
                 value_columns_sql()
             ))?
-            .query_row([key], Value::from_row)
+            .query_row([key], |row| row.try_into())?;
+        let update_last_used = last_used != now;
+        // eprintln!("updating last used: {}", update_last_used);
+        if update_last_used {
+            let (new_last_used,) = self
+                .tx
+                .prepare_cached(
+                    r"
+                    update keys
+                    set last_used=cast(unixepoch('subsec')*1e3 as integer)
+                    where key=?
+                    returning last_used
+                    ",
+                )?
+                .query_row([key], |row| row.try_into())?;
+            // This can in fact change between calls. Since we're updating now anyway, we don't
+            // really care.
+            //assert_eq!(new_last_used, now);
+            last_used = new_last_used;
+        }
+        Value::from_column_values(file_id, file_offset, value_length, last_used)
     }
 }
 

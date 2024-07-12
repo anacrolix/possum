@@ -480,10 +480,15 @@ impl Deref for Value {
 
 impl Value {
     fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
-        let file_id: Option<FileId> = row.get(0)?;
-        let file_offset: Option<u64> = row.get(1)?;
-        let length = row.get(2)?;
-        let last_used = row.get(3)?;
+        Self::from_column_values(row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)
+    }
+
+    fn from_column_values(
+        file_id: Option<FileId>,
+        file_offset: Option<u64>,
+        length: ValueLength,
+        last_used: Timestamp,
+    ) -> rusqlite::Result<Self> {
         let location = if length == 0 {
             assert_eq!(file_id, None);
             assert_eq!(file_offset, None);

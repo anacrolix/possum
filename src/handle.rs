@@ -469,7 +469,7 @@ use item::Item;
 
 use crate::c_api::{PossumHandle, PossumHandleRc};
 use crate::dir::Dir;
-use crate::owned_cell::OwnedCell;
+use crate::owned_cell::{MutOwnedCell, OwnedCell};
 use crate::ownedtx::{OwnedReadTx, OwnedTxInner};
 use crate::tx::ReadTransaction;
 use crate::walk::EntryType;
@@ -515,14 +515,14 @@ impl<'h, T> StartTransaction<'h, T> for &'h Handle {
         make_tx: impl FnOnce(&'h mut Connection, Self::TxHandle) -> rusqlite::Result<T>,
     ) -> rusqlite::Result<Self::Owned> {
         let guard = self.conn.lock().unwrap();
-        OwnedCell::try_make_mut(guard, |conn| make_tx(conn, self))
+        MutOwnedCell::try_make(guard, |conn| make_tx(conn, self))
     }
 }
 
 impl<'h, T> StartTransaction<'h, T> for PossumHandleRc {
     type Owned = OwnedCell<
         Self,
-        OwnedCell<Rc<RwLockReadGuard<'h, Handle>>, OwnedCell<MutexGuard<'h, Connection>, T>>,
+        OwnedCell<Rc<RwLockReadGuard<'h, Handle>>, MutOwnedCell<MutexGuard<'h, Connection>, T>>,
     >;
     type TxHandle = Rc<RwLockReadGuard<'h, Handle>>;
     // type TxHandle = &'h Handle;
@@ -533,7 +533,7 @@ impl<'h, T> StartTransaction<'h, T> for PossumHandleRc {
         OwnedCell::try_make(self, |handle_lock| {
             let handle_guard = Rc::new(handle_lock.read().unwrap());
             OwnedCell::try_make(handle_guard.clone(), |handle| {
-                OwnedCell::try_make_mut(handle.conn.lock().unwrap(), |conn| {
+                MutOwnedCell::try_make(handle.conn.lock().unwrap(), |conn| {
                     make_tx(conn, handle_guard)
                 })
             })

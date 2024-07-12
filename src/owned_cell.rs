@@ -6,31 +6,56 @@ use stable_deref_trait::StableDeref;
 
 use super::*;
 
-/// Store a value (the dependent, D) that needs a stable reference to another value (the owner, O)
-/// together. This is useful to allow the owner to move around with the dependent to ensure it gets
-/// dropped when the dependent is no longer needed. This is only possible if the owner implements
-/// StableDeref, a market trait for types that can be moved while there are references to them. A
-/// great example is MutexGuard.
-pub(crate) struct OwnedCell<O, D> {
+/// The shared part of owned cell types.
+pub(crate) struct OwnedCellInner<O, D> {
     // The order here matters. dep must be dropped before owner.
     dep: D,
     owner: O,
 }
 
-impl<O, D> OwnedCell<O, D> {
-    pub fn owner(&self) -> &O {
-        &self.owner
+impl<O, D> Deref for OwnedCellInner<O, D> {
+    type Target = D;
+
+    fn deref(&self) -> &Self::Target {
+        &self.dep
     }
 }
 
-impl<O, D> OwnedCell<O, D>
+impl<O, D> DerefMut for OwnedCellInner<O, D> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.dep
+    }
+}
+/// Store a value (the dependent, D) that needs a stable reference to another value (the owner, O)
+/// together. This is useful to allow the owner to move around with the dependent to ensure it gets
+/// dropped when the dependent is no longer needed. This is only possible if the owner implements
+/// StableDeref, a market trait for types that can be moved while there are references to them. A
+/// great example is MutexGuard. OwnedCell does not allow mutable references to O from D. See
+/// MutOwnedCell for that.
+pub(crate) struct OwnedCell<O, D> {
+    inner: OwnedCellInner<O, D>
+}
+
+impl<O, D> OwnedCell<O, D> {
+    /// This is not available on MutOwnedCell.
+    pub fn owner(&self) -> &O {
+        &self.inner.owner
+    }
+}
+
+// Self-referential pair of types where the dependent type may have mutable references to the owner.
+pub(crate) struct MutOwnedCell<O, D> {
+    inner: OwnedCellInner<O, D>
+}
+
+impl<O, D> MutOwnedCell<O, D>
 where
     // There's no StableDerefMut, but if StableDeref exists that might be a sufficient marker.
     O: StableDeref + DerefMut,
 {
     /// Create the dependent value using an exclusive reference to the owner's deref type
     /// that's promised to outlive the dependent value.
-    pub(crate) fn try_make_mut<'a, E>(
+    pub(crate) fn try_make<'a, E>(
         mut owner: O,
         make_dependent: impl FnOnce(&'a mut O::Target) -> Result<D, E>,
     ) -> Result<Self, E>
@@ -39,17 +64,16 @@ where
     {
         // Deref knowing that when guard is moved, the deref will still be valid.
         let stable_deref: *mut O::Target = owner.deref_mut();
-        Ok(Self {
+        Ok(Self {inner:OwnedCellInner{
             owner,
             dep: make_dependent(unsafe { &mut *stable_deref })?,
-        })
+        }})
     }
 }
 
 /// Allows for a dependent value that holds a reference to its owner in the same struct.
 impl<O, D> OwnedCell<O, D>
 where
-    // There's no StableDerefMut, but if StableDeref exists that might be a sufficient marker.
     O: StableDeref,
 {
     /// Create the dependent value using an exclusive reference to the owner's deref type
@@ -64,74 +88,67 @@ where
         // Deref knowing that when guard is moved, the deref will still be valid.
         let stable_deref: *const O::Target = owner.deref();
         Ok(Self {
+            inner: OwnedCellInner{
             owner,
             dep: make_dependent(unsafe { &*stable_deref })?,
-        })
+        }})
     }
 }
 
-impl<O, D> OwnedCell<O, D> {
+pub(crate) trait MoveDependent<D> {
     /// Move the dependent type out, before destroying the owner.
     // Another way to do this might be to extract the dependent and owner together, with the dependents lifetime bound
     // to the owner in the return scope.
-    pub(crate) fn move_dependent<R>(self, f: impl FnOnce(D) -> R) -> R {
-        f(self.dep)
+    fn move_dependent<R>(self, f: impl FnOnce(D) -> R) -> R;
+}
+
+impl<O, D> MoveDependent<D> for MutOwnedCell<O, D> {
+    fn move_dependent<R>(self, f: impl FnOnce(D) -> R) -> R {
+        f(self.inner.dep)
     }
 }
 
-impl<O, D> Deref for OwnedCell<O, D> {
-    type Target = D;
+impl<O, D> MoveDependent<D> for OwnedCell<O, D> {
+    fn move_dependent<R>(self, f: impl FnOnce(D) -> R) -> R {
+        f(self.inner.dep)
+    }
+}
 
-    fn deref(&self) -> &Self::Target {
-        &self.dep
+// TODO: Share this between MutOwnedCell and OwnedCell.
+#[allow(dead_code)]
+impl<O, D> OwnedCellInner<O, D> {
+    /// Move the dependent type out, before destroying the owner.
+    // Another way to do this might be to extract the dependent and owner together, with the dependents lifetime bound
+    // to the owner in the return scope.
+    fn move_dependent<R>(self, f: impl FnOnce(D) -> R) -> R {
+        f(self.dep)
     }
 }
 
 impl<O, D> DerefMut for OwnedCell<O, D> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.dep
+        &mut self.inner
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::convert::Infallible;
+impl<O, D> Deref for OwnedCell<O, D> {
+    type Target = OwnedCellInner<O, D>;
 
-    use super::{test, Mutex, OwnedCell};
-
-    struct Conn {
-        count: usize,
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
+}
 
-    impl Conn {
-        fn transaction(&mut self) -> Result<MutTransaction, Infallible> {
-            Ok(MutTransaction { conn: self })
-        }
-        fn new() -> Self {
-            Self { count: 0 }
-        }
+impl<O, D> Deref for MutOwnedCell<O, D> {
+    type Target = OwnedCellInner<O, D>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
     }
+}
 
-    struct MutTransaction<'a> {
-        conn: &'a mut Conn,
-    }
-
-    impl<'a> MutTransaction<'a> {
-        fn inc(&mut self) {
-            self.conn.count += 1
-        }
-    }
-
-    /// Test the case where we mutate the owner from the dependent, and then try to access the
-    /// owner. Intended for use with miri.
-    #[test]
-    fn test_miri_readonly_transaction() -> anyhow::Result<()> {
-        let conn = Mutex::new(Conn::new());
-        let mut cell = OwnedCell::try_make_mut(conn.lock().unwrap(), |conn| conn.transaction())?;
-        // We need to access before the mutate or miri doesn't notice.
-        assert_eq!(0, cell.owner().count);
-        cell.inc();
-        assert_eq!(1, cell.owner().count);
-        Ok(())
+impl<O, D> DerefMut for MutOwnedCell<O, D> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.inner
     }
 }

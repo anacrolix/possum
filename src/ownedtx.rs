@@ -3,6 +3,7 @@ use std::sync::RwLockReadGuard;
 
 use super::*;
 use crate::c_api::PossumReaderOwnedTransaction;
+use crate::owned_cell::*;
 use crate::tx::ReadTransactionOwned;
 
 /// A Sqlite Transaction and the mutex guard on the Connection it came from.
@@ -13,7 +14,7 @@ pub struct OwnedTx<'handle> {
     cell: OwnedTxInner<'handle, Transaction<'handle, &'handle Handle>>,
 }
 
-pub(crate) type OwnedTxInner<'h, T> = owned_cell::OwnedCell<MutexGuard<'h, Connection>, T>;
+pub(crate) type OwnedTxInner<'h, T> = MutOwnedCell<MutexGuard<'h, Connection>, T>;
 
 impl<'a> From<OwnedTxInner<'a, Transaction<'a, &'a Handle>>> for OwnedTx<'a> {
     fn from(cell: OwnedTxInner<'a, Transaction<'a, &'a Handle>>) -> Self {
@@ -43,7 +44,7 @@ impl<'a> OwnedTx<'a> {
 }
 
 type OwnedReadTxCell<'h> =
-    owned_cell::OwnedCell<MutexGuard<'h, Connection>, ReadTransactionOwned<'h>>;
+    MutOwnedCell<MutexGuard<'h, Connection>, ReadTransactionOwned<'h>>;
 
 pub struct OwnedReadTx<'h> {
     cell: OwnedReadTxCell<'h>,

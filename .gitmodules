@@ -4,6 +4,3 @@
 [submodule "libc"]
 	path = libc
 	url = https://github.com/anacrolix/rust-libc
-[submodule "nix"]
-	path = nix
-	url = https://github.com/anacrolix/rust-nix

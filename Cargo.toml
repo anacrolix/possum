@@ -63,6 +63,12 @@ criterion = "0.5.1"
 possum-db = { path = ".", features = ["testing"] }
 test-log = "0.2.14"
 
+[target.'cfg(loom)'.dev-dependencies]
+loom = "0.7"
+
+[target.'cfg(shuttle)'.dependencies]
+shuttle = "*"
+
 [features]
 default = []
 testing = ["dep:fdlimit", "dep:rayon", "dep:twox-hash"]

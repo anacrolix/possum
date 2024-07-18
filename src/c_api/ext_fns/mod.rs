@@ -3,7 +3,6 @@ mod handle;
 use std::ffi::{c_char, CStr};
 use std::path::PathBuf;
 use std::ptr::null_mut;
-use std::sync::RwLock;
 
 use libc::size_t;
 use positioned_io::ReadAt;

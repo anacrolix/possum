@@ -1,5 +1,4 @@
-use std::sync::*;
-use std::thread::*;
+use crate::sync::Barrier;
 use std::time::*;
 
 use anyhow::Result;
@@ -8,6 +7,25 @@ use rusqlite::TransactionState;
 use self::test;
 use super::*;
 use crate::testing::*;
+
+pub(crate) fn check_concurrency(
+    f: impl Fn() -> anyhow::Result<()> + Send + Sync + 'static,
+    #[allow(unused_variables)]
+    iterations_hint: usize,
+) -> anyhow::Result<()> {
+    #[cfg(loom)]
+    {
+        loom::model(move || f().unwrap());
+        Ok(())
+    }
+    #[cfg(shuttle)]
+    {
+        shuttle::check_random(move || f().unwrap(), iterations_hint);
+        Ok(())
+    }
+    #[cfg(all(not(loom), not(shuttle)))]
+    f()
+}
 
 #[test]
 fn test_to_usize_io() -> Result<()> {
@@ -58,91 +76,101 @@ fn test_inc_array() {
 #[test]
 #[cfg(not(miri))]
 fn test_replace_keys() -> Result<()> {
-    let tempdir = test_tempdir("test_replace_keys")?;
-    let handle = Handle::new(tempdir.path.clone())?;
-    let a = "a".as_bytes().to_vec();
-    let b = "b".as_bytes().to_vec();
-    let block_size: usize = handle.block_size().try_into()?;
-    let a_value = readable_repeated_bytes(1, block_size);
-    let b_value = readable_repeated_bytes(2, block_size);
-    let b_read = b_value.as_slice();
-    handle.single_write_from(a.clone(), a_value.as_slice())?;
-    handle.single_write_from(b.clone(), b_read)?;
-    handle.single_write_from(b.clone(), b_read)?;
-    // Check that the value for a hasn't been punched/zeroed.
-    assert_repeated_bytes_values_eq(
-        handle.read_single(&a).unwrap().unwrap().new_reader(),
-        a_value.as_slice(),
-    );
+    check_concurrency(
+        || {
+            let tempdir = test_tempdir("test_replace_keys")?;
+            let handle = Handle::new(tempdir.path.clone())?;
+            let a = "a".as_bytes().to_vec();
+            let b = "b".as_bytes().to_vec();
+            let block_size: usize = handle.block_size().try_into()?;
+            let a_value = readable_repeated_bytes(1, block_size);
+            let b_value = readable_repeated_bytes(2, block_size);
+            let b_read = b_value.as_slice();
+            handle.single_write_from(a.clone(), a_value.as_slice())?;
+            handle.single_write_from(b.clone(), b_read)?;
+            handle.single_write_from(b.clone(), b_read)?;
+            // Check that the value for a hasn't been punched/zeroed.
+            assert_repeated_bytes_values_eq(
+                handle.read_single(&a).unwrap().unwrap().new_reader(),
+                a_value.as_slice(),
+            );
 
-    let dir = handle.dir.clone();
-    let values_punched = handle.get_value_puncher_done();
-    drop(handle);
-    // Wait for it to recv, which should be a disconnect when the value_puncher hangs up.
-    values_punched.wait();
+            let dir = handle.dir.clone();
+            let values_punched = handle.get_value_puncher_done();
+            drop(handle);
+            // Wait for it to recv, which should be a disconnect when the value_puncher hangs up.
+            values_punched.wait();
 
-    let entries = dir.walk_dir()?;
-    let values_files: Vec<_> = entries
-        .iter()
-        .filter(|entry| entry.entry_type == walk::EntryType::ValuesFile)
-        .collect();
+            let entries = dir.walk_dir()?;
+            let values_files: Vec<_> = entries
+                .iter()
+                .filter(|entry| entry.entry_type == walk::EntryType::ValuesFile)
+                .collect();
 
-    let mut allocated_space = 0;
-    // There can be multiple value files if the value puncher is holding onto a file when another
-    // write occurs.
-    for value_file in values_files {
-        let mut file = File::open(&value_file.path)?;
-        for region in seekhole::Iter::new(&mut file) {
-            let region = region?;
-            if matches!(region.region_type, seekhole::RegionType::Data) {
-                allocated_space += region.length();
+            let mut allocated_space = 0;
+            // There can be multiple value files if the value puncher is holding onto a file when another
+            // write occurs.
+            for value_file in values_files {
+                let mut file = File::open(&value_file.path)?;
+                for region in seekhole::Iter::new(&mut file) {
+                    let region = region?;
+                    if matches!(region.region_type, seekhole::RegionType::Data) {
+                        allocated_space += region.length();
+                    }
+                }
             }
-        }
-    }
-    assert!(
-        [2].map(|num_blocks| num_blocks * block_size as seekhole::RegionOffset)
-            .contains(&allocated_space),
-        "block_size={}, allocated_space={}",
-        block_size,
-        allocated_space
-    );
-    Ok(())
+            assert!(
+                [2].map(|num_blocks| num_blocks * block_size as seekhole::RegionOffset)
+                    .contains(&allocated_space),
+                "block_size={}, allocated_space={}",
+                block_size,
+                allocated_space
+            );
+            Ok(())
+        },
+        100,
+    )
 }
 
 /// Prove that file cloning doesn't occur too late if the value is replaced.
 #[test]
 #[cfg(not(miri))]
 fn punch_value_before_snapshot_cloned() -> anyhow::Result<()> {
-    let tempdir = test_tempdir("punch_value_before_snapshot_cloned")?;
-    let handle = Handle::new(tempdir.path.clone())?;
-    let key = "a".as_bytes().to_vec();
-    let first_value = readable_repeated_bytes(1, handle.block_size() as usize);
-    let second_value = readable_repeated_bytes(2, handle.block_size() as usize);
-    let reader_handle = Handle::new(tempdir.path.clone())?;
-    let stop = Instant::now() + Duration::from_secs(1);
-    while Instant::now() < stop {
-        handle.single_write_from(key.clone(), first_value.as_slice())?;
-        let write_barrier = Barrier::new(2);
-        scope(|scope| {
-            let reader_scope = scope.spawn(|| -> anyhow::Result<()> {
-                let mut reader = reader_handle.read()?;
-                let value = reader.add(&key).unwrap().unwrap();
-                write_barrier.wait();
-                let snapshot = reader.begin().unwrap();
-                let value = snapshot.value(value);
-                // This should read 1. It will get 0 if the value was punched, and 2 if the clone
-                // occurred after the write.
-                assert_repeated_bytes_values_eq(value.new_reader(), first_value.as_slice());
-                Ok(())
-            });
-            write_barrier.wait();
-            handle
-                .single_write_from(key.clone(), second_value.as_slice())
-                .unwrap();
-            reader_scope.join().unwrap()
-        })?;
-    }
-    Ok(())
+    check_concurrency(
+        || {
+            let tempdir = test_tempdir("punch_value_before_snapshot_cloned")?;
+            let handle = Handle::new(tempdir.path.clone())?;
+            let key = "a".as_bytes().to_vec();
+            let first_value = readable_repeated_bytes(1, handle.block_size() as usize);
+            let second_value = readable_repeated_bytes(2, handle.block_size() as usize);
+            let reader_handle = Handle::new(tempdir.path.clone())?;
+            let stop = Instant::now() + Duration::from_secs(1);
+            while Instant::now() < stop {
+                handle.single_write_from(key.clone(), first_value.as_slice())?;
+                let write_barrier = Barrier::new(2);
+                thread_scope(|scope| {
+                    let reader_scope = scope.spawn(|| -> anyhow::Result<()> {
+                        let mut reader = reader_handle.read()?;
+                        let value = reader.add(&key).unwrap().unwrap();
+                        write_barrier.wait();
+                        let snapshot = reader.begin().unwrap();
+                        let value = snapshot.value(value);
+                        // This should read 1. It will get 0 if the value was punched, and 2 if the clone
+                        // occurred after the write.
+                        assert_repeated_bytes_values_eq(value.new_reader(), first_value.as_slice());
+                        Ok(())
+                    });
+                    write_barrier.wait();
+                    handle
+                        .single_write_from(key.clone(), second_value.as_slice())
+                        .unwrap();
+                    reader_scope.join().unwrap()
+                })?;
+            }
+            Ok(())
+        },
+        1,
+    )
 }
 
 #[test]

@@ -1,6 +1,3 @@
-use std::rc::Rc;
-use std::sync::RwLockReadGuard;
-
 use super::*;
 use crate::c_api::PossumReaderOwnedTransaction;
 use crate::owned_cell::*;
@@ -43,8 +40,7 @@ impl<'a> OwnedTx<'a> {
     }
 }
 
-type OwnedReadTxCell<'h> =
-    MutOwnedCell<MutexGuard<'h, Connection>, ReadTransactionOwned<'h>>;
+type OwnedReadTxCell<'h> = MutOwnedCell<MutexGuard<'h, Connection>, ReadTransactionOwned<'h>>;
 
 pub struct OwnedReadTx<'h> {
     cell: OwnedReadTxCell<'h>,

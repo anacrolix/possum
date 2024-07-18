@@ -9,9 +9,7 @@ use std::ffi::c_char;
 use std::mem::size_of;
 use std::pin::Pin;
 use std::ptr::copy_nonoverlapping;
-use std::rc::Rc;
 use std::slice;
-use std::sync::RwLockReadGuard;
 
 use libc::{calloc, malloc, size_t};
 

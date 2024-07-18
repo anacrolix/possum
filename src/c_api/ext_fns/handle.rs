@@ -1,6 +1,5 @@
 use libc::size_t;
 use positioned_io::ReadAt;
-use rusqlite::TransactionBehavior;
 
 use super::*;
 use crate::c_api::PossumError::NoError;

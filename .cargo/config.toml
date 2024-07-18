@@ -1,0 +1,3 @@
+[build]
+# Setting cfg here means our IDE and CLI both use the same values.
+#rustflags = "--cfg shuttle"

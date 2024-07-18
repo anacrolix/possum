@@ -11,7 +11,8 @@ use std::io::{ErrorKind, Read, Seek, Write};
 use std::num::TryFromIntError;
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::rc::Rc;
+use std::sync::OnceLock;
 use std::time::Duration;
 use std::{fs, io, str};
 
@@ -30,7 +31,8 @@ use positioned_io::ReadAt;
 use rand::Rng;
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use rusqlite::Error::QueryReturnedNoRows;
-use rusqlite::{params, CachedStatement, Connection, Statement};
+use rusqlite::{params, CachedStatement, Connection, Statement, TransactionBehavior};
+use stable_deref_trait::StableDeref;
 use sys::*;
 use tempfile::TempDir;
 #[cfg(test)]
@@ -64,6 +66,14 @@ pub use dir::*;
 pub mod env;
 mod reader;
 use reader::Reader;
+
+// Concurrency related stuff that's replaced by loom or shuttle.
+mod sync;
+use self::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard};
+#[cfg(test)]
+// This isn't available in loom or shuttle yet. Unfortunately for shuttle it means threads are
+// spawned outside its control, and it doesn't work.
+use std::thread::scope as thread_scope;
 
 use crate::handle::WithHandle;
 

@@ -33,7 +33,7 @@ impl<O, D> DerefMut for OwnedCellInner<O, D> {
 /// great example is MutexGuard. OwnedCell does not allow mutable references to O from D. See
 /// MutOwnedCell for that.
 pub(crate) struct OwnedCell<O, D> {
-    inner: OwnedCellInner<O, D>
+    inner: OwnedCellInner<O, D>,
 }
 
 impl<O, D> OwnedCell<O, D> {
@@ -45,7 +45,7 @@ impl<O, D> OwnedCell<O, D> {
 
 // Self-referential pair of types where the dependent type may have mutable references to the owner.
 pub(crate) struct MutOwnedCell<O, D> {
-    inner: OwnedCellInner<O, D>
+    inner: OwnedCellInner<O, D>,
 }
 
 impl<O, D> MutOwnedCell<O, D>
@@ -64,10 +64,12 @@ where
     {
         // Deref knowing that when guard is moved, the deref will still be valid.
         let stable_deref: *mut O::Target = owner.deref_mut();
-        Ok(Self {inner:OwnedCellInner{
-            owner,
-            dep: make_dependent(unsafe { &mut *stable_deref })?,
-        }})
+        Ok(Self {
+            inner: OwnedCellInner {
+                owner,
+                dep: make_dependent(unsafe { &mut *stable_deref })?,
+            },
+        })
     }
 }
 
@@ -88,10 +90,11 @@ where
         // Deref knowing that when guard is moved, the deref will still be valid.
         let stable_deref: *const O::Target = owner.deref();
         Ok(Self {
-            inner: OwnedCellInner{
-            owner,
-            dep: make_dependent(unsafe { &*stable_deref })?,
-        }})
+            inner: OwnedCellInner {
+                owner,
+                dep: make_dependent(unsafe { &*stable_deref })?,
+            },
+        })
     }
 }
 

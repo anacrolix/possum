@@ -17,3 +17,9 @@ sync-repo dest *args:
 
 flamegraph-macos bench_filter:
     CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph --root --bench possum -- --bench '{{ bench_filter }}'
+
+build-supported-targets:
+    for a in `cat supported-targets`; do just build-target "$a"; done
+
+build-target target:
+    cargo build --release --target {{target}}

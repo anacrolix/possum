@@ -6,9 +6,9 @@ use shuttle::sync;
 #[cfg(not(shuttle))]
 use std::sync;
 
-pub use sync::*;
 use sync::Mutex as InnerMutex;
 use sync::MutexGuard as InnerMutexGuard;
+pub use sync::*;
 // These types work in any sync context.
 use std::sync::{LockResult, PoisonError};
 

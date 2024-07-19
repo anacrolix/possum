@@ -15,8 +15,6 @@ pub use flock::*;
 pub(crate) use pathconf::*;
 pub use punchfile::*;
 
-use crate::env::{emulate_freebsd, flocking};
-
 cfg_if! {
     if #[cfg(windows)] {
         mod windows;
@@ -74,31 +72,4 @@ pub trait FileSystemFlags {
 
 pub trait DirMeta {
     fn file_system_flags(&self) -> io::Result<impl FileSystemFlags>;
-}
-
-struct UnixFilesystemFlags {}
-
-impl FileSystemFlags for UnixFilesystemFlags {
-    fn supports_sparse_files(&self) -> bool {
-        // AFAIK, all unix systems support sparse files on all filesystems.
-        true
-    }
-
-    fn supports_block_cloning(&self) -> Option<bool> {
-        // AFAIK there's no way to check if a filesystem supports block cloning on non-Windows
-        // platforms, and even then it depends on where you're copying to/from, sometimes even on
-        // the same filesystem.
-        if emulate_freebsd() {
-            Some(false)
-        } else {
-            None
-        }
-    }
-}
-
-#[cfg(not(windows))]
-impl DirMeta for File {
-    fn file_system_flags(&self) -> io::Result<impl FileSystemFlags> {
-        Ok(UnixFilesystemFlags {})
-    }
 }

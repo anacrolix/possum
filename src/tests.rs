@@ -10,8 +10,7 @@ use crate::testing::*;
 
 pub(crate) fn check_concurrency(
     f: impl Fn() -> anyhow::Result<()> + Send + Sync + 'static,
-    #[allow(unused_variables)]
-    iterations_hint: usize,
+    #[allow(unused_variables)] iterations_hint: usize,
 ) -> anyhow::Result<()> {
     #[cfg(loom)]
     {

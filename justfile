@@ -1,4 +1,8 @@
+build-supported-targets:
+    for a in `cat supported-targets`; do just build-target "$a"; done
+
 build-tests-windows:
+    # This outputs the paths of the generated test executables, which can be passed to wine.
     cargo test --no-run --target x86_64-pc-windows-gnu
 
 test-windows:
@@ -17,9 +21,6 @@ sync-repo dest *args:
 
 flamegraph-macos bench_filter:
     CARGO_PROFILE_RELEASE_DEBUG=true cargo flamegraph --root --bench possum -- --bench '{{ bench_filter }}'
-
-build-supported-targets:
-    for a in `cat supported-targets`; do just build-target "$a"; done
 
 build-target target:
     cargo build --release --target {{target}}

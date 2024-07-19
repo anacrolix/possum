@@ -67,7 +67,7 @@ test-log = "0.2.14"
 loom = "0.7"
 
 [target.'cfg(shuttle)'.dependencies]
-shuttle = "*"
+shuttle = "0.7.1"
 
 [features]
 default = []

@@ -873,7 +873,7 @@ dependencies = [
 
 [[package]]
 name = "possum-db"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "anacrolix-libc",
  "anyhow",

@@ -1,5 +1,8 @@
 # Possum
 
+![Crates.io Version](https://img.shields.io/crates/v/possum-db)
+![docs.rs](https://img.shields.io/docsrs/possum-db)
+
 ## What is it?
 
 Possum is a key-value cache stored directly on disk. It supports concurrent access from multiple processes without requiring interprocess communication or sidecar processes. It efficiently evicts data by using hole punching and sparse files. It supports read snapshots by using file cloning, a feature available on [filesystems](https://www.ctrl.blog/entry/file-cloning.html) such as Btrfs, XFS, ZFS, APFS and ReFSv2.

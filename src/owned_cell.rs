@@ -100,20 +100,24 @@ where
 
 pub(crate) trait MoveDependent<D> {
     /// Move the dependent type out, before destroying the owner.
-    // Another way to do this might be to extract the dependent and owner together, with the dependents lifetime bound
-    // to the owner in the return scope.
+    // TODO: Another way to do this might be to extract the dependent and owner together, with the
+    // dependents lifetime bound to the owner in the return scope.
     fn move_dependent<R>(self, f: impl FnOnce(D) -> R) -> R;
 }
 
 impl<O, D> MoveDependent<D> for MutOwnedCell<O, D> {
     fn move_dependent<R>(self, f: impl FnOnce(D) -> R) -> R {
-        f(self.inner.dep)
+        let res = f(self.inner.dep);
+        drop(self.inner.owner);
+        res
     }
 }
 
 impl<O, D> MoveDependent<D> for OwnedCell<O, D> {
     fn move_dependent<R>(self, f: impl FnOnce(D) -> R) -> R {
-        f(self.inner.dep)
+        let res = f(self.inner.dep);
+        drop(self.inner.owner);
+        res
     }
 }
 
@@ -121,8 +125,8 @@ impl<O, D> MoveDependent<D> for OwnedCell<O, D> {
 #[allow(dead_code)]
 impl<O, D> OwnedCellInner<O, D> {
     /// Move the dependent type out, before destroying the owner.
-    // Another way to do this might be to extract the dependent and owner together, with the dependents lifetime bound
-    // to the owner in the return scope.
+    // Another way to do this might be to extract the dependent and owner together, with the
+    // dependent's lifetime bound to the owner in the return scope.
     fn move_dependent<R>(self, f: impl FnOnce(D) -> R) -> R {
         f(self.dep)
     }
@@ -153,5 +157,50 @@ impl<O, D> Deref for MutOwnedCell<O, D> {
 impl<O, D> DerefMut for MutOwnedCell<O, D> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.inner
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use self::test;
+    use super::*;
+
+    struct Owner;
+
+    impl Deref for Owner {
+        type Target = ();
+
+        fn deref(&self) -> &Self::Target {
+            &()
+        }
+    }
+
+    unsafe impl StableDeref for Owner {}
+
+    impl Drop for Owner {
+        fn drop(&mut self) {
+            eprintln!("dropping owner")
+        }
+    }
+
+    struct Dep;
+
+    impl Drop for Dep {
+        fn drop(&mut self) {
+            eprintln!("dropping dep")
+        }
+    }
+
+    #[test]
+    fn test_owned_cell_dropped_field_drop_ordering() -> anyhow::Result<()> {
+        OwnedCell::try_make(Owner {}, |_| anyhow::Ok(Dep {}))?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_move_dependent_field_drop_ordering() -> anyhow::Result<()> {
+        let owned_cell = OwnedCell::try_make(Owner {}, |_| anyhow::Ok(Dep {}))?;
+        owned_cell.move_dependent(|_dep| println!("dep moving"));
+        Ok(())
     }
 }

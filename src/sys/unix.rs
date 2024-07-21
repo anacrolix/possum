@@ -2,10 +2,10 @@ use std::fs::File;
 use std::io;
 use std::path::Path;
 
-pub(crate) use nix::errno::errno;
 use crate::sys::{DirMeta, FileSystemFlags};
+pub(crate) use nix::errno::errno;
 
-use crate::env::{emulate_freebsd};
+use crate::env::emulate_freebsd;
 
 pub fn path_disk_allocation(path: &Path) -> std::io::Result<u64> {
     let metadata = std::fs::metadata(path)?;

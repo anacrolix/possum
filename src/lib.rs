@@ -68,12 +68,9 @@ mod reader;
 use reader::Reader;
 
 // Concurrency related stuff that's replaced by loom or shuttle.
-mod sync;
-use self::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard};
-#[cfg(test)]
-// This isn't available in loom or shuttle yet. Unfortunately for shuttle it means threads are
-// spawned outside its control, and it doesn't work.
-use std::thread::scope as thread_scope;
+pub mod concurrency;
+use self::concurrency::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard};
+use concurrency::*;
 
 use crate::handle::WithHandle;
 

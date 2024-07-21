@@ -108,3 +108,28 @@ pub fn assert_repeated_bytes_values_eq(a: impl Read, b: impl Read) {
     let b = condense_repeated_bytes(b);
     assert_eq!(a, b);
 }
+
+pub fn check_concurrency(
+    f: impl Fn() -> anyhow::Result<()> + Send + Sync + 'static,
+    #[allow(unused_variables)] iterations_hint: usize,
+) -> anyhow::Result<()> {
+    #[cfg(loom)]
+    {
+        loom::model(move || f().unwrap());
+        Ok(())
+    }
+    #[cfg(shuttle)]
+    {
+        shuttle::check_random(move || f().unwrap(), iterations_hint);
+        Ok(())
+    }
+    #[cfg(all(not(loom), not(shuttle)))]
+    if false {
+        for _ in 0..1000 {
+            f()?
+        }
+        Ok(())
+    } else {
+        f()
+    }
+}

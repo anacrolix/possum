@@ -1,4 +1,4 @@
-use crate::sync::Barrier;
+use crate::concurrency::sync::Barrier;
 use std::time::*;
 
 use anyhow::Result;
@@ -7,24 +7,6 @@ use rusqlite::TransactionState;
 use self::test;
 use super::*;
 use crate::testing::*;
-
-pub(crate) fn check_concurrency(
-    f: impl Fn() -> anyhow::Result<()> + Send + Sync + 'static,
-    #[allow(unused_variables)] iterations_hint: usize,
-) -> anyhow::Result<()> {
-    #[cfg(loom)]
-    {
-        loom::model(move || f().unwrap());
-        Ok(())
-    }
-    #[cfg(shuttle)]
-    {
-        shuttle::check_random(move || f().unwrap(), iterations_hint);
-        Ok(())
-    }
-    #[cfg(all(not(loom), not(shuttle)))]
-    f()
-}
 
 #[test]
 fn test_to_usize_io() -> Result<()> {
@@ -142,14 +124,18 @@ fn punch_value_before_snapshot_cloned() -> anyhow::Result<()> {
             let key = "a".as_bytes().to_vec();
             let first_value = readable_repeated_bytes(1, handle.block_size() as usize);
             let second_value = readable_repeated_bytes(2, handle.block_size() as usize);
-            let reader_handle = Handle::new(tempdir.path.clone())?;
+            let reader_handle = Arc::new(Handle::new(tempdir.path.clone())?);
             let stop = Instant::now() + Duration::from_secs(1);
             while Instant::now() < stop {
                 handle.single_write_from(key.clone(), first_value.as_slice())?;
-                let write_barrier = Barrier::new(2);
-                thread_scope(|scope| {
-                    let reader_scope = scope.spawn(|| -> anyhow::Result<()> {
-                        let mut reader = reader_handle.read()?;
+                let write_barrier = Arc::new(Barrier::new(2));
+                let reader_handle = reader_handle.clone();
+                let first_value = first_value.clone();
+                let reader_scope = {
+                    let key = key.clone();
+                    let write_barrier = write_barrier.clone();
+                    thread::spawn(move || -> () {
+                        let mut reader = reader_handle.read().unwrap();
                         let value = reader.add(&key).unwrap().unwrap();
                         write_barrier.wait();
                         let snapshot = reader.begin().unwrap();
@@ -157,18 +143,15 @@ fn punch_value_before_snapshot_cloned() -> anyhow::Result<()> {
                         // This should read 1. It will get 0 if the value was punched, and 2 if the clone
                         // occurred after the write.
                         assert_repeated_bytes_values_eq(value.new_reader(), first_value.as_slice());
-                        Ok(())
-                    });
-                    write_barrier.wait();
-                    handle
-                        .single_write_from(key.clone(), second_value.as_slice())
-                        .unwrap();
-                    reader_scope.join().unwrap()
-                })?;
+                    })
+                };
+                write_barrier.wait();
+                handle.single_write_from(key.clone(), second_value.as_slice())?;
+                reader_scope.join().unwrap();
             }
             Ok(())
         },
-        1,
+        10,
     )
 }
 
@@ -176,7 +159,7 @@ fn punch_value_before_snapshot_cloned() -> anyhow::Result<()> {
 #[cfg(not(miri))]
 fn test_torrent_storage_benchmark() -> anyhow::Result<()> {
     use testing::torrent_storage::*;
-    BENCHMARK_OPTS.build()?.run()
+    check_concurrency(|| BENCHMARK_OPTS.build()?.run(), 10)
 }
 
 /// Show that update moves a transaction to write, even if nothing is changed. This was an

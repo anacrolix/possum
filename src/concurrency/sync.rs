@@ -1,4 +1,4 @@
-use super::StableDeref;
+use crate::StableDeref;
 use std::ops::{Deref, DerefMut};
 
 #[cfg(shuttle)]

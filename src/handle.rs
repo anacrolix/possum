@@ -1,6 +1,6 @@
 use super::*;
 
-use rusqlite::TransactionBehavior;
+use rusqlite::{TransactionBehavior, TransactionState};
 
 #[derive(Default, Debug)]
 #[repr(C)]
@@ -10,7 +10,7 @@ pub struct Limits {
     pub disable_hole_punching: bool,
 }
 
-type DeletedValuesSender = std::sync::mpsc::SyncSender<Vec<NonzeroValueLocation>>;
+type DeletedValuesSender = sync::mpsc::SyncSender<Vec<NonzeroValueLocation>>;
 
 /// Provides access to a storage directory. Manages manifest access, file cloning, file writers,
 /// configuration, value eviction etc.
@@ -22,7 +22,7 @@ pub struct Handle {
     pub(crate) clones: Mutex<FileCloneCache>,
     pub(crate) instance_limits: Limits,
     deleted_values: Option<DeletedValuesSender>,
-    _value_puncher: Option<std::thread::JoinHandle<()>>,
+    _value_puncher: Option<thread::JoinHandle<()>>,
     value_puncher_done: ValuePuncherDone,
 }
 
@@ -106,8 +106,8 @@ impl Handle {
         let dir = Dir::new(dir)?;
         let mut conn = Connection::open(dir.path().join(MANIFEST_DB_FILE_NAME))?;
         Self::init_sqlite_conn(&mut conn, &dir)?;
-        let (deleted_values, receiver) = std::sync::mpsc::sync_channel(10);
-        let (value_puncher_done_sender, value_puncher_done) = std::sync::mpsc::sync_channel(0);
+        let (deleted_values, receiver) = sync::mpsc::sync_channel(10);
+        let (value_puncher_done_sender, value_puncher_done) = sync::mpsc::sync_channel(0);
         let value_puncher_done = ValuePuncherDone(Arc::new(Mutex::new(value_puncher_done)));
         let handle = Self {
             conn: Mutex::new(conn),
@@ -118,7 +118,7 @@ impl Handle {
             deleted_values: Some(deleted_values),
             // Don't wait on this, at least in the Drop handler, because it stays alive until it
             // succeeds in punching everything.
-            _value_puncher: Some(std::thread::spawn(move || -> () {
+            _value_puncher: Some(thread::spawn(move || -> () {
                 let _value_puncher_done_sender = value_puncher_done_sender;
                 if let Err(err) = Self::value_puncher(dir, receiver) {
                     error!("value puncher thread failed with {err:?}");
@@ -333,7 +333,7 @@ impl Handle {
     /// Punches values in batches with its own dedicated connection and read-only transactions.
     fn value_puncher(
         dir: Dir,
-        values_receiver: std::sync::mpsc::Receiver<Vec<NonzeroValueLocation>>,
+        values_receiver: sync::mpsc::Receiver<Vec<NonzeroValueLocation>>,
     ) -> Result<()> {
         let manifest_path = dir.path().join(MANIFEST_DB_FILE_NAME);
         use rusqlite::OpenFlags;
@@ -378,6 +378,7 @@ impl Handle {
             let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
             let tx = ReadTransactionOwned(tx);
             pending_values = Self::punch_values(&dir, pending_values, &tx)?;
+            debug_assert_ne!(tx.0.transaction_state(None)?, TransactionState::Write);
         }
         Ok(())
     }
@@ -483,7 +484,7 @@ impl Drop for Handle {
 }
 
 #[derive(Debug)]
-pub struct ValuePuncherDone(Arc<Mutex<std::sync::mpsc::Receiver<()>>>);
+pub struct ValuePuncherDone(Arc<Mutex<sync::mpsc::Receiver<()>>>);
 
 impl ValuePuncherDone {
     pub fn wait(&self) {

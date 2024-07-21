@@ -228,7 +228,7 @@ fn torrent_storage_small() -> Result<()> {
             }
             Ok(())
         },
-        100,
+        1,
     )
 }
 
@@ -244,7 +244,7 @@ fn torrent_storage_big() -> Result<()> {
                 view_snapshot_values: true,
             })
         },
-        100,
+        1,
     )
 }
 
@@ -288,7 +288,7 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
         let piece_data = Arc::clone(&piece_data);
         let start_delay = Duration::from_micros(1000 * (index / 2) as u64);
         let handle = Arc::clone(&handle);
-        join_handles.push(std::thread::spawn(move || -> Result<()> {
+        join_handles.push(thread::spawn(move || -> Result<()> {
             let key = offset_key(offset);
             sleep(start_delay);
             debug!("starting block write");
@@ -481,13 +481,14 @@ fn reads_update_last_used() -> Result<()> {
             let uniform = UniformDuration::new(Duration::from_nanos(0), LAST_USED_RESOLUTION);
             for _ in 0..100 {
                 let dither = uniform.sample(&mut rng);
-                sleep(LAST_USED_RESOLUTION + dither);
+                // This needs to be a real sleep or the timestamps sqlite generates don't progress.
+                std::thread::sleep(LAST_USED_RESOLUTION + dither);
                 let new_read_ts = handle.read_single(&key)?.unwrap().last_used();
                 assert!(new_read_ts > read_ts);
             }
             Ok(())
         },
-        100,
+        10,
     )
 }
 

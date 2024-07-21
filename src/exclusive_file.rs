@@ -131,6 +131,6 @@ impl ExclusiveFile {
 
 impl Drop for ExclusiveFile {
     fn drop(&mut self) {
-        debug!("dropping exclusive file {}", self.id.deref());
+        debug!("dropping exclusive file {}", self.id);
     }
 }

@@ -1,7 +1,7 @@
 pub mod torrent_storage;
 
 use std::hash::Hasher;
-use std::io::{copy, SeekFrom, Write};
+use std::io::{BufReader, copy, SeekFrom, Write};
 
 use anyhow::{ensure, Result};
 use rand::Rng;
@@ -90,6 +90,7 @@ pub fn readable_repeated_bytes(byte: u8, limit: usize) -> Vec<u8> {
 pub fn condense_repeated_bytes(r: impl Read) -> (Option<u8>, u64) {
     let mut count = 0;
     let mut byte = None;
+    let r = BufReader::new(r);
     for b in r.bytes() {
         let b = b.unwrap();
         match byte {
@@ -118,12 +119,12 @@ pub fn check_concurrency(
         loom::model(move || f().unwrap());
         Ok(())
     }
-    #[cfg(shuttle)]
+    #[cfg(feature = "shuttle")]
     {
         shuttle::check_random(move || f().unwrap(), iterations_hint);
         Ok(())
     }
-    #[cfg(all(not(loom), not(shuttle)))]
+    #[cfg(all(not(loom), not(feature = "shuttle")))]
     if false {
         for _ in 0..1000 {
             f()?

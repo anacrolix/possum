@@ -53,7 +53,8 @@ fn test_inc_array() {
 /// Show that replacing keys doesn't cause a key earlier in the same values file to be punched. This
 /// occurred because there were file_id values in the manifest file that had the wrong type, and so
 /// the query that looked for the starting offset for hole punching would punch out the whole file
-/// thinking it was empty.
+/// thinking it was empty. Note sometimes this test fails and there's extra values files floating
+/// around. I haven't figured out why.
 #[test]
 #[cfg(not(miri))]
 fn test_replace_keys() -> Result<()> {
@@ -61,6 +62,7 @@ fn test_replace_keys() -> Result<()> {
         || {
             let tempdir = test_tempdir("test_replace_keys")?;
             let handle = Handle::new(tempdir.path.clone())?;
+            handle.delete_prefix("")?;
             let a = "a".as_bytes().to_vec();
             let b = "b".as_bytes().to_vec();
             let block_size: usize = handle.block_size().try_into()?;
@@ -92,9 +94,13 @@ fn test_replace_keys() -> Result<()> {
             // There can be multiple value files if the value puncher is holding onto a file when another
             // write occurs.
             for value_file in values_files {
-                let mut file = File::open(&value_file.path)?;
+                let path = &value_file.path;
+                eprintln!("{:?}", path);
+                let mut file = File::open(path)?;
+                // file.sync_all()?;
                 for region in seekhole::Iter::new(&mut file) {
                     let region = region?;
+                    eprintln!("{:?}", region);
                     if matches!(region.region_type, seekhole::RegionType::Data) {
                         allocated_space += region.length();
                     }

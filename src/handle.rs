@@ -226,7 +226,15 @@ impl Handle {
     ) -> rusqlite::Result<OwnedTx> {
         Ok(self
             .start_transaction(|conn, handle| {
-                let rtx = conn.transaction_with_behavior(behaviour)?;
+                let tx_res = run_blocking(|| {
+                    // We're holding the write lock around the Connection, I think we're safe to
+                    // pass it to another thread. For some reason the return type, the
+                    // rusqlite::Transaction is what spits the dummy. It doesn't implement Send,
+                    // even though it only has a reference to Connection internally. So we put it
+                    // inside CanSend to return it from the thread then pop it out.
+                    conn.transaction_with_behavior(behaviour).map(CanSend)
+                });
+                let rtx = tx_res?.0;
                 Ok(Transaction::new(rtx, handle))
             })?
             .into())
@@ -260,15 +268,6 @@ impl Handle {
         };
         Ok(reader)
     }
-
-    // pub(crate) fn associated_read<'h, H>(handle: H) -> rusqlite::Result<Reader<'h, H>> where H: WithHandle {
-    //     let reader = Reader {
-    //         owned_tx: handle.as_ref().start_deferred_transaction()?,
-    //         handle,
-    //         reads: Default::default(),
-    //     };
-    //     Ok(reader)
-    // }
 
     pub fn read_single(&self, key: &[u8]) -> Result<Option<SnapshotValue<Value>>> {
         let mut reader = self.read()?;
@@ -454,9 +453,9 @@ impl Handle {
         Ok(())
     }
 
-    pub fn delete_prefix(&self, prefix: &[u8]) -> PubResult<()> {
+    pub fn delete_prefix(&self, prefix: impl AsRef<[u8]>) -> PubResult<()> {
         let mut tx = self.start_deferred_transaction()?;
-        for item in tx.list_items(prefix)? {
+        for item in tx.list_items(prefix.as_ref())? {
             tx.delete_key(&item.key)?;
         }
         tx.commit()?.complete();
@@ -567,3 +566,7 @@ impl AsRef<Handle> for Rc<RwLockReadGuard<'_, Handle>> {
         self.deref()
     }
 }
+
+struct CanSend<T>(T);
+
+unsafe impl<T> Send for CanSend<T> {}

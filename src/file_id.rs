@@ -15,14 +15,6 @@ impl Debug for FileId {
     }
 }
 
-impl Deref for FileId {
-    type Target = FileIdInner;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 impl std::str::FromStr for FileId {
     type Err = std::num::ParseIntError;
 

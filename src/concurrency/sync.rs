@@ -1,9 +1,9 @@
 use crate::StableDeref;
 use std::ops::{Deref, DerefMut};
 
-#[cfg(shuttle)]
+#[cfg(feature = "shuttle")]
 use shuttle::sync;
-#[cfg(not(shuttle))]
+#[cfg(not(feature = "shuttle"))]
 use std::sync;
 
 use sync::Mutex as InnerMutex;

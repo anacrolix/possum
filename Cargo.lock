@@ -45,10 +45,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0942ffc6dcaadf03badf6e6a2d0228460359d5e34b57ccdc720b7382dfbd5ec5"
 
 [[package]]
-name = "anacrolix-libc"
-version = "0.2.151"
-
-[[package]]
 name = "android-tzdata"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -618,9 +614,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
-version = "0.2.153"
+version = "0.2.158"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c198f91728a82281a64e1f4f9eeb25d82cb32a5de251c6bd1b5154d63a8e7bd"
+checksum = "d8adc4bb1803a324070e64a98ae98f38934d91957a99cfb3a43dcbc01bc56439"
 
 [[package]]
 name = "libsqlite3-sys"
@@ -875,7 +871,6 @@ dependencies = [
 name = "possum-db"
 version = "0.3.0"
 dependencies = [
- "anacrolix-libc",
  "anyhow",
  "bytesize",
  "cfg-if",
@@ -886,6 +881,7 @@ dependencies = [
  "env_logger 0.10.2",
  "fdlimit",
  "itertools 0.12.1",
+ "libc",
  "log",
  "loom",
  "memmap2",

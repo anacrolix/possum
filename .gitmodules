@@ -1,6 +1,3 @@
 [submodule "util/apfs-clone-checker"]
 	path = util/apfs-clone-checker
 	url = https://github.com/anacrolix/apfs-clone-checker
-[submodule "libc"]
-	path = libc
-	url = https://github.com/anacrolix/rust-libc

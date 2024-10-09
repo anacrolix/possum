@@ -29,7 +29,7 @@ pub extern "C" fn possum_new(path: *const c_char) -> *mut PossumHandle {
     let handle = match Handle::new(path_buf.clone()) {
         Ok(handle) => handle,
         Err(err) => {
-            error!("error creating possum handle in {path_buf:?}: {err}");
+            error!("error creating possum handle in {path_buf:?}: {err:#?}");
             return null_mut();
         }
     };

@@ -103,7 +103,7 @@ impl Handle {
                 "3.42"
             );
         }
-        let dir = Dir::new(dir)?;
+        let dir = Dir::new(dir).context("new Dir")?;
         let mut conn = Connection::open(dir.path().join(MANIFEST_DB_FILE_NAME))?;
         Self::init_sqlite_conn(&mut conn, &dir)?;
         let (deleted_values, receiver) = sync::mpsc::sync_channel(10);

@@ -37,8 +37,14 @@ impl Dir {
                 let _ = std::fs::remove_file(&dst_path);
                 match clone_res {
                     Ok(()) => true,
-                    Err(err) if CloneFileError::is_unsupported(&err) => false,
-                    Err(err) => return Err(err).context("testing clonefile"),
+                    Err(err) if CloneFileError::is_unsupported(&err) => {
+                        warn!(?err, "clonefile unsupported");
+                        false
+                    },
+                    Err(err) => {
+                        error!(?err);
+                        return Err(err).context("testing clonefile")
+                    },
                 }
             }
         };

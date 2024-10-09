@@ -27,7 +27,7 @@ impl CloneFileError for NativeIoError {
     #[cfg(unix)]
     fn is_unsupported(&self) -> bool {
         self.raw_os_error()
-            .map(|errno| matches!(errno, EOPNOTSUPP))
+            .map(|errno| matches!(errno, EOPNOTSUPP | libc::EXDEV))
             .unwrap_or_default()
     }
     #[cfg(windows)]

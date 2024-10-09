@@ -19,6 +19,10 @@ type Limits = possumC.Limits
 
 func Open(dir string) (handle *Handle, err error) {
 	cHandle := possumC.NewHandle(dir)
+	if cHandle == nil {
+		err = errors.New("unhandled possum error")
+		return
+	}
 	generics.InitNew(&handle)
 	handle.cHandle.Init(cHandle, func(cHandle *possumC.Handle) {
 		possumC.DropHandle(cHandle)

@@ -31,14 +31,14 @@ where
 
 #[cfg(feature = "shuttle")]
 pub(crate) fn run_blocking<F, R>(f: F) -> R
-    where
-        F: FnOnce() -> R + Send,
-        R: Send,
+where
+    F: FnOnce() -> R + Send,
+    R: Send,
 {
     use std::sync::mpsc;
     let (sender, receiver) = mpsc::channel();
     let tx_thread = std::thread::scope(|scope| {
-        scope.spawn(||{
+        scope.spawn(|| {
             let res = f();
             sender.send(res).unwrap();
         });
@@ -46,7 +46,7 @@ pub(crate) fn run_blocking<F, R>(f: F) -> R
             shuttle::thread::yield_now();
             match receiver.try_recv() {
                 Err(mpsc::TryRecvError::Empty) => continue,
-                default => return default.unwrap()
+                default => return default.unwrap(),
             }
         }
     });

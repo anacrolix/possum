@@ -40,11 +40,11 @@ impl Dir {
                     Err(err) if CloneFileError::is_unsupported(&err) => {
                         warn!(?err, "clonefile unsupported");
                         false
-                    },
+                    }
                     Err(err) => {
                         error!(?err);
-                        return Err(err).context("testing clonefile")
-                    },
+                        return Err(err).context("testing clonefile");
+                    }
                 }
             }
         };

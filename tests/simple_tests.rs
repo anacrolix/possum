@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail, Context, Result};
 use fdlimit::raise_fd_limit;
 use itertools::Itertools;
+use possum::concurrency::thread;
 use possum::testing::*;
 use possum::walk::{walk_dir, EntryType};
 use possum::Error::NoSuchKey;
@@ -23,11 +24,9 @@ use rand::distributions::uniform::{UniformDuration, UniformSampler};
 use rand::{thread_rng, RngCore, SeedableRng};
 use tempfile::tempdir;
 use test_log::test;
+use thread::sleep;
 use tracing::*;
 use walk::Entry as WalkEntry;
-
-use possum::concurrency::thread;
-use thread::sleep;
 
 #[test]
 fn rename_key() -> Result<()> {

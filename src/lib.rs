@@ -69,9 +69,9 @@ use reader::Reader;
 
 // Concurrency related stuff that's replaced by loom or shuttle.
 pub mod concurrency;
-use self::concurrency::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use concurrency::*;
 
+use self::concurrency::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use crate::handle::WithHandle;
 
 /// Type to be exposed eventually from the lib instead of anyhow. Should be useful for the C API.

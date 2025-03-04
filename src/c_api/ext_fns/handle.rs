@@ -217,10 +217,5 @@ pub extern "C" fn possum_handle_delete_prefix(
     prefix: PossumBuf,
 ) -> PossumError {
     let handle = unsafe { &mut *handle };
-    with_residual(|| {
-        handle
-            .read()
-            .unwrap()
-            .delete_prefix(prefix.as_ref())
-    })
+    with_residual(|| handle.read().unwrap().delete_prefix(prefix.as_ref()))
 }

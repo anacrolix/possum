@@ -1,4 +1,3 @@
-use crate::concurrency::sync::Barrier;
 use std::time::*;
 
 use anyhow::Result;
@@ -6,6 +5,7 @@ use rusqlite::TransactionState;
 
 use self::test;
 use super::*;
+use crate::concurrency::sync::Barrier;
 use crate::testing::*;
 
 #[test]

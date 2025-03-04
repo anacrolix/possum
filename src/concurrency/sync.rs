@@ -1,16 +1,15 @@
-use crate::StableDeref;
 use std::ops::{Deref, DerefMut};
+#[cfg(not(feature = "shuttle"))]
+use std::sync;
+// These types work in any sync context.
+use std::sync::{LockResult, PoisonError};
 
 #[cfg(feature = "shuttle")]
 use shuttle::sync;
-#[cfg(not(feature = "shuttle"))]
-use std::sync;
-
-use sync::Mutex as InnerMutex;
-use sync::MutexGuard as InnerMutexGuard;
 pub use sync::*;
-// These types work in any sync context.
-use std::sync::{LockResult, PoisonError};
+use sync::{Mutex as InnerMutex, MutexGuard as InnerMutexGuard};
+
+use crate::StableDeref;
 
 // We need to wrap the real mutex guard in use, so we can implement StableDeref on it.
 pub struct MutexGuard<'a, T>(InnerMutexGuard<'a, T>);

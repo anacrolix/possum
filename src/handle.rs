@@ -1,6 +1,6 @@
-use super::*;
-
 use rusqlite::{TransactionBehavior, TransactionState};
+
+use super::*;
 
 #[derive(Default, Debug)]
 #[repr(C)]

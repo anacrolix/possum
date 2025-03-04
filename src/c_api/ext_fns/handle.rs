@@ -222,6 +222,5 @@ pub extern "C" fn possum_handle_delete_prefix(
             .read()
             .unwrap()
             .delete_prefix(prefix.as_ref())
-            .map_err(Into::into)
     })
 }

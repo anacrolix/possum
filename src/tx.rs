@@ -63,7 +63,6 @@ pub trait ReadTransaction: ReadOnlyTransactionAccessor {
         self.readonly_transaction()
             .prepare_cached_readonly("select value from sums where key='value_length'")?
             .query_row([], |row| row.get(0))
-            .map_err(Into::into)
     }
 
     /// Returns the end offset of the last active value before offset in the same file.
@@ -175,7 +174,7 @@ pub struct Transaction<'h, H> {
 
 // TODO: Try doing this with a read trait that just requires a rusqlite::Transaction be available.
 
-impl<'t, H> ReadOnlyTransactionAccessor for Transaction<'t, H> {
+impl<H> ReadOnlyTransactionAccessor for Transaction<'_, H> {
     fn readonly_transaction(&self) -> &rusqlite::Transaction {
         &self.tx
     }
@@ -183,7 +182,7 @@ impl<'t, H> ReadOnlyTransactionAccessor for Transaction<'t, H> {
 
 impl<T> ReadTransaction for T where T: ReadOnlyTransactionAccessor {}
 
-impl<'h, H> Transaction<'h, H> {
+impl<H> Transaction<'_, H> {
     pub fn touch_for_read(&mut self, key: &[u8]) -> rusqlite::Result<Value> {
         // Avoid modifying the manifest. We had to take a write lock already to ensure our data
         // isn't modified on us, but it still seems to be an improvement. (-67% on read times in

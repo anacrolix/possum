@@ -111,9 +111,9 @@ pub fn assert_repeated_bytes_values_eq(a: impl Read, b: impl Read) {
 }
 
 pub fn check_concurrency(
-    f: impl Fn() -> anyhow::Result<()> + Send + Sync + 'static,
+    f: impl Fn() -> Result<()> + Send + Sync + 'static,
     #[allow(unused_variables)] iterations_hint: usize,
-) -> anyhow::Result<()> {
+) -> Result<()> {
     #[cfg(loom)]
     {
         loom::model(move || f().unwrap());

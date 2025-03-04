@@ -364,7 +364,7 @@ fn torrent_storage_inner(opts: TorrentStorageOpts) -> Result<()> {
 fn offsets_starting_with<'a>(
     offsets: impl Iterator<Item = usize> + 'a,
     prefix: &'a str,
-) -> impl Iterator<Item = usize> + '_ {
+) -> impl Iterator<Item = usize> + 'a {
     offsets.filter(move |offset| offset.to_string().starts_with(prefix))
 }
 

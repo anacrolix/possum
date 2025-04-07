@@ -47,7 +47,7 @@ func mapError(err C.PossumError) error {
 	return Error{pec: err}
 }
 
-type Stat = C.PossumStat
+type Stat C.PossumStat
 
 func (me Stat) LastUsed() time.Time {
 	ts := me.last_used
@@ -56,6 +56,10 @@ func (me Stat) LastUsed() time.Time {
 
 func (me Stat) Size() int64 {
 	return int64(me.size)
+}
+
+func (me *Stat) AsCPtr() *C.PossumStat {
+	return (*C.PossumStat)(unsafe.Pointer(me))
 }
 
 type Handle = C.PossumHandle
@@ -72,7 +76,7 @@ func DropHandle(handle *Handle) {
 }
 
 func SingleDelete(handle *Handle, key string) (opt generics.Option[Stat], err error) {
-	pe := C.possum_single_delete(handle, BufFromString(key), &opt.Value)
+	pe := C.possum_single_delete(handle, BufFromString(key), opt.Value.AsCPtr())
 	switch pe {
 	case C.NoError:
 		opt.Ok = true
@@ -87,7 +91,7 @@ func SingleStat(handle *Handle, key string) (opt generics.Option[Stat]) {
 	opt.Ok = bool(C.possum_single_stat(
 		handle,
 		BufFromString(key),
-		&opt.Value,
+		opt.Value.AsCPtr(),
 	))
 	return
 }
@@ -114,7 +118,7 @@ func goListItems(items *C.PossumItem, itemsLen C.size_t) (goItems []Item) {
 			C.int(from.key.size),
 		)
 		C.free(unsafe.Pointer(from.key.ptr))
-		to.Stat = from.stat
+		to.Stat = Stat(from.stat)
 	}
 	C.free(unsafe.Pointer(items))
 	return
@@ -207,7 +211,7 @@ func ValueReadAt(v Value, buf []byte, offset int64) (n int, err error) {
 }
 
 func ValueStat(v Value) (ret Stat) {
-	C.possum_value_stat(v, &ret)
+	C.possum_value_stat(v, ret.AsCPtr())
 	return
 }
 

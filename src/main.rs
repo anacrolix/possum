@@ -323,7 +323,7 @@ fn print_missing_holes(
     tx: ReadTransactionRef,
     values_file_entry: &walk::Entry,
     block_size: u64,
-    fragments: bool,
+    print_fragments: bool,
 ) -> anyhow::Result<()> {
     let file_id = values_file_entry.file_id().unwrap();
     let mut last_hole_end = None;
@@ -331,8 +331,12 @@ fn print_missing_holes(
         if let Some(last_hole_end) = last_hole_end {
             assert!(start > last_hole_end);
         }
+        // Determine if the hole fully occupies a punchable block.
+        let this_hole_startable_block = start.div_ceil(block_size);
+        let this_hole_end_block = (start + length) / block_size;
+        let partial = this_hole_startable_block >= this_hole_end_block;
         last_hole_end = Some(start + length);
-        if !fragments && length < block_size {
+        if !print_fragments && partial {
             continue;
         }
         println!(

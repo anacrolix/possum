@@ -40,8 +40,8 @@ impl Handle {
         self.start_deferred_transaction()?.apply_limits()
     }
 
-    pub fn dir(&self) -> &Path {
-        self.dir.as_ref()
+    pub fn dir(&self) -> &Dir {
+        &self.dir
     }
 
     pub(crate) fn get_exclusive_file(&self) -> Result<ExclusiveFile> {

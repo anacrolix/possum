@@ -178,7 +178,7 @@ where
     ) -> PubResult<Arc<Mutex<FileClone>>> {
         let mut file = open_file_id(
             OpenOptions::new().read(true),
-            self.owned_tx.as_handle().dir(),
+            self.owned_tx.as_handle().dir().as_ref(),
             file_id,
         )?;
 

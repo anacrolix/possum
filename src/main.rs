@@ -37,6 +37,7 @@ enum Commands {
 
 #[derive(clap::Subcommand, Clone)]
 enum DatabaseCommands {
+    Info {},
     WriteFile {
         file: OsString,
     },
@@ -81,6 +82,10 @@ fn main() -> anyhow::Result<()> {
             let handle = Handle::new(dir)?;
             use DatabaseCommands::*;
             match command {
+                Info {} => {
+                    println!("{:?}", handle.dir());
+                    Ok(())
+                }
                 WriteFile { file } => {
                     let key = Path::new(&file)
                         .file_name()

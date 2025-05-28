@@ -1,9 +1,7 @@
 package possumC
 
 /*
-// Not sure how to statically link just this library, so for now it's preferred to use CGO_LDFLAGS
-// to do your own thing.
-//#cgo LDFLAGS: -lpossum
+#cgo LDFLAGS: -L${SRCDIR}/../../target/debug -lpossum
 #include "possum.h"
 */
 import "C"

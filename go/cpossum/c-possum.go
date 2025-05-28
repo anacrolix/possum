@@ -10,12 +10,13 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"github.com/anacrolix/generics"
 	"io/fs"
 	"math"
 	"runtime"
 	"time"
 	"unsafe"
+
+	"github.com/anacrolix/generics"
 )
 
 var NoSuchKey = Error{

@@ -68,6 +68,9 @@ test-log = "0.2.14"
 [target.'cfg(loom)'.dev-dependencies]
 loom = "0.7"
 
+[build-dependencies]
+cbindgen = "0.29.0"
+
 [features]
 default = []
 testing = ["dep:fdlimit", "dep:rayon", "dep:twox-hash"]

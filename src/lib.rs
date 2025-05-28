@@ -67,9 +67,11 @@ pub mod env;
 mod reader;
 use reader::Reader;
 
-// Concurrency related stuff that's replaced by loom or shuttle.
+// Concurrency-related stuff that's replaced by loom or shuttle.
 pub mod concurrency;
 use concurrency::*;
+
+mod macros;
 
 use self::concurrency::sync::{Arc, Mutex, MutexGuard, RwLock, RwLockReadGuard};
 use crate::handle::WithHandle;
@@ -709,7 +711,7 @@ where
     }
 }
 
-#[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
+#[derive(Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Debug)]
 struct ReadExtent {
     pub offset: u64,
     pub len: u64,

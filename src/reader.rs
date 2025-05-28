@@ -41,11 +41,14 @@ where
 
     /// Takes a snapshot and commits the read transaction.
     pub fn begin(self) -> Result<Snapshot> {
-        let file_clones = self.clone_files().context("cloning files")?;
-        self.owned_tx
-            .end_tx(|tx| tx.commit())
-            .context("committing transaction")?
-            .complete();
+        log_time!(
+            { num_files = self.reads.len() },
+            "cloning files";
+            let file_clones = self.clone_files().context("cloning files")?
+        );
+        let commit = || self.owned_tx.end_tx(|tx| tx.commit());
+        let post_work = log_time!("reader commit", commit());
+        post_work.context("committing transaction")?.complete();
         Ok(Snapshot { file_clones })
     }
 
@@ -99,9 +102,14 @@ where
         if self.owned_tx.as_handle().dir_supports_file_cloning() {
             match self.clone_file(file_id, tempdir, cache, src_dir) {
                 Err(err) if err.root_cause_is_unsupported_filesystem() => (),
-                default => return default,
+                Err(err) => return Err(err),
+                default @ Ok(_) => {
+                    info!(%file_id, tempdir = %tempdir.as_ref().unwrap().path().display(), "cloned file");
+                    return default;
+                }
             }
         }
+        warn!(%file_id, ?read_extents, "falling back to segment locking to read");
         self.get_file_for_read_by_segment_locking(file_id, read_extents)
     }
 

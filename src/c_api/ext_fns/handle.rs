@@ -1,5 +1,6 @@
 use libc::size_t;
 use positioned_io::ReadAt;
+use std::time::Instant;
 
 use super::*;
 use crate::c_api::PossumError::NoError;
@@ -115,6 +116,7 @@ pub extern "C" fn possum_single_read_at(
     buf: *mut PossumBuf,
     offset: u64,
 ) -> PossumError {
+    let started = Instant::now();
     let rust_key = key.as_ref();
     let value = match unsafe { handle.as_ref() }
         .unwrap()
@@ -132,14 +134,15 @@ pub extern "C" fn possum_single_read_at(
         Err(err) => return err.into(),
         Ok(ok) => ok,
     };
-    // eprintln!(
-    //     "reading single {} bytes at {} from {}, read {}: {}",
-    //     read_buf.len(),
-    //     offset,
-    //     value.length(),
-    //     r_nbyte,
-    //     rust_key.escape_ascii(),
-    // );
+    debug!(
+        "{:?}: reading single {} bytes at {} from {}, read {}: {}",
+        started.elapsed(),
+        read_buf.len(),
+        offset,
+        value.length(),
+        r_nbyte,
+        rust_key.escape_ascii(),
+    );
     buf.size = r_nbyte;
     NoError
 }

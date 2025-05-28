@@ -42,6 +42,7 @@ enum DatabaseCommands {
         file: OsString,
     },
     ListKeys {
+        #[arg(default_value = "")]
         prefix: String,
     },
     ReadKey {

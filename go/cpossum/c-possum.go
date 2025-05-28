@@ -1,7 +1,10 @@
 package possumC
 
 /*
-#cgo LDFLAGS: -L${SRCDIR}/../../target/debug -lpossum
+// I think we trigger static linking on Linux because we don't want to have to specify the path to
+// the library at runtime. I can't seem to get CGO on macOS to do the same.
+#cgo !darwin LDFLAGS: -L${SRCDIR}/../../target/debug -l:libpossum.a -lm
+#cgo darwin LDFLAGS: -L${SRCDIR}/../../target/debug -lpossum
 #include "possum.h"
 */
 import "C"

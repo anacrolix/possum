@@ -2,9 +2,12 @@ package possumC
 
 /*
 // I think we trigger static linking on Linux because we don't want to have to specify the path to
-// the library at runtime. I can't seem to get CGO on macOS to do the same.
-#cgo !darwin LDFLAGS: -L${SRCDIR}/../../target/debug -l:libpossum.a -lm
-#cgo darwin LDFLAGS: -L${SRCDIR}/../../target/debug -lpossum
+// the library at runtime. I can't seem to get CGO on macOS to do the same. I can't get a reliable
+// Windows system to get to the point I can actually build this, so I don't know how it works there.
+// Also cgo directives seem to use the old build constraint syntax. Why the fuck isn't this stuff
+// documented?
+#cgo !windows,!darwin LDFLAGS: -L${SRCDIR}/../../target/debug -l:libpossum.a -lm
+#cgo darwin windows LDFLAGS: -L${SRCDIR}/../../target/debug -lpossum
 #include "possum.h"
 */
 import "C"

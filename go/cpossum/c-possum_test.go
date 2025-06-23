@@ -1,15 +1,14 @@
 package possumC
 
 import (
-	qt "github.com/frankban/quicktest"
+	qt "github.com/go-quicktest/qt"
 	"testing"
 )
 
 func TestNoSuchKey(t *testing.T) {
-	c := qt.New(t)
-	c.Check(NoSuchKey, qt.ErrorIs, NoSuchKey)
-	c.Check(Error{
+	qt.Check(t, qt.ErrorIs(NoSuchKey, NoSuchKey))
+	qt.Check(t, qt.ErrorIs(Error{
 		pec:             cErrorEnumNoSuchKey,
 		displayGoesHere: "some string not in the NoSuchKey global target",
-	}, qt.ErrorIs, NoSuchKey)
+	}, NoSuchKey))
 }

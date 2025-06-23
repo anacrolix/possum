@@ -1,15 +1,14 @@
 package possum
 
 import (
-	qt "github.com/frankban/quicktest"
+	qt "github.com/go-quicktest/qt"
 	"sync"
 	"testing"
 )
 
 func TestHandleDropWhileReading(t *testing.T) {
-	c := qt.New(t)
 	dir, err := Open(t.TempDir())
-	c.Assert(err, qt.IsNil)
+	qt.Assert(t, qt.IsNil(err))
 	var wg sync.WaitGroup
 	wg.Add(2)
 	b := make([]byte, 420)
@@ -23,17 +22,16 @@ func TestHandleDropWhileReading(t *testing.T) {
 		dir.Close()
 	}()
 	wg.Wait()
-	c.Check(dir.cHandle.ValueDropped().IsSet(), qt.IsTrue)
+	qt.Check(t, qt.IsTrue(dir.cHandle.ValueDropped().IsSet()))
 }
 
 func TestReadDroppedHandle(t *testing.T) {
-	c := qt.New(t)
 	dir, err := Open(t.TempDir())
-	c.Assert(err, qt.IsNil)
-	c.Assert(dir.Close(), qt.IsNil)
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.IsNil(dir.Close()))
 	b := make([]byte, 420)
 	n, err := dir.SingleReadAt("a", 69, b)
-	c.Assert(err, qt.ErrorIs, ErrHandleClosed)
-	c.Check(n, qt.Equals, 0)
-	c.Check(dir.cHandle.ValueDropped().IsSet(), qt.IsTrue)
+	qt.Assert(t, qt.ErrorIs(err, ErrHandleClosed))
+	qt.Check(t, qt.Equals(n, 0))
+	qt.Check(t, qt.IsTrue(dir.cHandle.ValueDropped().IsSet()))
 }

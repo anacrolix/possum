@@ -7,7 +7,8 @@ package possumC
 // Also cgo directives seem to use the old build constraint syntax. Why the fuck isn't this stuff
 // documented?
 #cgo !windows,!darwin LDFLAGS: -L${SRCDIR}/../../target/debug -l:libpossum.a -lm
-#cgo darwin windows LDFLAGS: -L${SRCDIR}/../../target/debug -lpossum
+#cgo darwin LDFLAGS: -L${SRCDIR}/../../target/debug -lpossum
+#cgo windows LDFLAGS: -L${SRCDIR}/../../target/debug -l:possum.lib -lkernel32 -lws2_32 -lbcrypt -lole32 -loleaut32 -luserenv -lntdll -lsynchronization
 #include "possum.h"
 */
 import "C"

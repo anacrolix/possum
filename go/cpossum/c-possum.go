@@ -8,7 +8,7 @@ package possumC
 // documented?
 #cgo !windows,!darwin LDFLAGS: -L${SRCDIR}/../../target/debug -l:libpossum.a -lm
 #cgo darwin LDFLAGS: -L${SRCDIR}/../../target/debug -lpossum
-#cgo windows LDFLAGS: -L${SRCDIR}/../../target/debug -l:possum.lib -lkernel32 -lws2_32 -lbcrypt -lole32 -loleaut32 -luserenv -lntdll -lsynchronization
+#cgo windows LDFLAGS: -L${SRCDIR}/../../target/debug -l:possum.lib -lkernel32 -lws2_32 -lbcrypt -lole32 -loleaut32 -luserenv -lntdll -lsynchronization -lgcc -lmingw32 -lmingwex -lmsvcrt -lstdc++
 #include "possum.h"
 */
 import "C"

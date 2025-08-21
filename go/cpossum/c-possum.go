@@ -6,8 +6,8 @@ package possumC
 // Windows system to get to the point I can actually build this, so I don't know how it works there.
 // Also cgo directives seem to use the old build constraint syntax. Why the fuck isn't this stuff
 // documented?
-#cgo !windows,!darwin LDFLAGS: -L${SRCDIR}/../../target/debug -l:libpossum.a -lm
-#cgo darwin windows LDFLAGS: -L${SRCDIR}/../../target/debug -lpossum
+#cgo !windows,!darwin LDFLAGS: -l:libpossum.a -lm
+#cgo darwin windows LDFLAGS: -lpossum
 #include "possum.h"
 */
 import "C"

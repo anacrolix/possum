@@ -2,6 +2,8 @@ package possum
 
 import (
 	"testing"
+
+	_ "github.com/anacrolix/possum/go/testlink"
 )
 
 func TestOpenClose(t *testing.T) {

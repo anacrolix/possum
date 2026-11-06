@@ -29,11 +29,11 @@ Efficiently removing data, and creating read snapshots requires hole punching, a
 
 macOS, Linux and Windows.
 
-FreeBSD 14+. Unfortunately file cloning and open file description locking are missing. The implementation falls back on flock(2) and has to separate write and read files.
+FreeBSD 14+. Open file description locking is missing (still true in 15.0), so the implementation falls back on flock(2) and has to separate write and read files. On FreeBSD 15.0+, file cloning is used where the filesystem supports it (ZFS with block cloning enabled) via copy_file_range(2) with `COPY_FILE_RANGE_CLONE`.
 
 Solaris requires a small amount of work to complete the implementation.
 
-On filesystems where block cloning is not supported (ext4 on Linux, and NTFS on Windows are notable examples), the implementation falls back to file region locking unless that is also not available (FreeBSD).
+On filesystems where block cloning is not supported (ext4 on Linux, and NTFS on Windows are notable examples), the implementation falls back to file region locking unless that is also not available (FreeBSD, where it falls back further to whole-file flock(2)).
 
 ## anacrolix/squirrel
 

@@ -30,7 +30,20 @@ impl Dir {
         let supports_file_cloning = match supports_file_cloning_flag {
             Some(some) => some,
             None => {
-                let src = tempfile::NamedTempFile::new_in(&path_buf)?;
+                #[allow(unused_mut)]
+                let mut src = tempfile::NamedTempFile::new_in(&path_buf)?;
+                // FreeBSD's copy_file_range(2) succeeds trivially for empty files, so give it a
+                // real block to clone. Random data so compression can't turn it into a hole or an
+                // embedded block.
+                #[cfg(target_os = "freebsd")]
+                {
+                    use rand::RngCore;
+                    use std::io::Write;
+                    let mut buf = vec![0; block_size as usize];
+                    rand::thread_rng().fill_bytes(&mut buf);
+                    src.write_all(&buf)?;
+                    src.flush()?;
+                }
                 let dst_path = random_file_name_in_dir(&path_buf, ".clone_test-");
                 assert!(!dst_path.exists());
                 let clone_res = clonefile(src.path(), &dst_path);

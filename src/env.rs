@@ -15,8 +15,9 @@ fn emulate_freebsd_from_env() -> bool {
     })
 }
 
-/// FreeBSD doesn't support file range locking or block cloning (yet). We can emulate FreeBSD on
-/// platforms that have flock().
+/// FreeBSD doesn't support open file description (range) locking, even in 15.0. We can emulate
+/// FreeBSD on platforms that have flock(). Block cloning is probed at runtime everywhere, since
+/// FreeBSD 15.0 can clone on ZFS.
 pub(crate) fn emulate_freebsd() -> bool {
     cfg_if! {
         if #[cfg(target_os = "freebsd")] {

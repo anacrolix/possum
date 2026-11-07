@@ -250,8 +250,15 @@ where
 {
     handle: H,
     exclusive_files: Vec<ExclusiveFile>,
-    pending_writes: Vec<PendingWrite>,
+    // Writes and deletes, applied in the order they were staged.
+    pending_ops: Vec<PendingOp>,
     value_renames: Vec<ValueRename>,
+}
+
+#[derive(Debug)]
+enum PendingOp {
+    Write(PendingWrite),
+    Delete(Vec<u8>),
 }
 
 impl<H> BatchWriter<H>
@@ -262,7 +269,7 @@ where
         Self {
             handle,
             exclusive_files: Default::default(),
-            pending_writes: Default::default(),
+            pending_ops: Default::default(),
             value_renames: Default::default(),
         }
     }
@@ -341,13 +348,20 @@ where
         let exclusive_file = value.exclusive_file;
         let value_file_id = exclusive_file.id;
         self.exclusive_files.push(exclusive_file);
-        self.pending_writes.push(PendingWrite {
+        self.pending_ops.push(PendingOp::Write(PendingWrite {
             key,
             value_file_offset: value.value_file_offset,
             value_length,
             value_file_id,
-        });
+        }));
         Ok(())
+    }
+
+    /// Stages the removal of a key, applied when the batch commits. Writes and deletes are applied
+    /// in the order they were staged, so a later write to the same key takes effect, and a later
+    /// delete removes an earlier staged write. Deleting a key that doesn't exist does nothing.
+    pub fn stage_delete(&mut self, key: Vec<u8>) {
+        self.pending_ops.push(PendingOp::Delete(key));
     }
 
     pub fn new_value(&mut self) -> BeginWriteValue<'_,H> {
@@ -374,11 +388,18 @@ where
         let write_commit_res = self.handle.with_handle(|handle| {
             let mut transaction: OwnedTx = handle.start_immediate_transaction()?;
             let mut write_commit_res = WriteCommitResult { count: 0 };
-            for pw in self.pending_writes.drain(..) {
-                before_write();
-                transaction.delete_key(&pw.key)?;
-                transaction.insert_key(pw)?;
-                write_commit_res.count += 1;
+            for op in self.pending_ops.drain(..) {
+                match op {
+                    PendingOp::Write(pw) => {
+                        before_write();
+                        transaction.delete_key(&pw.key)?;
+                        transaction.insert_key(pw)?;
+                        write_commit_res.count += 1;
+                    }
+                    PendingOp::Delete(key) => {
+                        transaction.delete_key(&key)?;
+                    }
+                }
             }
             for vr in self.value_renames.drain(..) {
                 transaction.rename_value(&vr.value, vr.new_key)?;

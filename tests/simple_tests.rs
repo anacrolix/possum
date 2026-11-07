@@ -612,3 +612,61 @@ fn test_writeback_mmap() -> anyhow::Result<()> {
     file.write_all(&mmap)?;
     Ok(())
 }
+
+#[test]
+fn list_items_range_and_stage_delete() -> anyhow::Result<()> {
+    use std::ops::Bound::*;
+    let tempdir = test_tempdir("list_items_range_and_stage_delete")?;
+    let handle = Handle::new(tempdir.path.clone())?;
+    let keys: Vec<&[u8]> = vec![b"a", b"ab", b"b", b"ba", b"c"];
+    let mut writer = handle.new_writer()?;
+    for key in &keys {
+        let mut value = writer.new_value().begin()?;
+        value.write_all(key)?;
+        writer.stage_write(key.to_vec(), value)?;
+    }
+    writer.commit()?;
+    let list = |start, end, descending, limit| -> anyhow::Result<Vec<Vec<u8>>> {
+        Ok(handle
+            .list_items_range(start, end, descending, limit)?
+            .into_iter()
+            .map(|item| item.key)
+            .collect())
+    };
+    let owned = |keys: &[&[u8]]| keys.iter().map(|k| k.to_vec()).collect::<Vec<_>>();
+    assert_eq!(list(Unbounded, Unbounded, false, None)?, owned(&keys));
+    assert_eq!(
+        list(Excluded(&b"a"[..]), Included(&b"ba"[..]), false, None)?,
+        owned(&[b"ab", b"b", b"ba"])
+    );
+    assert_eq!(
+        list(Included(&b"ab"[..]), Unbounded, false, Some(2))?,
+        owned(&[b"ab", b"b"])
+    );
+    assert_eq!(
+        list(Unbounded, Excluded(&b"c"[..]), true, Some(2))?,
+        owned(&[b"ba", b"b"])
+    );
+
+    // Staged deletes and writes apply in order.
+    let mut writer = handle.new_writer()?;
+    writer.stage_delete(b"a".to_vec());
+    let mut value = writer.new_value().begin()?;
+    value.write_all(b"new")?;
+    writer.stage_write(b"d".to_vec(), value)?;
+    writer.stage_delete(b"d".to_vec());
+    let mut value = writer.new_value().begin()?;
+    value.write_all(b"again")?;
+    writer.stage_write(b"b".to_vec(), value)?;
+    writer.stage_delete(b"missing".to_vec());
+    writer.commit()?;
+    assert_eq!(
+        list(Unbounded, Unbounded, false, None)?,
+        owned(&[b"ab", b"b", b"ba", b"c"])
+    );
+    handle
+        .read_single(b"b")?
+        .expect("b should exist")
+        .view(|bytes| assert_eq!(bytes, b"again"))?;
+    Ok(())
+}

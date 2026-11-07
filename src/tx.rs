@@ -1,4 +1,5 @@
 use super::*;
+use std::ops::Bound;
 
 /// This is more work to be done after the Handle conn mutex is released.
 #[must_use]
@@ -124,6 +125,59 @@ pub trait ReadTransaction: ReadOnlyTransactionAccessor {
                 rusqlite::params![prefix, range_end],
             ),
         }
+    }
+
+    /// Lists items with keys in the given range, in key order (byte-wise lexicographic), or reverse
+    /// key order if `descending`. At most `limit` items are returned if it is given. This allows
+    /// paging through keys without loading them all at once.
+    fn list_items_range(
+        &self,
+        start: Bound<&[u8]>,
+        end: Bound<&[u8]>,
+        descending: bool,
+        limit: Option<u64>,
+    ) -> PubResult<Vec<Item>> {
+        let mut conditions = vec![];
+        let mut params: Vec<&[u8]> = vec![];
+        match start {
+            Bound::Included(start) => {
+                conditions.push("key >= ?");
+                params.push(start);
+            }
+            Bound::Excluded(start) => {
+                conditions.push("key > ?");
+                params.push(start);
+            }
+            Bound::Unbounded => {}
+        }
+        match end {
+            Bound::Included(end) => {
+                conditions.push("key <= ?");
+                params.push(end);
+            }
+            Bound::Excluded(end) => {
+                conditions.push("key < ?");
+                params.push(end);
+            }
+            Bound::Unbounded => {}
+        }
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("where {}", conditions.join(" and "))
+        };
+        let order = if descending { "desc" } else { "asc" };
+        // A negative limit means no limit in SQLite.
+        let limit: i64 = limit.map_or(-1, |limit| limit.try_into().unwrap_or(i64::MAX));
+        let sql = format!(
+            "select {}, key from keys {where_clause} order by key {order} limit {limit}",
+            value_columns_sql()
+        );
+        list_items_inner(
+            self.readonly_transaction(),
+            &sql,
+            rusqlite::params_from_iter(params),
+        )
     }
 }
 

@@ -6,7 +6,8 @@ package possumC
 // Windows system to get to the point I can actually build this, so I don't know how it works there.
 // Also cgo directives seem to use the old build constraint syntax. Why the fuck isn't this stuff
 // documented?
-#cgo !windows,!darwin LDFLAGS: -l:libpossum.a -lm
+// -l:libpossum.a is rejected since Go 1.27.4 and 1.26.11, so -Wl,-Bstatic picks the static library.
+#cgo !windows,!darwin LDFLAGS: -Wl,-Bstatic -lpossum -Wl,-Bdynamic -lm
 #cgo darwin windows LDFLAGS: -lpossum
 #include "possum.h"
 */

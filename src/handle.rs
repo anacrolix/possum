@@ -106,18 +106,22 @@ impl Handle {
         let (value_puncher_done_sender, value_puncher_done) = sync::mpsc::sync_channel(0);
         let value_puncher_done = ValuePuncherDone(Arc::new(Mutex::new(value_puncher_done)));
         let clones: Arc<Mutex<FileCloneCache>> = Arc::default();
+        // The puncher only gets a weak reference: a strong one would keep the cache, and the
+        // snapshot dirs its FileClones hold, alive after the Handle is dropped, since the puncher
+        // isn't joined.
+        let puncher_clones = Arc::downgrade(&clones);
         let handle = Self {
             conn: Mutex::new(conn),
             exclusive_files: Default::default(),
             dir: dir.clone(),
-            clones: clones.clone(),
+            clones,
             instance_limits: Default::default(),
             deleted_values: Some(deleted_values),
             // Don't wait on this, at least in the Drop handler, because it stays alive until it
             // succeeds in punching everything.
             _value_puncher: Some(thread::spawn(move || -> () {
                 let _value_puncher_done_sender = value_puncher_done_sender;
-                if let Err(err) = Self::value_puncher(dir, clones, receiver) {
+                if let Err(err) = Self::value_puncher(dir, puncher_clones, receiver) {
                     error!("value puncher thread failed with {err:?}");
                 }
             })),
@@ -329,7 +333,7 @@ impl Handle {
     /// Punches values in batches with its own dedicated connection and read-only transactions.
     fn value_puncher(
         dir: Dir,
-        clones: Arc<Mutex<FileCloneCache>>,
+        clones: std::sync::Weak<Mutex<FileCloneCache>>,
         values_receiver: sync::mpsc::Receiver<Vec<NonzeroValueLocation>>,
     ) -> Result<()> {
         let manifest_path = dir.path().join(MANIFEST_DB_FILE_NAME);
@@ -374,7 +378,14 @@ impl Handle {
             }
             let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
             let tx = ReadTransactionOwned(tx);
-            pending_values = Self::punch_values(&dir, Some(&clones), pending_values, &tx)?;
+            // Only hold the cache while punching. If the Handle is gone there's nothing to evict.
+            let clones = if pending_values.is_empty() {
+                None
+            } else {
+                clones.upgrade()
+            };
+            pending_values = Self::punch_values(&dir, clones.as_deref(), pending_values, &tx)?;
+            drop(clones);
             debug_assert_ne!(tx.0.transaction_state(None)?, TransactionState::Write);
         }
         Ok(())

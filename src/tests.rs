@@ -228,8 +228,7 @@ fn test_punch_stale_snapshot_no_remove_if_new_data() -> anyhow::Result<()> {
             | OpenFlags::SQLITE_OPEN_NO_MUTEX
             | OpenFlags::SQLITE_OPEN_URI,
     )?;
-    let stale_tx_inner =
-        stale_conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
+    let stale_tx_inner = stale_conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
     let stale_tx = ReadTransactionOwned(stale_tx_inner);
     // Force the snapshot to be taken now (deferred transactions snapshot on first read).
     let _ = stale_tx.sum_value_length()?;
@@ -343,5 +342,24 @@ fn test_clone_cache_cleaned_on_file_removal() -> anyhow::Result<()> {
         "FileClone cache entry was not removed when the values file was deleted"
     );
 
+    Ok(())
+}
+
+/// The value puncher thread must not keep the clone cache alive after the Handle is dropped.
+/// Otherwise the cache's FileClones keep snapshot dirs around after every Value using them is
+/// dropped, which made tests/simple_tests.rs cleanup_snapshots flaky.
+#[test]
+#[cfg(not(miri))]
+fn test_dropped_handle_releases_clone_cache() -> anyhow::Result<()> {
+    let tempdir = test_tempdir("test_dropped_handle_releases_clone_cache")?;
+    for _ in 0..100 {
+        let handle = Handle::new(tempdir.path.clone())?;
+        let clones = Arc::downgrade(&handle.clones);
+        drop(handle);
+        assert!(
+            clones.upgrade().is_none(),
+            "clone cache outlived its Handle"
+        );
+    }
     Ok(())
 }

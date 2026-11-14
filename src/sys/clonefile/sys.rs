@@ -117,20 +117,7 @@ pub fn fclonefile_noflags(src_file: &File, dst_path: &Path) -> Result<(), Native
             }
             Ok(())
         } else if #[cfg(target_os = "freebsd")] {
-            // Looks like the syscall isn't ready yet.
-            // https://github.com/openzfs/zfs/pull/13392#issue-1221750354
-            // Should this be exclusive create?
-
-            // let dst_file = File::create(dst_path)?;
-            // let src_fd = src_file.as_raw_fd();
-            // let dst_fd = dst_file.as_raw_fd();
-            // let rv = libc::fclonefile(src_fd, dst_fd);
-            // if rv == -1 {
-            //     return Err(last_errno());
-            // }
-
-            // Screen this sooner by claiming no clonefile support before it's even attempted.
-            unimplemented!()
+            freebsd_clone_file(src_file, dst_path)
         } else {
             // assert!(dst_path.is_absolute());
             let dst_buf = CPathBuf::try_from(dst_path).unwrap();
@@ -142,4 +129,62 @@ pub fn fclonefile_noflags(src_file: &File, dst_path: &Path) -> Result<(), Native
             Ok(())
         }
     }
+}
+
+/// `COPY_FILE_RANGE_CLONE` from FreeBSD's sys/unistd.h. It isn't in the libc crate yet. It first
+/// shipped in FreeBSD 15.0; older kernels reject any non-zero flags with EINVAL.
+/// https://man.freebsd.org/cgi/man.cgi?query=copy_file_range&sektion=2&manpath=FreeBSD+15.0-RELEASE
+#[cfg(target_os = "freebsd")]
+const COPY_FILE_RANGE_CLONE: libc::c_uint = 0x00800000;
+
+/// Clones the whole of src_file to a new file at dst_path using copy_file_range(2) with
+/// COPY_FILE_RANGE_CLONE, which fails with EOPNOTSUPP rather than silently copying data when the
+/// filesystem can't block clone (for example ZFS with vfs.zfs.bclone_enabled=0).
+#[cfg(target_os = "freebsd")]
+fn freebsd_clone_file(src_file: &File, dst_path: &Path) -> Result<(), NativeIoError> {
+    let dst_file = File::create(dst_path)?;
+    let res = freebsd_clone_file_contents(src_file, &dst_file);
+    if res.is_err() {
+        // Don't leave an empty or partial file behind, callers may fall back to copying elsewhere.
+        drop(dst_file);
+        let _ = std::fs::remove_file(dst_path);
+    }
+    res
+}
+
+#[cfg(target_os = "freebsd")]
+fn freebsd_clone_file_contents(src_file: &File, dst_file: &File) -> Result<(), NativeIoError> {
+    let len = src_file.metadata()?.len();
+    let mut done: u64 = 0;
+    while done < len {
+        // Track offsets ourselves: unpatched 15.0 doesn't update them (FreeBSD-EN-25:16.vfs).
+        let mut in_off: libc::off_t = done.try_into().unwrap();
+        let mut out_off: libc::off_t = in_off;
+        let remaining: libc::size_t = (len - done).try_into().unwrap_or(libc::size_t::MAX);
+        let rv = unsafe {
+            libc::copy_file_range(
+                src_file.as_raw_fd(),
+                &mut in_off,
+                dst_file.as_raw_fd(),
+                &mut out_off,
+                remaining,
+                COPY_FILE_RANGE_CLONE,
+            )
+        };
+        if rv == -1 {
+            let err = last_errno();
+            // Kernels before 15.0 don't know the clone flag and return EINVAL. Report that as
+            // cloning being unsupported so callers fall back.
+            if err.raw_os_error() == Some(libc::EINVAL) {
+                return Err(io::Error::from_raw_os_error(EOPNOTSUPP));
+            }
+            return Err(err);
+        }
+        if rv == 0 {
+            // The source shrank underneath us.
+            break;
+        }
+        done += rv as u64;
+    }
+    Ok(())
 }

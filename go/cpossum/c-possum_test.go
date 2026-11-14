@@ -4,8 +4,6 @@ import (
 	"testing"
 
 	"github.com/go-quicktest/qt"
-
-	_ "github.com/anacrolix/possum/go/testlink"
 )
 
 func TestNoSuchKey(t *testing.T) {

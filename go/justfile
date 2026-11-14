@@ -1,3 +1,7 @@
+# Go 1.27.4 and 1.26.11 reject -L directories in #cgo directives that contain LLVM bitcode, which
+# Rust's prebuilt std puts in libpossum.a. Flags from the environment are not checked.
+export CGO_LDFLAGS := env_var_or_default('CGO_LDFLAGS', '') + ' -L' + justfile_directory() + '/../target/debug'
+
 test:
 	cargo build
 	make -C ..

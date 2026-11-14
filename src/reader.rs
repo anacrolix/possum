@@ -80,6 +80,20 @@ where
         self.owned_tx.transaction().list_items(prefix)
     }
 
+    /// Lists items with keys in a range within the read transaction. See
+    /// [ReadTransaction::list_items_range].
+    pub fn list_items_range(
+        &self,
+        start: std::ops::Bound<&[u8]>,
+        end: std::ops::Bound<&[u8]>,
+        descending: bool,
+        limit: Option<u64>,
+    ) -> PubResult<Vec<Item>> {
+        self.owned_tx
+            .transaction()
+            .list_items_range(start, end, descending, limit)
+    }
+
     fn get_file_clone(
         &self,
         file_id: &FileId,

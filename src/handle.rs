@@ -330,6 +330,19 @@ impl Handle {
             .list_items(prefix)
     }
 
+    /// Lists items with keys in a range, in key order, or reverse key order if `descending`.
+    /// Returns at most `limit` items if given. See [ReadTransaction::list_items_range].
+    pub fn list_items_range(
+        &self,
+        start: std::ops::Bound<&[u8]>,
+        end: std::ops::Bound<&[u8]>,
+        descending: bool,
+        limit: Option<u64>,
+    ) -> PubResult<Vec<Item>> {
+        self.start_deferred_transaction_for_read()?
+            .list_items_range(start, end, descending, limit)
+    }
+
     /// Punches values in batches with its own dedicated connection and read-only transactions.
     fn value_puncher(
         dir: Dir,
